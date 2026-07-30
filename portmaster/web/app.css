@@ -1,0 +1,628 @@
+/* Hallmark · macrostructure: Index-First · tone: utilitario con contencion editorial
+ * genre: editorial · theme: custom "Ledger"
+ * vibe: "papel de cuaderno, tinta calida, una sola arcilla"
+ * paper oklch(96.5% 0.008 85) · accent oklch(56% 0.13 42) warm
+ * display: serif del sistema (Georgia) · body: sans nativa · data: mono
+ * axes: light paper / roman-serif display / warm accent
+ * pre-emit critique: P5 H5 E4 S5 R5 V4
+ *
+ * Sin webfonts a proposito: la CSP del servidor es default-src 'self' y una
+ * herramienta local que le pide fuentes a un CDN en cada carga esta peor
+ * diseñada que una que usa lo que ya tenes instalado. Georgia en grande, con
+ * tracking cerrado, tiene mas caracter que cualquier sans descargada.
+ */
+
+@import url("tokens.css");
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  overflow-x: clip;
+  margin: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: 1.55;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+::selection {
+  background: var(--color-accent-soft);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  /* Sin transicion: el anillo tiene que aparecer en el instante del foco. */
+}
+
+/* masthead ---------------------------------------------------------------- */
+
+.masthead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm) var(--space-lg);
+  padding: var(--space-lg) var(--space-gutter) var(--space-md);
+  border-bottom: var(--rule) solid var(--color-rule-strong);
+}
+
+.wordmark {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 400;
+  letter-spacing: -0.022em;
+  margin: 0;
+}
+
+.masthead__status {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+  margin: 0;
+}
+
+.masthead__status[data-down="true"] {
+  color: var(--color-bad);
+}
+
+/* sheet ------------------------------------------------------------------- */
+
+.sheet {
+  flex: 1;
+  width: 100%;
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: var(--space-xl) var(--space-gutter) var(--space-2xl);
+}
+
+.lede {
+  max-width: 42ch;
+  margin: 0 0 var(--space-xl);
+  color: var(--color-ink-2);
+}
+
+.empty {
+  max-width: 52ch;
+  color: var(--color-ink-2);
+  border-top: var(--rule) solid var(--color-rule);
+  padding-top: var(--space-lg);
+}
+
+.empty code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--color-ink);
+}
+
+/* index de proyectos ------------------------------------------------------ */
+
+.index {
+  display: grid;
+  gap: var(--space-md);
+}
+
+/* Marco propio por proyecto: con varios stacks en la pagina, la linea sola no
+   alcanza para saber donde termina uno y empieza el otro. El borde sale de los
+   tokens y no de un hex fijo, que en papel claro seria una raya negra. */
+.project {
+  border: var(--rule) solid var(--color-rule-strong);
+  border-radius: var(--radius);
+  padding: var(--space-lg);
+}
+
+.project__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-xs) var(--space-md);
+}
+
+.project__name {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 400;
+  letter-spacing: -0.018em;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.project__path {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+  margin: 0.15rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.project__error {
+  font-size: var(--text-sm);
+  color: var(--color-bad);
+  margin: var(--space-sm) 0 0;
+  padding-left: var(--space-sm);
+  border-left: 2px solid var(--color-bad);
+}
+
+/* estado ------------------------------------------------------------------ */
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--color-ink-2);
+  margin: 0;
+  white-space: nowrap;
+}
+
+.dot {
+  inline-size: 0.5rem;
+  block-size: 0.5rem;
+  border-radius: 50%;
+  background: var(--color-ink-3);
+  flex: none;
+}
+
+/* El color nunca lleva el significado solo: siempre va con su etiqueta. */
+[data-tone="ready"] .dot,
+.dot[data-tone="ready"] {
+  background: var(--color-ok);
+}
+[data-tone="starting"] .dot,
+.dot[data-tone="starting"] {
+  background: var(--color-warn);
+}
+[data-tone="bad"] .dot,
+.dot[data-tone="bad"] {
+  background: var(--color-bad);
+}
+
+/* servicios --------------------------------------------------------------- */
+
+.services {
+  list-style: none;
+  margin: var(--space-md) 0 0;
+  padding: 0;
+}
+
+/* Tabla, no fila estirada: las columnas van juntas para que el ojo lea
+   "api 8080 listo" como una unidad y no como tres datos sueltos. */
+.service {
+  display: grid;
+  grid-template-columns: minmax(0, 8rem) 4rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-sm) var(--space-md);
+  padding: var(--space-xs) var(--space-sm);
+  margin-inline: calc(var(--space-sm) * -1);
+  border-radius: var(--radius);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.service:hover {
+  background: var(--color-paper-3);
+}
+
+.service__name {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  min-width: 0;
+  font-size: var(--text-sm);
+}
+
+.service__label {
+  overflow-wrap: anywhere;
+}
+
+/* El icono dice contenedor o proceso local, que es lo unico que se sabe del rol.
+   Nunca va solo: el nombre del servicio esta al lado. */
+.service__icon {
+  inline-size: 0.95rem;
+  block-size: 0.95rem;
+  flex: none;
+  fill: none;
+  stroke: var(--color-ink-3);
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.service__port,
+.service__state {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-2);
+}
+
+.service__port {
+  text-align: right;
+}
+
+.service__port-link {
+  color: var(--color-accent);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--color-accent);
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.service__port-link:hover {
+  opacity: 0.8;
+  text-decoration: none;
+}
+
+/* Badge: el estado se lee como una unidad y no como texto suelto. El color va
+   siempre con la etiqueta y con el punto, nunca solo. */
+.service__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  justify-self: start;
+  max-inline-size: 100%;
+  min-width: 0;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  /* No paper-3: es el mismo fondo que toma la fila al pasar el mouse y el badge
+     se disolveria justo cuando lo estas mirando. */
+  background: var(--color-rule);
+}
+
+.service__state[data-tone="ready"] {
+  color: var(--color-ok);
+  background: color-mix(in oklch, var(--color-ok) 14%, transparent);
+}
+
+.service__state[data-tone="starting"] {
+  color: var(--color-warn);
+  background: color-mix(in oklch, var(--color-warn) 16%, transparent);
+}
+
+.service__state[data-tone="bad"] {
+  color: var(--color-bad);
+  background: var(--color-bad-soft);
+}
+
+.service__state span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.service__act {
+  justify-self: start;
+}
+
+/* acciones ---------------------------------------------------------------- */
+
+.project__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}
+
+.project__drop {
+  margin-left: auto;
+  color: var(--color-ink-3);
+}
+
+.btn {
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  line-height: 1;
+  color: var(--color-ink);
+  background: var(--color-paper-2);
+  border: var(--rule) solid var(--color-rule-strong);
+  border-radius: var(--radius);
+  padding: 0.55rem 0.85rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--color-paper-3);
+  border-color: var(--color-ink-3);
+}
+
+.btn:active:not(:disabled) {
+  background: var(--color-rule);
+}
+
+.btn:disabled {
+  color: var(--color-ink-3);
+  background: transparent;
+  border-color: var(--color-rule);
+  cursor: not-allowed;
+}
+
+.btn[data-busy="true"] {
+  color: var(--color-ink-3);
+  cursor: progress;
+}
+
+.btn--primary {
+  background: var(--color-ink);
+  color: var(--color-paper);
+  border-color: var(--color-ink);
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.btn--quiet {
+  background: transparent;
+  border-color: transparent;
+  padding-inline: 0.5rem;
+}
+
+.btn--quiet:hover:not(:disabled) {
+  background: var(--color-paper-3);
+  border-color: transparent;
+}
+
+.btn--kill {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 0.3rem 0.55rem;
+  color: var(--color-bad);
+  border-color: var(--color-bad-rule);
+}
+
+.btn--kill:hover:not(:disabled) {
+  background: var(--color-bad-soft);
+  border-color: var(--color-bad);
+}
+
+.profile {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.profile[hidden] {
+  display: none;
+}
+
+.profile__label {
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+}
+
+.profile__select {
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  color: var(--color-ink);
+  background: var(--color-paper-2);
+  border: var(--rule) solid var(--color-rule-strong);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.5rem;
+}
+
+/* logs -------------------------------------------------------------------- */
+
+.logs {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--color-ink-2);
+  background: var(--color-paper-2);
+  border: var(--rule) solid var(--color-rule);
+  border-radius: var(--radius);
+  margin: var(--space-md) 0 0;
+  padding: var(--space-md);
+  max-block-size: 22rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* alta de proyecto -------------------------------------------------------- */
+
+.enroll {
+  margin-top: var(--space-xl);
+  padding-top: var(--space-lg);
+  border-top: var(--rule) solid var(--color-rule-strong);
+}
+
+.enroll__label {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+  margin-bottom: var(--space-sm);
+}
+
+.enroll__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.enroll__input {
+  flex: 1 1 20rem;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-ink);
+  background: var(--color-paper-2);
+  border: var(--rule) solid var(--color-rule-strong);
+  border-radius: var(--radius);
+  padding: 0.55rem 0.7rem;
+}
+
+.enroll__input::placeholder {
+  color: var(--color-ink-3);
+}
+
+/* explorador de carpetas -------------------------------------------------- */
+
+.picker {
+  inline-size: min(34rem, calc(100vw - 2 * var(--space-md)));
+  max-block-size: min(30rem, 80vh);
+  padding: 0;
+  color: var(--color-ink);
+  background: var(--color-paper-2);
+  border: var(--rule) solid var(--color-rule-strong);
+  border-radius: var(--radius);
+}
+
+.picker[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.picker::backdrop {
+  background: oklch(20% 0.01 70 / 0.45);
+}
+
+.picker__head {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border-bottom: var(--rule) solid var(--color-rule);
+}
+
+.picker__path {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-ink-2);
+  overflow-wrap: anywhere;
+}
+
+.picker__list {
+  flex: 1;
+  /* Sin esto la lista no se encoge (min-height: auto por defecto en flex), crece
+     mas alla del alto del dialogo y empuja el pie fuera de la pantalla: los
+     botones Subir y Registrar quedan inalcanzables. */
+  min-block-size: 0;
+  overflow-y: auto;
+  list-style: none;
+  padding: var(--space-xs) 0;
+  margin: 0;
+}
+
+.picker__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-md);
+  inline-size: 100%;
+  text-align: start;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  color: var(--color-ink);
+  background: none;
+  border: 0;
+  padding: 0.45rem var(--space-md);
+  cursor: pointer;
+}
+
+.picker__row:hover,
+.picker__row:focus-visible {
+  background: var(--color-paper-3);
+}
+
+.picker__name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.picker__markers {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+  white-space: nowrap;
+}
+
+.picker__empty,
+.picker__note {
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+  padding: var(--space-sm) var(--space-md);
+}
+
+.picker__foot {
+  display: flex;
+  flex: none;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border-top: var(--rule) solid var(--color-rule);
+}
+
+/* colofon y avisos -------------------------------------------------------- */
+
+.colophon {
+  border-top: var(--rule) solid var(--color-rule);
+  padding: var(--space-md) var(--space-gutter);
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+}
+
+.flash {
+  position: fixed;
+  z-index: 2;
+  inset-block-end: var(--space-md);
+  inset-inline: var(--space-gutter);
+  max-inline-size: 32rem;
+  margin-inline: auto;
+  font-size: var(--text-sm);
+  color: var(--color-paper);
+  background: var(--color-ink);
+  border-radius: var(--radius);
+  padding: var(--space-sm) var(--space-md);
+}
+
+.flash[data-tone="bad"] {
+  background: var(--color-bad);
+}
+
+/* mobile ------------------------------------------------------------------ */
+
+@media (max-width: 34rem) {
+  .service {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .service__state {
+    grid-column: 1 / -1;
+  }
+
+  .service__act {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+  }
+}

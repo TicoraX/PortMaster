@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PortMaster</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <header class="masthead">
+      <h1 class="wordmark">PortMaster</h1>
+      <p class="masthead__status" id="connection" role="status">Conectando…</p>
+    </header>
+
+    <main class="sheet">
+      <p class="lede">
+        Tus stacks locales. Arrancá, apagá, liberá los puertos que quedaron tomados.
+      </p>
+
+      <div id="projects" class="index" aria-busy="true"></div>
+
+      <p class="empty" id="empty" hidden>
+        Todavía no registraste ningún proyecto. Corré <code>portmaster add</code>
+        dentro de una carpeta con <code>stack.yaml</code>, o pegá la ruta acá abajo.
+      </p>
+
+      <form class="enroll" id="enroll">
+        <label class="enroll__label" for="path">Registrar un proyecto</label>
+        <div class="enroll__row">
+          <input
+            class="enroll__input"
+            id="path"
+            name="path"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="A:\Proyectos\mi-app"
+            required
+          />
+          <button class="btn" type="button" id="browse">Explorar…</button>
+          <button class="btn btn--primary" type="submit">Registrar</button>
+        </div>
+      </form>
+
+      <dialog class="picker" id="picker" aria-label="Elegir carpeta">
+        <div class="picker__head">
+          <p class="picker__path" id="picker-path"></p>
+          <button class="btn btn--quiet" type="button" data-picker="close">Cerrar</button>
+        </div>
+        <ul class="picker__list" id="picker-list"></ul>
+        <p class="picker__note" id="picker-note" hidden></p>
+        <div class="picker__foot">
+          <button class="btn" type="button" data-picker="up">Subir</button>
+          <button class="btn btn--primary" type="button" data-picker="pick">
+            Registrar esta carpeta
+          </button>
+        </div>
+      </dialog>
+    </main>
+
+    <footer class="colophon">
+      <span>Solo loopback. Nada de esto sale de tu máquina.</span>
+    </footer>
+
+    <p class="flash" id="flash" role="alert" hidden></p>
+
+    <template id="tpl-project">
+      <article class="project">
+        <div class="project__head">
+          <h2 class="project__name"></h2>
+          <p class="state"><span class="dot"></span><span class="state__text"></span></p>
+          <button class="btn btn--quiet project__drop" type="button" data-act="drop">
+            Quitar
+          </button>
+        </div>
+        <p class="project__path"></p>
+
+        <p class="project__error" hidden></p>
+
+        <ul class="services"></ul>
+
+        <div class="project__actions">
+          <label class="profile">
+            <span class="profile__label">Perfil</span>
+            <select class="profile__select"></select>
+          </label>
+          <button class="btn btn--primary" type="button" data-act="up">Arrancar</button>
+          <button class="btn" type="button" data-act="down">Apagar</button>
+          <button class="btn btn--quiet" type="button" data-act="logs" aria-expanded="false">
+            Logs
+          </button>
+        </div>
+
+        <pre class="logs" hidden tabindex="0"></pre>
+      </article>
+    </template>
+
+    <template id="tpl-service">
+      <li class="service">
+        <span class="service__name"><span class="service__label"></span></span>
+        <span class="service__port"></span>
+        <span class="service__state"><span class="dot"></span><span></span></span>
+        <span class="service__act"></span>
+      </li>
+    </template>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,94 @@
+/* Hallmark · theme: custom "Ledger"
+ * axes: light paper / roman-serif display / warm accent
+ */
+
+:root {
+  /* Los controles nativos (select, input, scrollbar) siguen al tema del SO en
+     vez de quedar blancos sobre papel oscuro. */
+  color-scheme: light dark;
+
+  /* papel y tinta. Nunca #fff ni #000: los dos son mas duros que cualquier
+     papel real y delatan una paleta elegida sin mirar. */
+  --color-paper: oklch(96.5% 0.008 85);
+  --color-paper-2: oklch(98.4% 0.005 85);
+  --color-paper-3: oklch(93.2% 0.011 85);
+  --color-ink: oklch(23% 0.012 60);
+  --color-ink-2: oklch(47% 0.011 60);
+  /* ink-3 llega justo a 4.5:1 sobre el papel. Es el piso, no una eleccion
+     estetica: por debajo de 54% de luminosidad el texto chico deja de leerse. */
+  --color-ink-3: oklch(54% 0.010 60);
+  --color-rule: oklch(89% 0.009 82);
+  --color-rule-strong: oklch(82% 0.011 82);
+
+  /* un solo acento, arcilla, usado en menos del 5% de la pantalla */
+  --color-accent: oklch(52% 0.13 42);
+  --color-accent-soft: oklch(92% 0.035 42);
+
+  /* estados. Verde apagado y no neon: esto es un panel, no un semaforo.
+     Los tres pasan 3:1 sobre el papel, que es lo que pide un indicador. */
+  --color-ok: oklch(52% 0.095 155);
+  --color-warn: oklch(62% 0.115 75);
+  --color-bad: oklch(51% 0.155 28);
+  --color-bad-soft: oklch(94% 0.028 28);
+  --color-bad-rule: oklch(78% 0.07 28);
+
+  /* tipografia: tres roles, cero descargas. Ver la nota en app.css. */
+  --font-display: ui-serif, Georgia, "Times New Roman", serif;
+  --font-body:
+    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono:
+    ui-monospace, "Cascadia Mono", "SF Mono", "JetBrains Mono", Consolas,
+    monospace;
+
+  --text-xs: 0.8125rem;
+  --text-sm: 0.9375rem;
+  --text-base: 1rem;
+  --text-lg: 1.5rem;
+  --text-xl: 1.875rem;
+
+  /* escala de 4pt */
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2.5rem;
+  --space-2xl: 4rem;
+  --space-gutter: 1.5rem;
+
+  --rule: 1px;
+  --radius: 3px;
+
+  --dur-fast: 120ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (min-width: 48rem) {
+  :root {
+    --space-gutter: 2.5rem;
+  }
+}
+
+/* Modo oscuro: la herramienta corre al lado del editor y tiene que seguir al
+   sistema. Mismo papel calido, invertido; el acento sube en luminosidad para
+   mantener contraste sobre fondo oscuro. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-paper: oklch(20% 0.008 70);
+    --color-paper-2: oklch(24% 0.009 70);
+    --color-paper-3: oklch(28% 0.010 70);
+    --color-ink: oklch(92% 0.008 85);
+    --color-ink-2: oklch(74% 0.009 85);
+    --color-ink-3: oklch(63% 0.009 85);
+    --color-rule: oklch(31% 0.009 70);
+    --color-rule-strong: oklch(39% 0.010 70);
+
+    --color-accent: oklch(72% 0.12 45);
+    --color-accent-soft: oklch(34% 0.05 45);
+
+    --color-ok: oklch(70% 0.11 155);
+    --color-warn: oklch(78% 0.12 78);
+    --color-bad: oklch(68% 0.15 28);
+    --color-bad-soft: oklch(30% 0.05 28);
+    --color-bad-rule: oklch(44% 0.09 28);
+  }
+}
