@@ -150,6 +150,43 @@ def test_un_apagado_que_falla_no_revienta(tmp_path):
     engine.down()  # no propaga: apagar es lo ultimo que se hace
 
 
+def test_el_error_dice_la_causa_no_solo_el_codigo(tmp_path):
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          contenedores:
+            command: {sys.executable} -c "print('no encuentro el daemon'); raise SystemExit(1)"
+            detached: true
+        """,
+    )
+    engine = make_runner(stack)
+    with pytest.raises(runner.StartupError, match="no encuentro el daemon"):
+        engine.up()
+
+
+def test_los_avisos_no_tapan_la_causa(tmp_path):
+    """compose escupe un level=warning por cada variable sin definir, despues del
+    error de verdad. La ultima linea a secas seria el aviso."""
+    salida = (
+        "print('la causa real'); "
+        "print('time=x level=warning msg=\\\"variable sin definir\\\"'); "
+        "raise SystemExit(1)"
+    )
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          contenedores:
+            command: {sys.executable} -c "{salida}"
+            detached: true
+        """,
+    )
+    engine = make_runner(stack)
+    with pytest.raises(runner.StartupError, match="la causa real"):
+        engine.up()
+
+
 def test_detached_que_falla_aborta(tmp_path):
     stack = stack_from(
         tmp_path,

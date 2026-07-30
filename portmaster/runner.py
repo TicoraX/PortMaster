@@ -17,6 +17,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections import deque
 from dataclasses import dataclass, field
 
 import psutil
@@ -51,6 +52,9 @@ class Proc:
     ready: bool = False
     matched_log: bool = False
     port: int | None = None  # descubierto, para los servicios con ready: listen
+    # Ultimas lineas de salida, para que el error diga la causa y no solo el
+    # codigo: "fallo con codigo 1" sin el motivo obliga a abrir los logs.
+    tail: deque[str] = field(default_factory=lambda: deque(maxlen=5))
 
     @property
     def known_port(self) -> int | None:
@@ -181,12 +185,12 @@ class Runner:
             if not service.detached and proc.popen.poll() is not None:
                 raise StartupError(
                     f"{service.name} termino con codigo {proc.popen.returncode} "
-                    "antes de estar listo"
+                    f"antes de estar listo{_why(proc)}"
                 )
             if time.monotonic() > deadline:
                 raise StartupError(
                     f"{service.name} no estuvo listo en {self.timeout:.0f}s "
-                    f"(ready: {service.ready})"
+                    f"(ready: {service.ready}){_why(proc)}"
                 )
             time.sleep(POLL)
 
@@ -201,7 +205,7 @@ class Runner:
             ) from None
         self._drain()
         if code != 0:
-            raise StartupError(f"{proc.service.name} fallo con codigo {code}")
+            raise StartupError(f"{proc.service.name} fallo con codigo {code}{_why(proc)}")
 
     def _is_ready(self, proc: Proc) -> bool:
         ready = proc.service.ready
@@ -229,6 +233,7 @@ class Runner:
             marker = proc.service.ready
             if marker.startswith("log:") and marker[4:] in line:
                 proc.matched_log = True
+            proc.tail.append(line)
             self._write(proc, line)
             printed = True
 
@@ -238,6 +243,25 @@ class Runner:
     def _write(self, proc: Proc, text: str) -> None:
         name = proc.service.name.ljust(self._width)
         self.console.print(f"[{proc.color}]{name}[/] [dim]|[/] {text}", highlight=False)
+
+
+WHY_MAX = 200
+
+
+def _why(proc: Proc) -> str:
+    """Ultima linea con contenido de la salida del servicio.
+
+    Es la diferencia entre "postgres fallo con codigo 1" y saber que el daemon de
+    Docker no esta corriendo. Los avisos de compose sobre variables sin definir se
+    saltean: son ruido y tapan la linea que importa.
+    """
+    for line in reversed(proc.tail):
+        text = line.strip()
+        if text and "level=warning" not in text:
+            if len(text) > WHY_MAX:
+                text = text[: WHY_MAX - 1].rstrip() + "…"
+            return f": {text}"
+    return ""
 
 
 def _http_ok(url: str) -> bool:
