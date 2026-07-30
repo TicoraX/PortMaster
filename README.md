@@ -1,5 +1,9 @@
 # PortMaster
 
+[![tests](https://github.com/TicoraX/PortMaster/actions/workflows/ci.yml/badge.svg)](https://github.com/TicoraX/PortMaster/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+
 Orquestador de entornos de desarrollo locales. Un archivo en la raíz del
 proyecto, un comando, y el stack entero arriba: puertos libres, Docker,
 backend y frontend, sin cuatro terminales abiertas.
