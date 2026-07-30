@@ -1,0 +1,41 @@
+# Esquema de configuracion de PortMaster.
+#
+# Diseñado, todavia no implementado: la version 0.1.0 solo trae el motor de
+# puertos. Este archivo es la especificacion contra la que se va a escribir.
+
+name: mi-proyecto
+
+services:
+  db:
+    command: docker compose up -d postgres
+    port: 5432
+    ready: port        # port | log:<texto> | http://... | none
+    detached: true     # el comando termina, el servicio sigue vivo
+
+  api:
+    command: npm run dev
+    cwd: backend       # relativo a la raiz, no puede escapar de ella
+    port: 8080
+    needs: [db]
+    env:
+      DATABASE_URL: postgres://localhost:5432/app
+
+  web:
+    command: npm run dev
+    cwd: frontend
+    port: 3000
+    needs: [api]
+
+profiles:
+  fullstack: [db, api, web]
+  backend: [db, api]
+  db-only: [db]
+
+# Reglas:
+#
+# - Solo `command` es obligatorio.
+# - `needs` define el orden. Sin `needs`, arranque en paralelo. Los ciclos son
+#   error al cargar el archivo, no en tiempo de ejecucion.
+# - `ready: port` espera a que el TCP acepte conexion. Es el default cuando hay
+#   `port`; sin `port`, el default es `none`.
+# - Sin `--profile`, arrancan todos los servicios.
