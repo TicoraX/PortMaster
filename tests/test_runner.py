@@ -199,3 +199,8 @@ def test_env_llega_al_proceso(tmp_path):
     engine = runner.Runner(stack, console=Console(file=salida), timeout=20.0)
     engine.up()
     assert "VALOR=hola" in salida.getvalue()
+
+
+def test_terminate_tree_pid_inexistente():
+    # PID 999999 no deberia lanzar psutil.NoSuchProcess
+    runner._terminate_tree(999999)

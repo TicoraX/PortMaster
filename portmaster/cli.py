@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
 import psutil
 from rich.console import Console
 from rich.table import Table
 
-from . import __version__, config, ports, runner
+from . import __version__, config, detect, ports, registry, runner
 
 app = typer.Typer(
     help="Orquestador de entornos de desarrollo locales.",
@@ -35,16 +37,19 @@ def _row(status: ports.PortStatus, cmd_width: int) -> tuple[str, ...]:
 def ports_cmd(
     port: list[int] = typer.Argument(None, min=1, max=65535),
 ) -> None:
-    """Revisa puertos. Sin argumentos, usa los declarados en stack.yaml."""
+    """Revisa puertos. Sin argumentos, usa los del stack (declarados o detectados)."""
     if not port:
         try:
-            stack = config.load()
+            stack = detect.stack_for(Path.cwd())
         except config.ConfigError as exc:
             err.print(f"{exc}\nPasa los puertos como argumento: portmaster ports 3000 8080")
             raise typer.Exit(1)
         port = stack.ports()
         if not port:
-            err.print(f"{stack.path} no declara ningun puerto.")
+            err.print(
+                f"{stack.path} no declara ningun puerto. Los servicios con "
+                "'ready: listen' recien lo tienen cuando arrancan."
+            )
             raise typer.Exit(1)
 
     table = Table(box=None, pad_edge=False)
@@ -52,8 +57,9 @@ def ports_cmd(
         table.add_column(column)
     # Presupuesto para el comando: lo que sobra tras las cuatro columnas fijas.
     cmd_width = max(20, console.width - 34)
+    scanned = ports.scan_many(port)
     for value in port:
-        table.add_row(*_row(ports.scan(value), cmd_width))
+        table.add_row(*_row(scanned[value], cmd_width))
     console.print(table)
 
 
@@ -109,22 +115,37 @@ def free_cmd(
         console.print(f"Siguiente puerto libre: [bold]{ports.next_free(port)}[/]")
 
 
+def _confirm_detected(services: list[config.Service], yes: bool) -> bool:
+    """Muestra lo detectado y pide confirmacion: nadie quiere arrancar a ciegas."""
+    console.print("[dim]Sin stack.yaml. Detectado:[/]")
+    table = Table(box=None, pad_edge=False, show_header=False)
+    for service in services:
+        port = str(service.port) if service.port else "[dim]al arrancar[/]"
+        table.add_row(f"  [bold]{service.name}[/]", service.command, port)
+    console.print(table)
+    console.print("[dim]Para congelarlo en un archivo editable: portmaster init[/]")
+    return yes or typer.confirm("Arrancar?", default=True)
+
+
 @app.command("up")
 def up_cmd(
     profile: str = typer.Option(None, "--profile", "-p", help="Perfil de stack.yaml."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Liberar puertos sin preguntar."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="No preguntar nada, arrancar."),
     force: bool = typer.Option(False, "--force", help="kill() si ignora terminate()."),
     timeout: float = typer.Option(60.0, help="Segundos de espera por servicio."),
 ) -> None:
     """Levanta el stack: libera puertos, arranca en orden y sigue los logs."""
     try:
-        stack = config.load()
+        stack = detect.stack_for(Path.cwd())
         services = stack.resolve(profile)
     except config.ConfigError as exc:
         err.print(str(exc))
         raise typer.Exit(1)
 
     console.print(f"[bold]{stack.name}[/] [dim]{stack.path}[/]")
+
+    if stack.detected and not _confirm_detected(services, yes):
+        raise typer.Exit(1)
 
     for service in services:
         if service.port and not _release(service.port, yes, force):
@@ -149,6 +170,115 @@ def up_cmd(
         console.print()
     finally:
         engine.down()
+
+
+@app.command("add")
+def add_cmd(
+    path: str = typer.Argument(".", help="Directorio del proyecto."),
+) -> None:
+    """Registra un proyecto para que aparezca en la interfaz."""
+    try:
+        registered = registry.add(path)
+    except registry.RegistryError as exc:
+        err.print(str(exc))
+        raise typer.Exit(1)
+    console.print(f"Registrado: [bold]{registered}[/]")
+
+
+@app.command("list")
+@app.command("ls")
+def list_cmd() -> None:
+    """Lista los proyectos registrados para la interfaz web."""
+    items = registry.paths()
+    if not items:
+        console.print("[dim]No hay proyectos registrados. Registra uno con: portmaster add <ruta>[/]")
+        return
+
+    table = Table(box=None, pad_edge=False)
+    table.add_column("ID")
+    table.add_column("NOMBRE")
+    table.add_column("RUTA")
+    for path in items:
+        pid = registry.project_id(path)
+        table.add_row(pid, path.name, str(path))
+    console.print(table)
+
+
+@app.command("remove")
+@app.command("rm")
+def remove_cmd(
+    target: str = typer.Argument(..., help="Ruta o ID del proyecto a des-registrar."),
+) -> None:
+    """Des-registra un proyecto de la interfaz."""
+    pids = {registry.project_id(p): p for p in registry.paths()}
+    if target in pids:
+        pid = target
+        path = pids[pid]
+    else:
+        resolved = Path(target).expanduser().resolve()
+        pid = registry.project_id(resolved)
+        path = resolved
+
+    if registry.remove(pid):
+        console.print(f"Quitado: [bold]{path}[/]")
+    else:
+        err.print(f"El proyecto '{target}' no esta registrado.")
+        raise typer.Exit(1)
+
+
+@app.command("init")
+def init_cmd(
+    path: str = typer.Argument(".", help="Directorio del proyecto."),
+) -> None:
+    """Escribe un stack.yaml con lo detectado, para editarlo a mano."""
+    root = Path(path).expanduser().resolve()
+    target = root / config.CONFIG_NAMES[0]
+    if any((root / name).is_file() for name in config.CONFIG_NAMES):
+        err.print(f"{root} ya tiene un stack.yaml. No se sobreescribe.")
+        raise typer.Exit(1)
+
+    stack = detect.detect(root)
+    if stack is None:
+        err.print(f"No se detecto nada conocido en {root} (compose, package.json, manage.py)")
+        raise typer.Exit(1)
+
+    target.write_text(detect.to_yaml(stack), encoding="utf-8")
+    console.print(f"Escrito: [bold]{target}[/]")
+    console.print(f"[dim]{len(stack.services)} servicios. Revisalo antes de confiar en el.[/]")
+
+
+@app.command("serve")
+def serve_cmd(
+    port: int = typer.Option(7666, min=1, max=65535, help="Puerto de la interfaz."),
+    no_open: bool = typer.Option(False, "--no-open", help="No abrir el navegador."),
+) -> None:
+    """Levanta la interfaz web local."""
+    try:
+        import uvicorn
+
+        from . import server
+    except ImportError:
+        err.print("Falta el extra web. Instalalo con: pip install 'portmaster[web]'")
+        raise typer.Exit(1)
+
+    token = registry.token()
+    url = f"http://127.0.0.1:{port}/?token={token}"
+
+    console.print(f"PortMaster en [bold]http://127.0.0.1:{port}[/]")
+    console.print("[dim]Solo loopback. El token va en la URL de abajo.[/]")
+    console.print(url)
+
+    if not no_open:
+        import webbrowser
+
+        webbrowser.open(url)
+
+    try:
+        uvicorn.run(server.create_app(token), host="127.0.0.1", port=port, log_level="warning")
+    except OSError as exc:
+        err.print(f"No se pudo iniciar el servidor en 127.0.0.1:{port}: {exc}")
+        err.print(f"El puerto {port} esta ocupado. Podes usar 'portmaster free {port}' o '--port <otro>'.")
+        raise typer.Exit(1)
 
 
 @app.command("version")

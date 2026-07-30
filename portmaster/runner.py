@@ -29,6 +29,11 @@ COLORS = ("cyan", "magenta", "green", "yellow", "blue", "bright_red")
 SHUTDOWN_TIMEOUT = 5
 POLL = 0.15
 
+# Un comando detached tiene su propio presupuesto, mucho mas largo que el del
+# healthcheck: la primera vez que corre, `docker compose up -d` construye la
+# imagen y eso tarda minutos sin que nada este mal.
+DETACHED_TIMEOUT = 900
+
 
 class StartupError(Exception):
     """Un servicio no arranco o no llego a estar listo."""
@@ -41,6 +46,11 @@ class Proc:
     color: str
     ready: bool = False
     matched_log: bool = False
+    port: int | None = None  # descubierto, para los servicios con ready: listen
+
+    @property
+    def known_port(self) -> int | None:
+        return self.service.port or self.port
 
 
 @dataclass
@@ -94,11 +104,17 @@ class Runner:
         # shell=True es deliberado: `npm run dev` y `docker compose up -d` no son
         # ejecutables, y stack.yaml ya es codigo ejecutable por diseño. El README
         # documenta el modelo de confianza.
+        env = {
+            "PYTHONUNBUFFERED": "1",
+            "FORCE_COLOR": "1",
+            **os.environ,
+            **service.env,
+        }
         return subprocess.Popen(
             service.command,
             shell=True,
             cwd=service.cwd,
-            env={**os.environ, **service.env},
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -125,7 +141,8 @@ class Runner:
             self._drain()
             if self._is_ready(proc):
                 proc.ready = True
-                self._say(proc, "listo" + (f" ({service.port})" if service.port else ""))
+                port = proc.known_port
+                self._say(proc, "listo" + (f" ({port})" if port else ""))
                 return
             if not service.detached and proc.popen.poll() is not None:
                 raise StartupError(
@@ -141,11 +158,12 @@ class Runner:
 
     def _await_exit(self, proc: Proc) -> None:
         """Un servicio detached corre un comando que termina y deja algo vivo."""
+        budget = max(self.timeout, DETACHED_TIMEOUT)
         try:
-            code = proc.popen.wait(self.timeout)
+            code = proc.popen.wait(budget)
         except subprocess.TimeoutExpired:
             raise StartupError(
-                f"{proc.service.name} es detached pero no termino en {self.timeout:.0f}s"
+                f"{proc.service.name} es detached pero no termino en {budget:.0f}s"
             ) from None
         self._drain()
         if code != 0:
@@ -157,6 +175,9 @@ class Runner:
             return True
         if ready == "port":
             return not ports.is_free(proc.service.port)
+        if ready == "listen":
+            proc.port = ports.listening(proc.popen.pid)
+            return proc.port is not None
         if ready.startswith("log:"):
             return proc.matched_log
         return _http_ok(ready)
@@ -201,10 +222,9 @@ def _terminate_tree(pid: int, timeout: float = SHUTDOWN_TIMEOUT) -> None:
     """
     try:
         parent = psutil.Process(pid)
+        victims = parent.children(recursive=True) + [parent]
     except psutil.NoSuchProcess:
         return
-
-    victims = parent.children(recursive=True) + [parent]
     for victim in victims:
         try:
             victim.terminate()

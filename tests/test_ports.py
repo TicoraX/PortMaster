@@ -63,8 +63,9 @@ def test_kill_rechaza_el_proceso_propio():
 
 
 def test_kill_rechaza_pids_protegidos():
-    with pytest.raises(ports.KillRefused):
-        ports.kill(0)
+    for pid in (0, 1, 4):
+        with pytest.raises(ports.KillRefused):
+            ports.kill(pid)
 
 
 def test_kill_rechaza_un_ancestro():

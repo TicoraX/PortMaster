@@ -16,7 +16,7 @@ from pathlib import Path
 import yaml
 
 CONFIG_NAMES = ("stack.yaml", "stack.yml")
-READY_KINDS = ("port", "none")
+READY_KINDS = ("port", "none", "listen")
 
 
 class ConfigError(Exception):
@@ -42,6 +42,7 @@ class Stack:
     path: Path
     services: dict[str, Service]
     profiles: dict[str, tuple[str, ...]]
+    detected: bool = False
 
     def ports(self) -> list[int]:
         """Puertos declarados, en orden de aparicion y sin repetir."""
@@ -155,10 +156,14 @@ def _service(name: str, spec: object, root: Path) -> Service:
     ready = spec.get("ready", "port" if port else "none")
     if not isinstance(ready, str) or not _valid_ready(ready):
         raise ConfigError(
-            f"{where}.ready debe ser 'port', 'none', 'log:<texto>' o una URL http"
+            f"{where}.ready debe ser 'port', 'listen', 'none', 'log:<texto>' o una URL http"
         )
     if ready == "port" and port is None:
         raise ConfigError(f"{where}.ready es 'port' pero no hay 'port' declarado")
+    if ready == "listen" and port is not None:
+        raise ConfigError(
+            f"{where}.ready es 'listen' pero el puerto esta declarado: usa 'port'"
+        )
 
     needs = spec.get("needs", [])
     if not isinstance(needs, list) or not all(isinstance(n, str) for n in needs):

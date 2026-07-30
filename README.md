@@ -49,6 +49,91 @@ Antes de arrancar nada revisa los puertos declarados. Si alguno está tomado
 por un proceso huérfano, muestra cuál es y pregunta si cerrarlo. `Ctrl-C`
 apaga los servicios en orden inverso, árbol de procesos incluido.
 
+### Sin archivo de configuración
+
+`stack.yaml` es opcional. Si no hay uno, PortMaster mira la raíz del proyecto:
+
+| Encuentra | Arranca |
+|---|---|
+| `compose.yaml`, `compose.yml`, `docker-compose.yml`, `docker-compose.yaml` | un servicio por contenedor: `docker compose up -d <nombre>` |
+| `manage.py` | `python manage.py runserver` |
+| `fastapi` o `uvicorn` declarados, con un módulo que defina `app` | `uvicorn <módulo>:app --reload` |
+| `package.json` con un script que sirva (`dev`, `start:dev`, `serve`, `start`) | `npm run dev`, con `pnpm`/`yarn`/`bun` según el lockfile o el campo `packageManager` |
+
+```
+mi-app  A:\Proyectos\mi-app
+Sin stack.yaml. Detectado:
+  docker  docker compose up -d        5433
+  web     pnpm run dev                al arrancar
+Para congelarlo en un archivo editable: portmaster init
+Arrancar? [Y/n]
+```
+
+Arranca en ese orden y encadena las dependencias: el frontend espera al
+backend, el backend a los contenedores.
+
+Si la raíz no tiene `package.json`, busca una vuelta más abajo: `frontend/`,
+`web/`, `client/`, `ui/`, `front/`, `site/`, y los hijos de `apps/`,
+`packages/` y `services/`. Cada app encontrada es un servicio con el nombre de
+su carpeta. Si la raíz sí tiene `package.json`, gana ese y no se baja: en un
+monorepo su script `dev` suele ser el orquestador (turbo, nx) y arrancar además
+los hijos duplicaría todo.
+
+En las subcarpetas hace falta además una dependencia que declare un servidor de
+desarrollo (vite, next, nest, astro, nodemon y compañía). Un workspace tiene
+tantas librerías como apps, y una librería con `dev: tsc --watch` entraría como
+servicio y se quedaría esperando un puerto que nunca abre.
+
+Nada de esto es recursivo: un scan profundo termina dentro de `node_modules`.
+
+Un compose no entra como un bloque único: cada contenedor es un servicio con su
+puerto publicado, su estado y su link, y el orden sale del `depends_on` del
+propio archivo. `docker compose up -d <nombre>` arranca ese contenedor con sus
+dependencias y es idempotente. Los puertos escritos como `${WEB_PORT:-8080}` se
+resuelven con el entorno, con el `.env` del proyecto y por último con el default
+de la expresión, el mismo orden que usa compose.
+
+El puerto de `npm run dev` y de `uvicorn` no se adivina: se arranca el proceso y
+se le pregunta cuál quedó escuchando. Es más confiable que parsear
+`vite.config.ts`, los flags del script y `.env`, y acierta cuando Vite encuentra
+5173 tomado y se corre a 5174. El costo es que esos puertos no se pueden liberar
+antes de arrancar, porque no se saben hasta después. Los de compose sí, que
+están declarados en el archivo.
+
+`portmaster init` escribe lo detectado como `stack.yaml` para editarlo a mano.
+No sobreescribe uno existente.
+
+### Interfaz web
+
+Cuando tenés varios proyectos, el CLI se queda corto: trabaja sobre el
+directorio actual. La interfaz los muestra todos a la vez.
+
+```bash
+pip install 'portmaster[web]'
+portmaster add .        # registrar el proyecto actual
+portmaster list         # listar proyectos registrados (alias: portmaster ls)
+portmaster remove .     # des-registrar un proyecto (alias: portmaster rm)
+portmaster serve        # abre http://127.0.0.1:7666
+```
+
+Estado de cada servicio, arrancar y apagar stacks, liberar puertos tomados por
+procesos ajenos, y logs en vivo por proyecto.
+
+Para registrar un proyecto no hace falta copiar la ruta: `Explorar…` abre un
+navegador de carpetas que empieza en tu home y en las unidades montadas, y marca
+las que tienen `stack.yaml`, un compose, un `package.json` o un `manage.py`. El
+listado lo arma el servidor, porque una página web no puede conocer rutas
+absolutas de tu disco. Devuelve nombres de carpetas y de esos archivos
+marcadores, nunca contenido.
+
+El servidor escucha solo en loopback y exige un token que `serve` genera en
+`~/.portmaster/token` y pasa en la URL de arranque. Ejecuta los comandos de tus
+`stack.yaml`, así que se trata como superficie sensible: rate limit en todas las
+rutas, CSP estricta, y validación del header `Host` contra rebinding de DNS.
+Podés fijar el token vos mismo con `PORTMASTER_TOKEN`.
+
+### Puertos
+
 Revisar el estado de los puertos sin arrancar nada:
 
 ```bash
@@ -124,14 +209,18 @@ y los ciclos fallan al cargar el archivo, no a mitad del arranque. Un perfil
 arrastra sus dependencias transitivas: pedir `api` sin su base de datos nunca
 es lo que alguien quiso decir.
 
-`ready` decide cuándo un servicio cuenta como listo, y acepta cuatro formas:
+`ready` decide cuándo un servicio cuenta como listo, y acepta cinco formas:
 
 | Valor | Espera a que |
 |---|---|
 | `port` | el puerto acepte conexiones (default si hay `port`) |
+| `listen` | el proceso abra un puerto cualquiera, y lo reporta |
 | `log:texto` | ese texto aparezca en la salida del servicio |
 | `http://...` | esa URL responda con menos de 400 |
 | `none` | nada (default si no hay `port`) |
+
+`listen` es para servicios que eligen su propio puerto. Es incompatible con
+`port`: si lo conocés, el healthcheck es `port`.
 
 El ejemplo completo y comentado está en
 [`stack.example.yaml`](stack.example.yaml).
@@ -141,6 +230,10 @@ El ejemplo completo y comentado está en
 `stack.yaml` ejecuta comandos arbitrarios, igual que `package.json` o un
 `Makefile`. PortMaster no lo sandboxea: sería teatro. Tratá un `stack.yaml`
 de un repo ajeno con el mismo cuidado que sus scripts de build.
+
+Sin `stack.yaml`, los comandos salen de la detección, y `scripts.dev` de un
+`package.json` ajeno es igual de arbitrario. Por eso `up` muestra qué va a
+ejecutar y pregunta antes, y `-y` es tuyo para saltarlo cuando ya lo leíste.
 
 ## Desarrollo
 
