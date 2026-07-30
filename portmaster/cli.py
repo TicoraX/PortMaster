@@ -7,7 +7,7 @@ import psutil
 from rich.console import Console
 from rich.table import Table
 
-from . import __version__, ports
+from . import __version__, config, ports
 
 app = typer.Typer(
     help="Orquestador de entornos de desarrollo locales.",
@@ -32,8 +32,21 @@ def _row(status: ports.PortStatus, cmd_width: int) -> tuple[str, ...]:
 
 
 @app.command("ports")
-def ports_cmd(port: list[int] = PortArg) -> None:
-    """Revisa el estado de uno o mas puertos."""
+def ports_cmd(
+    port: list[int] = typer.Argument(None, min=1, max=65535),
+) -> None:
+    """Revisa puertos. Sin argumentos, usa los declarados en stack.yaml."""
+    if not port:
+        try:
+            stack = config.load()
+        except config.ConfigError as exc:
+            err.print(f"{exc}\nPasa los puertos como argumento: portmaster ports 3000 8080")
+            raise typer.Exit(1)
+        port = stack.ports()
+        if not port:
+            err.print(f"{stack.path} no declara ningun puerto.")
+            raise typer.Exit(1)
+
     table = Table(box=None, pad_edge=False)
     for column in ("PUERTO", "ESTADO", "PID", "PROCESO", "COMANDO"):
         table.add_column(column)
