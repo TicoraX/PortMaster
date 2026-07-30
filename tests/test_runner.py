@@ -111,6 +111,45 @@ def test_detached_exitoso(tmp_path):
     assert engine.procs[0].ready
 
 
+def test_el_comando_de_apagado_corre_al_bajar(tmp_path):
+    """Un detached deja algo vivo fuera de nuestro arbol: matar al hijo no
+    alcanza, tiene que correr su propio comando de apagado."""
+    marca = tmp_path / "apagado.txt"
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          contenedores:
+            command: {sys.executable} -c "print('arriba')"
+            detached: true
+            stop: {sys.executable} -c "open(r'{marca}', 'w').write('bajado')"
+        """,
+    )
+
+    engine = make_runner(stack)
+    engine.up()
+    assert not marca.exists(), "el apagado no corre al arrancar"
+
+    engine.down()
+    assert marca.read_text(encoding="utf-8") == "bajado"
+
+
+def test_un_apagado_que_falla_no_revienta(tmp_path):
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          contenedores:
+            command: {sys.executable} -c "print('arriba')"
+            detached: true
+            stop: {sys.executable} -c "raise SystemExit(2)"
+        """,
+    )
+    engine = make_runner(stack)
+    engine.up()
+    engine.down()  # no propaga: apagar es lo ultimo que se hace
+
+
 def test_detached_que_falla_aborta(tmp_path):
     stack = stack_from(
         tmp_path,

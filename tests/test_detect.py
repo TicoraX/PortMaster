@@ -96,6 +96,21 @@ def test_un_servicio_por_contenedor(tmp_path):
     assert all(s.detached for s in stack.services.values())
 
 
+def test_cada_contenedor_trae_su_apagado(tmp_path):
+    write(tmp_path, "compose.yaml", "services:\n  db:\n    image: postgres\n")
+    assert detect.detect(tmp_path).services["db"].stop == "docker compose stop db"
+
+
+def test_compose_sin_servicios_apaga_todo(tmp_path):
+    write(tmp_path, "docker-compose.yml", "name: solo-un-nombre\n")
+    assert detect.detect(tmp_path).services["docker"].stop == "docker compose stop"
+
+
+def test_un_proceso_local_no_tiene_apagado(tmp_path):
+    write(tmp_path, "manage.py", "import django")
+    assert detect.detect(tmp_path).services["api"].stop is None
+
+
 def test_contenedor_con_puerto_espera_a_que_acepte(tmp_path):
     write(
         tmp_path,

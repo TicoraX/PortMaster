@@ -142,6 +142,8 @@ def to_yaml(stack: Stack) -> str:
             spec["needs"] = list(service.needs)
         if service.detached:
             spec["detached"] = True
+        if service.stop:
+            spec["stop"] = service.stop
         services[service.name] = spec
 
     return yaml.safe_dump(
@@ -170,7 +172,9 @@ def _compose(root: Path) -> list[Service]:
     declared = raw.get("services") if isinstance(raw, dict) else None
     if not isinstance(declared, dict) or not declared:
         # Compose ilegible o sin servicios: se arranca entero y sin puertos.
-        return [_container("docker", "docker compose up -d", root, None, ())]
+        return [
+            _container("docker", "docker compose up -d", root, None, (), "docker compose stop")
+        ]
 
     env = _dotenv(root)
     names = {str(name) for name in declared}
@@ -180,12 +184,21 @@ def _compose(root: Path) -> list[Service]:
         spec = spec if isinstance(spec, dict) else {}
         needs = tuple(dep for dep in _depends_on(spec) if dep in names and dep != name)
         found.append(
-            _container(name, f"docker compose up -d {name}", root, _first_port(spec, env), needs)
+            _container(
+                name,
+                f"docker compose up -d {name}",
+                root,
+                _first_port(spec, env),
+                needs,
+                f"docker compose stop {name}",
+            )
         )
     return found
 
 
-def _container(name: str, command: str, root: Path, port: int | None, needs: tuple[str, ...]):
+def _container(
+    name: str, command: str, root: Path, port: int | None, needs: tuple[str, ...], stop: str
+):
     return Service(
         name=name,
         command=command,
@@ -197,6 +210,7 @@ def _container(name: str, command: str, root: Path, port: int | None, needs: tup
         needs=needs,
         env={},
         detached=True,
+        stop=stop,  # el contenedor no muere con el cliente que lo arranco
     )
 
 

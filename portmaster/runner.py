@@ -34,6 +34,10 @@ POLL = 0.15
 # imagen y eso tarda minutos sin que nada este mal.
 DETACHED_TIMEOUT = 900
 
+# `docker compose stop` le da su gracia a cada contenedor antes de matarlo, y con
+# varios no entra en los 5s del apagado del arbol.
+STOP_TIMEOUT = 90
+
 
 class StartupError(Exception):
     """Un servicio no arranco o no llego a estar listo."""
@@ -84,10 +88,40 @@ class Runner:
     def down(self) -> None:
         """Apaga en orden inverso al de arranque."""
         for proc in reversed(self.procs):
+            if proc.service.stop:
+                self._stop_command(proc)
             if proc.popen.poll() is None:
                 self._say(proc, "apagando")
                 _terminate_tree(proc.popen.pid)
         self._drain()
+
+    def _stop_command(self, proc: Proc) -> None:
+        """Apagado propio del servicio.
+
+        Matar el arbol no alcanza cuando lo que quedo vivo no es hijo nuestro:
+        `docker compose up -d` termina enseguida y los contenedores siguen
+        corriendo. Sin este comando, "apagar" no apaga nada.
+        """
+        self._say(proc, f"$ {proc.service.stop}")
+        try:
+            done = subprocess.run(
+                proc.service.stop,
+                shell=True,
+                cwd=proc.service.cwd,
+                env={**os.environ, **proc.service.env},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                errors="replace",
+                timeout=STOP_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            self._say(proc, f"el apagado no termino en {STOP_TIMEOUT}s")
+            return
+        for line in (done.stdout or "").splitlines():
+            self._write(proc, line.rstrip())
+        if done.returncode != 0:
+            self._say(proc, f"el apagado fallo con codigo {done.returncode}")
 
     # arranque -------------------------------------------------------------
 

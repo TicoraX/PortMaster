@@ -133,6 +133,8 @@ def test_cwd_inexistente(tmp_path):
         ("services:\n  api:\n    command: x\n    needs: [fantasma]", "no existe"),
         ("services:\n  api:\n    command: x\n    needs: [api]", "a si mismo"),
         ("services:\n  api:\n    command: x\n    detached: quizas", "detached"),
+        ("services:\n  api:\n    command: x\n    stop: ''", "stop"),
+        ("services:\n  api:\n    command: x\n    stop: 3", "stop"),
         ("services:\n  api:\n    command: x\n    typo: 1", "desconocidos"),
         ("services:\n  api:\n    command: x\n    env:\n      A: [1, 2]", "valor simple"),
         ("services:\n  api:\n    command: x\nprofiles:\n  p: [fantasma]", "no existe"),
@@ -143,6 +145,25 @@ def test_cwd_inexistente(tmp_path):
 def test_configuraciones_invalidas(tmp_path, body, mensaje):
     with pytest.raises(config.ConfigError, match=mensaje):
         config.load(write(tmp_path, body))
+
+
+def test_stop_es_opcional(tmp_path):
+    stack = config.load(
+        write(
+            tmp_path,
+            """
+            services:
+              db:
+                command: docker compose up -d db
+                detached: true
+                stop: docker compose stop db
+              api:
+                command: npm run dev
+            """,
+        )
+    )
+    assert stack.services["db"].stop == "docker compose stop db"
+    assert stack.services["api"].stop is None
 
 
 def test_yaml_roto(tmp_path):

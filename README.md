@@ -222,6 +222,13 @@ es lo que alguien quiso decir.
 `listen` es para servicios que eligen su propio puerto. Es incompatible con
 `port`: si lo conocés, el healthcheck es `port`.
 
+`stop` es un comando de apagado propio, opcional. Sin él, apagar mata el árbol
+de procesos del servicio, que es lo correcto para un `npm run dev` y no alcanza
+para un contenedor: `docker compose up -d` termina enseguida y lo que queda
+vivo no es hijo nuestro. Los servicios detectados de un compose traen
+`stop: docker compose stop <nombre>`. Si el comando falla o tarda más de 90s, se
+loguea y el apagado sigue con el resto.
+
 El ejemplo completo y comentado está en
 [`stack.example.yaml`](stack.example.yaml).
 

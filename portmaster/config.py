@@ -33,6 +33,9 @@ class Service:
     needs: tuple[str, ...]
     env: dict[str, str]
     detached: bool
+    # Comando de apagado propio, para lo que no muere matando al proceso que lo
+    # arranco: un contenedor vive fuera de nuestro arbol.
+    stop: str | None = None
 
 
 @dataclass(frozen=True)
@@ -140,7 +143,9 @@ def _service(name: str, spec: object, root: Path) -> Service:
     if not isinstance(spec, dict):
         raise ConfigError(f"{where} debe ser un mapa")
 
-    unknown = set(spec) - {"command", "cwd", "port", "ready", "needs", "env", "detached"}
+    unknown = set(spec) - {
+        "command", "cwd", "port", "ready", "needs", "env", "detached", "stop",
+    }
     if unknown:
         raise ConfigError(f"{where}: campos desconocidos: {', '.join(sorted(unknown))}")
 
@@ -175,6 +180,10 @@ def _service(name: str, spec: object, root: Path) -> Service:
     if not isinstance(detached, bool):
         raise ConfigError(f"{where}.detached debe ser true o false")
 
+    stop = spec.get("stop")
+    if stop is not None and (not isinstance(stop, str) or not stop.strip()):
+        raise ConfigError(f"{where}.stop debe ser texto no vacio")
+
     return Service(
         name=name,
         command=command,
@@ -184,6 +193,7 @@ def _service(name: str, spec: object, root: Path) -> Service:
         needs=tuple(needs),
         env=_env(where, spec.get("env")),
         detached=detached,
+        stop=stop,
     )
 
 
