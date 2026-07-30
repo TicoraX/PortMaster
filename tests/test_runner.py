@@ -1,0 +1,201 @@
+"""Procesos reales. Un orquestador probado con mocks no prueba nada."""
+
+import io
+import sys
+import textwrap
+import time
+
+import psutil
+import pytest
+from rich.console import Console
+
+from portmaster import config, runner
+
+# Servidor minimo que anuncia su arranque y se queda escuchando.
+SERVER = (
+    "import socket, time; "
+    "s = socket.socket(); s.bind(('127.0.0.1', {port})); s.listen(); "
+    "print('SERVIDOR ARRIBA', flush=True); "
+    "time.sleep(120)"
+)
+
+
+def stack_from(tmp_path, body):
+    path = tmp_path / "stack.yaml"
+    path.write_text(textwrap.dedent(body), encoding="utf-8")
+    return config.load(path)
+
+
+def make_runner(stack, timeout=20.0):
+    return runner.Runner(stack, console=Console(file=io.StringIO()), timeout=timeout)
+
+
+def test_arranca_en_orden_y_espera_el_puerto(tmp_path, free_ports):
+    a, b = free_ports(2)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          uno:
+            command: {sys.executable} -c "{SERVER.format(port=a)}"
+            port: {a}
+          dos:
+            command: {sys.executable} -c "{SERVER.format(port=b)}"
+            port: {b}
+            needs: [uno]
+        """,
+    )
+    engine = make_runner(stack)
+    try:
+        engine.up()
+        assert [p.service.name for p in engine.procs] == ["uno", "dos"]
+        assert all(p.ready for p in engine.procs)
+    finally:
+        engine.down()
+
+
+def test_down_apaga_el_arbol_y_libera_el_puerto(tmp_path, free_ports):
+    (port,) = free_ports(1)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "{SERVER.format(port=port)}"
+            port: {port}
+        """,
+    )
+    engine = make_runner(stack)
+    engine.up()
+    hijos = psutil.Process(engine.procs[0].popen.pid).children(recursive=True)
+
+    engine.down()
+
+    deadline = time.time() + 10
+    while time.time() < deadline and not runner.ports.is_free(port):
+        time.sleep(0.1)
+    assert runner.ports.is_free(port)
+    assert all(not h.is_running() for h in hijos)
+
+
+def test_ready_por_log(tmp_path):
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "print('LISTO PARA RECIBIR', flush=True); import time; time.sleep(120)"
+            ready: "log:LISTO PARA RECIBIR"
+        """,
+    )
+    engine = make_runner(stack)
+    try:
+        engine.up()
+        assert engine.procs[0].ready
+    finally:
+        engine.down()
+
+
+def test_detached_exitoso(tmp_path):
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          setup:
+            command: {sys.executable} -c "print('hecho')"
+            detached: true
+        """,
+    )
+    engine = make_runner(stack)
+    engine.up()
+    assert engine.procs[0].ready
+
+
+def test_detached_que_falla_aborta(tmp_path):
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          setup:
+            command: {sys.executable} -c "raise SystemExit(3)"
+            detached: true
+        """,
+    )
+    engine = make_runner(stack)
+    with pytest.raises(runner.StartupError, match="codigo 3"):
+        engine.up()
+
+
+def test_servicio_que_muere_antes_de_estar_listo(tmp_path, free_ports):
+    (port,) = free_ports(1)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "raise SystemExit(1)"
+            port: {port}
+        """,
+    )
+    engine = make_runner(stack)
+    with pytest.raises(runner.StartupError, match="antes de estar listo"):
+        engine.up()
+
+
+def test_timeout_de_healthcheck(tmp_path, free_ports):
+    (port,) = free_ports(1)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "import time; time.sleep(120)"
+            port: {port}
+        """,
+    )
+    engine = make_runner(stack, timeout=2.0)
+    with pytest.raises(runner.StartupError, match="no estuvo listo"):
+        engine.up()
+
+
+def test_un_fallo_apaga_lo_ya_levantado(tmp_path, free_ports):
+    a, b = free_ports(2)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          bueno:
+            command: {sys.executable} -c "{SERVER.format(port=a)}"
+            port: {a}
+          malo:
+            command: {sys.executable} -c "raise SystemExit(1)"
+            port: {b}
+            needs: [bueno]
+        """,
+    )
+    engine = make_runner(stack, timeout=5.0)
+    with pytest.raises(runner.StartupError):
+        engine.up()
+
+    deadline = time.time() + 10
+    while time.time() < deadline and not runner.ports.is_free(a):
+        time.sleep(0.1)
+    assert runner.ports.is_free(a), "el servicio bueno quedo huerfano"
+
+
+def test_env_llega_al_proceso(tmp_path):
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "import os; print('VALOR=' + os.environ['SALUDO'])"
+            detached: true
+            env:
+              SALUDO: hola
+        """,
+    )
+    salida = io.StringIO()
+    engine = runner.Runner(stack, console=Console(file=salida), timeout=20.0)
+    engine.up()
+    assert "VALOR=hola" in salida.getvalue()
