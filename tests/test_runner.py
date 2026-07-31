@@ -111,6 +111,53 @@ def test_detached_exitoso(tmp_path):
     assert engine.procs[0].ready
 
 
+HTTP_SERVER = (
+    "from http.server import HTTPServer, BaseHTTPRequestHandler; "
+    "HTTPServer(('127.0.0.1', {port}), BaseHTTPRequestHandler).serve_forever()"
+)
+
+
+def test_un_puerto_que_habla_http_se_puede_abrir(tmp_path, free_ports):
+    (port,) = free_ports(1)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          web:
+            command: {sys.executable} -c "{HTTP_SERVER.format(port=port)}"
+            port: {port}
+        """,
+    )
+    engine = make_runner(stack)
+    try:
+        engine.up()
+        # BaseHTTPRequestHandler contesta 501 a un GET: no sirve nada, pero es
+        # HTTP, que es justo lo que distingue a un frontend de una base de datos.
+        assert engine.procs[0].http is True
+    finally:
+        engine.down()
+
+
+def test_un_socket_pelado_no_se_ofrece_para_abrir(tmp_path, free_ports):
+    (port,) = free_ports(1)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          db:
+            command: {sys.executable} -c "{SERVER.format(port=port)}"
+            port: {port}
+        """,
+    )
+    engine = make_runner(stack)
+    try:
+        engine.up()
+        assert engine.procs[0].ready, "esta listo igual, solo que no es abrible"
+        assert engine.procs[0].http is False
+    finally:
+        engine.down()
+
+
 def test_el_comando_de_apagado_corre_al_bajar(tmp_path):
     """Un detached deja algo vivo fuera de nuestro arbol: matar al hijo no
     alcanza, tiene que correr su propio comando de apagado."""

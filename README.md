@@ -119,6 +119,12 @@ portmaster serve        # abre http://127.0.0.1:7666
 Estado de cada servicio, arrancar y apagar stacks, liberar puertos tomados por
 procesos ajenos, y logs en vivo por proyecto.
 
+Los servicios que se pueden abrir en el navegador traen un botón `Abrir`. Cuál
+lo lleva no se adivina por el nombre: cuando el servicio queda listo, PortMaster
+le hace una petición al puerto. Si contesta HTTP, es abrible. Un `404` cuenta,
+porque la mayoría de las APIs no sirven nada en la raíz; lo que descarta al
+servicio es que no conteste, que es el caso de una base de datos.
+
 Para registrar un proyecto no hace falta copiar la ruta: `Explorar…` abre un
 navegador de carpetas que empieza en tu home y en las unidades montadas, y marca
 las que tienen `stack.yaml`, un compose, un `package.json` o un `manage.py`. El

@@ -140,6 +140,12 @@ class Session:
             return {}
         return {p.service.name: p.port for p in self.engine.procs if p.port}
 
+    def service_http(self) -> set[str]:
+        """Servicios cuyo puerto contesta HTTP: los unicos que tiene sentido abrir."""
+        if self.engine is None:
+            return set()
+        return {p.service.name for p in self.engine.procs if p.http}
+
     def service_states(self) -> dict[str, str]:
         if self.engine is None:
             return {}
@@ -448,6 +454,7 @@ def _project_view(path: Path) -> dict:
         session = sessions.get(pid)
     running = session.service_states() if session else {}
     discovered = session.service_ports() if session else {}
+    openable = session.service_http() if session else set()
 
     scanned = ports.scan_many([s.port for s in stack.services.values() if s.port])
     services = []
@@ -465,6 +472,9 @@ def _project_view(path: Path) -> dict:
                 # del rol de un servicio. Adivinar "backend" por el nombre no.
                 "kind": "container" if service.detached else "local",
                 "port": service.port or discovered.get(service.name),
+                # Solo lo que contesta HTTP se ofrece para abrir: un postgres
+                # listo tiene puerto y no es algo que mandar al navegador.
+                "openable": state != "stopped" and service.name in openable,
                 "needs": list(service.needs),
                 "state": state,
                 "occupant": _occupant(status, state != "stopped"),

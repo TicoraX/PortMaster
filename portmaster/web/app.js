@@ -132,21 +132,19 @@ function renderService(service, projectId) {
     service.kind === "container" ? "contenedor" : "proceso local";
 
   const portCell = node.querySelector(".service__port");
-  if (service.port) {
-    if (service.state === "ready") {
-      const link = document.createElement("a");
-      link.href = `http://localhost:${service.port}`;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      link.className = "service__port-link";
-      link.title = `Abrir http://localhost:${service.port}`;
-      link.textContent = `${service.port} ↗`;
-      portCell.replaceChildren(link);
-    } else {
-      portCell.textContent = String(service.port);
-    }
-  } else {
-    portCell.textContent = "—";
+  portCell.textContent = service.port ? String(service.port) : "—";
+
+  // El boton de abrir sale solo cuando el puerto contesto HTTP. Un postgres
+  // listo tiene puerto y abrirlo en el navegador no lleva a ningun lado.
+  if (service.openable && service.port) {
+    const link = document.createElement("a");
+    link.href = `http://localhost:${service.port}`;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.className = "btn btn--open";
+    link.title = `Abrir http://localhost:${service.port}`;
+    link.textContent = "Abrir ↗";
+    node.querySelector(".service__act").append(link);
   }
 
   node.querySelector(".service__label").textContent = service.name;

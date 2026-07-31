@@ -52,6 +52,7 @@ class Proc:
     ready: bool = False
     matched_log: bool = False
     port: int | None = None  # descubierto, para los servicios con ready: listen
+    http: bool = False  # el puerto contesta HTTP, o sea que se puede abrir
     # Ultimas lineas de salida, para que el error diga la causa y no solo el
     # codigo: "fallo con codigo 1" sin el motivo obliga a abrir los logs.
     tail: deque[str] = field(default_factory=lambda: deque(maxlen=5))
@@ -180,7 +181,12 @@ class Runner:
             if self._is_ready(proc):
                 proc.ready = True
                 port = proc.known_port
-                self._say(proc, "listo" + (f" ({port})" if port else ""))
+                if port:
+                    proc.http = _speaks_http(port)
+                detail = f" ({port})" if port else ""
+                if proc.http:
+                    detail += f" · http://localhost:{port}"
+                self._say(proc, "listo" + detail)
                 return
             if not service.detached and proc.popen.poll() is not None:
                 raise StartupError(
@@ -262,6 +268,35 @@ def _why(proc: Proc) -> str:
                 text = text[: WHY_MAX - 1].rstrip() + "…"
             return f": {text}"
     return ""
+
+
+HTTP_PROBE_TIMEOUT = 1.0
+
+
+def _speaks_http(port: int) -> bool:
+    """Si el puerto contesta HTTP, y por lo tanto se puede abrir en el navegador.
+
+    Un postgres listo no es algo que abrir, y saber cual servicio es el frontend
+    por el nombre es adivinar. Se le pregunta al puerto, igual que el puerto se le
+    pregunta al proceso.
+
+    Un 404 cuenta: la mayoria de las APIs no sirven nada en la raiz y siguen
+    siendo HTTP. Lo que descarta al servicio es que no conteste.
+
+    ponytail: un solo sondeo, en el momento en que el servicio queda listo.
+    Reintentar cuesta el timeout entero por cada puerto que no habla HTTP. El
+    techo conocido es un servidor que compila en la primera peticion y tarda
+    segundos en contestarla, como el modo dev de Next: se queda sin boton hasta
+    el proximo arranque. La salida, si aparece, es re-sondear desde la vista de
+    estado y cachear, no reintentar aca y frenar el arranque.
+    """
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}", timeout=HTTP_PROBE_TIMEOUT):
+            return True
+    except urllib.error.HTTPError:
+        return True
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
 
 
 def _http_ok(url: str) -> bool:

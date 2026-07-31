@@ -256,16 +256,19 @@ body {
   text-align: right;
 }
 
-.service__port-link {
+/* Unica accion en acento del index: abrir lo que esta corriendo es lo que mas se
+   hace desde aca, y es lo unico que se lleva un color. */
+.btn--open {
+  font-size: var(--text-xs);
+  padding: 0.3rem 0.6rem;
   color: var(--color-accent);
+  border-color: var(--color-accent);
   text-decoration: none;
-  border-bottom: 1px dashed var(--color-accent);
-  transition: opacity var(--dur-fast) var(--ease-out);
 }
 
-.service__port-link:hover {
-  opacity: 0.8;
-  text-decoration: none;
+.btn--open:hover {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
 }
 
 /* Badge: el estado se lee como una unidad y no como texto suelto. El color va
