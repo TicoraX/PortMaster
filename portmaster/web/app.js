@@ -320,18 +320,30 @@ async function refresh() {
  * conocer. Cada click pide el listado de una carpeta y nada mas. */
 
 let here = { path: "", parent: null, markers: [] };
+let historyStack = [];
 
-async function browseTo(path) {
+async function browseTo(path, isHistoryAction = false) {
+  const from = here.path;
+
   let data;
   try {
     data = await api(`/api/browse?path=${encodeURIComponent(path)}`);
   } catch (error) {
     // Una ruta mala escrita a mano no puede dejar el dialogo en blanco: se cae
-    // a las raices y recien despues se muestra el aviso, que si no lo tapa.
-    if (path) await browseTo("");
+    // a las raices y recien despues se muestra el aviso, que si no lo tapa. El
+    // salto a las raices es del historial: si no, Volver traeria de vuelta la
+    // ruta que acaba de fallar.
+    if (path) await browseTo("", true);
     ui.pickerNote.textContent = error.message;
     ui.pickerNote.hidden = false;
     return;
+  }
+
+  // El historial se anota recien cuando la navegacion salio bien, y contra la
+  // ruta que devolvio el servidor: es la normalizada, la que Volver puede
+  // pedir de nuevo.
+  if (!isHistoryAction && from !== data.path) {
+    historyStack.push(from);
   }
 
   here = data;
@@ -340,6 +352,9 @@ async function browseTo(path) {
   if (data.truncated) {
     ui.pickerNote.textContent = `Se muestran las primeras ${data.entries.length} carpetas.`;
   }
+
+  const backBtn = ui.picker.querySelector('[data-picker="back"]');
+  if (backBtn) backBtn.disabled = historyStack.length === 0;
 
   ui.picker.querySelector('[data-picker="up"]').disabled = data.parent === null;
   ui.picker.querySelector('[data-picker="pick"]').disabled = !data.path;
@@ -379,13 +394,26 @@ function entryRow(entry) {
 }
 
 ui.browse.addEventListener("click", () => {
+  historyStack = [];
+  const backBtn = ui.picker.querySelector('[data-picker="back"]');
+  if (backBtn) backBtn.disabled = true;
   ui.picker.showModal();
-  browseTo(ui.path.value.trim() || here.path);
+  browseTo(ui.path.value.trim() || here.path, true);
 });
 
 ui.picker.querySelector('[data-picker="close"]').addEventListener("click", () => {
   ui.picker.close();
 });
+
+const backBtn = ui.picker.querySelector('[data-picker="back"]');
+if (backBtn) {
+  backBtn.addEventListener("click", () => {
+    if (historyStack.length > 0) {
+      const prevPath = historyStack.pop();
+      browseTo(prevPath, true);
+    }
+  });
+}
 
 ui.picker.querySelector('[data-picker="up"]').addEventListener("click", () => {
   if (here.parent !== null) browseTo(here.parent);

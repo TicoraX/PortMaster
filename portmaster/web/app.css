@@ -577,6 +577,11 @@ body {
   border-top: var(--rule) solid var(--color-rule);
 }
 
+.picker__nav {
+  display: flex;
+  gap: var(--space-sm);
+}
+
 /* colofon y avisos -------------------------------------------------------- */
 
 .colophon {
