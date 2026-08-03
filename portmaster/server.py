@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import psutil
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -35,6 +35,7 @@ log = logging.getLogger("portmaster.server")
 
 WEB = Path(__file__).parent / "web"
 LOG_LINES = 500
+PAGE_SIZE = 8
 
 # Cuotas por ventana de 15 minutos. La interfaz sondea el estado cada 2s, que da
 # unas 450 peticiones por ventana: un limite global de 100 la romperia en el uso
@@ -273,8 +274,28 @@ def create_app(token: str) -> FastAPI:
     app.mount("/static", StaticFiles(directory=WEB), name="static")
 
     @app.get("/api/state", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
-    def state() -> dict:
-        return {"projects": [_project_view(path) for path in registry.paths()]}
+    def state(
+        q: str = Query("", max_length=200),
+        page: int = Query(1, ge=1),
+        size: int = Query(PAGE_SIZE, ge=1, le=50),
+    ) -> dict:
+        known = registry.paths()
+        paths = _matching(known, q)
+        total = len(paths)
+        pages = max(1, -(-total // size))
+        page = min(page, pages)
+        # Solo se arma la vista de la pagina pedida: cada una lee la config del
+        # proyecto y le escanea los puertos, y eso corre cada 2.5 segundos.
+        window = paths[(page - 1) * size : page * size]
+        return {
+            "projects": [_project_view(path) for path in window],
+            "total": total,
+            # Registrados en total, filtro aparte: es lo que dice el encabezado, y
+            # no tiene por que bajar cuando alguien escribe en el buscador.
+            "registered": len(known),
+            "page": page,
+            "pages": pages,
+        }
 
     @app.get("/api/browse", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
     def browse(path: str = "") -> dict:
@@ -497,6 +518,18 @@ def _lookup(pid: str) -> Path:
         if registry.project_id(path) == pid:
             return path
     raise HTTPException(404, "proyecto desconocido")
+
+
+def _matching(paths: list[Path], needle: str) -> list[Path]:
+    """Filtra por nombre de carpeta o ruta.
+
+    El nombre del stack no entra: sale de leer la config de cada proyecto, que es
+    justo el trabajo que el filtro existe para no hacer.
+    """
+    needle = needle.strip().lower()
+    if not needle:
+        return paths
+    return [p for p in paths if needle in p.name.lower() or needle in str(p).lower()]
 
 
 def _project_view(path: Path) -> dict:

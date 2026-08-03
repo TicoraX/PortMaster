@@ -111,6 +111,63 @@ body {
   color: var(--color-ink);
 }
 
+/* buscador y paginado ----------------------------------------------------- */
+
+/* `display: flex` le gana a la regla del navegador para [hidden]: sin esto, el
+   buscador y el paginador se ven siempre. */
+.find[hidden],
+.pager[hidden] {
+  display: none;
+}
+
+.find {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.find__label {
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+}
+
+.find__input {
+  flex: 1 1 14rem;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-ink);
+  background: var(--color-paper-2);
+  border: var(--rule) solid var(--color-rule-strong);
+  border-radius: var(--radius);
+  padding: 0.4rem 0.6rem;
+}
+
+.find__input::placeholder {
+  color: var(--color-ink-3);
+}
+
+.find__count {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+  white-space: nowrap;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-top: var(--space-md);
+}
+
+.pager__at {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+}
+
 /* index de proyectos ------------------------------------------------------ */
 
 .index {

@@ -12,6 +12,11 @@ const ui = {
   enroll: document.getElementById("enroll"),
   path: document.getElementById("path"),
   browse: document.getElementById("browse"),
+  find: document.getElementById("find"),
+  search: document.getElementById("search"),
+  count: document.getElementById("count"),
+  pager: document.getElementById("pager"),
+  pagerAt: document.getElementById("pager-at"),
   picker: document.getElementById("picker"),
   pickerPath: document.getElementById("picker-path"),
   pickerList: document.getElementById("picker-list"),
@@ -22,6 +27,11 @@ const ui = {
 
 const cards = new Map(); // id -> {root, logSeq, logsOpen}
 let flashTimer = null;
+
+// Debajo de esto el buscador estorba mas de lo que ayuda.
+const PAGE_MIN = 5;
+let query = "";
+let page = 1;
 
 /* token ------------------------------------------------------------------- */
 
@@ -304,8 +314,24 @@ async function pullLogs(id, entry) {
   }
 }
 
-function render(projects) {
-  ui.empty.hidden = projects.length > 0;
+function render(projects, data) {
+  // Sin resultados con un filtro puesto no es lo mismo que no tener proyectos:
+  // el cartel de "registrá el primero" ahi seria mentira.
+  ui.empty.hidden = projects.length > 0 || Boolean(query);
+
+  // El buscador aparece cuando hay algo que buscar. Con tres proyectos, buscar
+  // es mas trabajo que mirar.
+  const searchable = data.registered > PAGE_MIN || Boolean(query);
+  ui.find.hidden = !searchable;
+  ui.count.textContent = query
+    ? `${data.total} ${data.total === 1 ? "coincidencia" : "coincidencias"}`
+    : "";
+
+  ui.pager.hidden = data.pages <= 1;
+  ui.pagerAt.textContent = `${data.page} de ${data.pages}`;
+  ui.pager.querySelector('[data-page="prev"]').disabled = data.page <= 1;
+  ui.pager.querySelector('[data-page="next"]').disabled = data.page >= data.pages;
+  page = data.page;
 
   const seen = new Set();
   for (const project of projects) {
@@ -332,10 +358,12 @@ function render(projects) {
 
 async function refresh() {
   try {
-    const data = await api("/api/state");
-    render(data.projects);
-    const count = data.projects.length;
-    ui.connection.textContent = `${count} ${count === 1 ? "proyecto" : "proyectos"}`;
+    const params = new URLSearchParams({ page: String(page) });
+    if (query) params.set("q", query);
+    const data = await api(`/api/state?${params}`);
+    render(data.projects, data);
+    const n = data.registered;
+    ui.connection.textContent = `${n} ${n === 1 ? "proyecto" : "proyectos"}`;
     ui.connection.dataset.down = "false";
   } catch (error) {
     ui.connection.textContent = `sin conexión · ${error.message}`;
@@ -421,6 +449,27 @@ function entryRow(entry) {
   item.append(row);
   return item;
 }
+
+/* buscador y paginado ----------------------------------------------------- */
+
+let searchTimer = null;
+
+ui.search.addEventListener("input", () => {
+  // Sin esperar, cada tecla dispara un escaneo de puertos en el servidor.
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    query = ui.search.value.trim();
+    page = 1;
+    refresh();
+  }, 200);
+});
+
+ui.pager.addEventListener("click", (event) => {
+  const move = event.target.dataset.page;
+  if (!move) return;
+  page = move === "next" ? page + 1 : Math.max(1, page - 1);
+  refresh();
+});
 
 ui.browse.addEventListener("click", () => {
   historyStack = [];

@@ -157,6 +157,60 @@ def test_perfil_invalido(client, proyecto):
     assert "perfil desconocido" in respuesta.json()["detail"]
 
 
+# busqueda y paginado ------------------------------------------------------
+
+
+def registrar(tmp_path, *nombres):
+    for nombre in nombres:
+        root = tmp_path / nombre
+        root.mkdir(parents=True)
+        (root / "stack.yaml").write_text("services:\n  a:\n    command: echo a\n", encoding="utf-8")
+        registry.add(root)
+
+
+def test_paginado(client, tmp_path):
+    registrar(tmp_path, *(f"app{i:02d}" for i in range(11)))
+
+    primera = client.get("/api/state").json()
+    assert primera["total"] == 11
+    assert primera["pages"] == 2
+    assert len(primera["projects"]) == server.PAGE_SIZE
+
+    segunda = client.get("/api/state?page=2").json()
+    assert len(segunda["projects"]) == 11 - server.PAGE_SIZE
+    ids = {p["id"] for p in primera["projects"]} | {p["id"] for p in segunda["projects"]}
+    assert len(ids) == 11, "ningun proyecto se repite ni se pierde entre paginas"
+
+
+def test_una_pagina_de_mas_cae_en_la_ultima(client, tmp_path):
+    registrar(tmp_path, "sola")
+    datos = client.get("/api/state?page=99").json()
+    assert datos["page"] == 1
+    assert len(datos["projects"]) == 1
+
+
+def test_busqueda_por_nombre_y_por_ruta(client, tmp_path):
+    registrar(tmp_path, "tienda", "blog", "tienda-admin")
+
+    por_nombre = client.get("/api/state?q=tienda").json()
+    assert por_nombre["total"] == 2
+    assert {p["path"].split("\\")[-1].split("/")[-1] for p in por_nombre["projects"]} == {
+        "tienda",
+        "tienda-admin",
+    }
+
+    assert por_nombre["registered"] == 3, "el total registrado no lo mueve el filtro"
+    assert client.get("/api/state?q=TIENDA").json()["total"] == 2, "sin distinguir mayusculas"
+    assert client.get("/api/state?q=nada-de-esto").json()["total"] == 0
+    assert client.get(f"/api/state?q={tmp_path.name}").json()["total"] == 3, "tambien por ruta"
+
+
+def test_la_busqueda_no_acepta_cualquier_cosa(client):
+    assert client.get("/api/state?q=" + "x" * 500).status_code == 422
+    assert client.get("/api/state?page=0").status_code == 422
+    assert client.get("/api/state?size=999").status_code == 422
+
+
 # ciclo de vida ------------------------------------------------------------
 
 

@@ -17,7 +17,26 @@
         Tus stacks locales. Arrancá, apagá, liberá los puertos que quedaron tomados.
       </p>
 
+      <div class="find" id="find" hidden>
+        <label class="find__label" for="search">Buscar</label>
+        <input
+          class="find__input"
+          id="search"
+          type="search"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="nombre o ruta"
+        />
+        <span class="find__count" id="count" role="status"></span>
+      </div>
+
       <div id="projects" class="index" aria-busy="true"></div>
+
+      <nav class="pager" id="pager" aria-label="Paginas de proyectos" hidden>
+        <button class="btn" type="button" data-page="prev">Anterior</button>
+        <span class="pager__at" id="pager-at"></span>
+        <button class="btn" type="button" data-page="next">Siguiente</button>
+      </nav>
 
       <p class="empty" id="empty" hidden>
         Todavía no registraste ningún proyecto. Corré <code>portmaster add</code>
