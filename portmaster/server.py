@@ -145,6 +145,19 @@ class Session:
         self.state = "stopping"
         threading.Thread(target=self.stop, daemon=True).start()
 
+    def restart_async(self, name: str) -> None:
+        """Reinicia un servicio. Como el apagado, no hace esperar al request."""
+        threading.Thread(target=self._restart, args=(name,), daemon=True).start()
+
+    def _restart(self, name: str) -> None:
+        assert self.engine is not None
+        try:
+            self.engine.restart(name)
+        except Exception as exc:  # el hilo no debe morir en silencio
+            self.error = str(exc)
+            self.state = "error"
+            log.warning("reinicio de %s fallo: %s", name, exc)
+
     def stop(self) -> None:
         if self.engine is not None:
             # Apagar mientras arranca: el hilo de arranque es el que sabe que
@@ -328,6 +341,23 @@ def create_app(token: str) -> FastAPI:
             raise HTTPException(404, "ese stack no fue arrancado desde aca")
         if session.state != "stopping":
             session.stop_async()
+        return {"ok": True}
+
+    @app.post(
+        "/api/projects/{pid}/services/{name}/restart",
+        dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)],
+    )
+    def restart(pid: str, name: str) -> dict:
+        with sessions_lock:
+            session = sessions.get(pid)
+        if session is None:
+            raise HTTPException(404, "ese stack no fue arrancado desde aca")
+        if session.state != "running":
+            raise HTTPException(409, "el stack no esta corriendo")
+        if name not in session.stack.services:
+            log.info("reinicio rechazado en %s: servicio %r desconocido", pid, name)
+            raise HTTPException(404, "ese servicio no esta en el stack")
+        session.restart_async(name)
         return {"ok": True}
 
     @app.get(

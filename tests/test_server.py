@@ -244,6 +244,37 @@ def test_apagar_contesta_sin_esperar_al_apagado(client, tmp_path):
     assert esperar(lambda: server.sessions[pid].state == "stopped")
 
 
+def test_reiniciar_un_servicio(client, proyecto):
+    path, port = proyecto
+    pid = registry.project_id(path)
+    client.post(f"/api/projects/{pid}/up", json={})
+
+    sesion = server.sessions[pid]
+    assert esperar(lambda: sesion.state == "running")
+    viejo = sesion.engine.procs[0].popen.pid
+
+    assert client.post(f"/api/projects/{pid}/services/srv/restart").status_code == 200
+    assert esperar(lambda: sesion.engine.procs[0].popen.pid != viejo)
+    assert esperar(lambda: sesion.engine.procs[0].ready)
+    assert sesion.state == "running", "reiniciar un servicio no baja el stack"
+
+
+def test_reiniciar_un_servicio_que_no_existe(client, proyecto):
+    path, _ = proyecto
+    pid = registry.project_id(path)
+    client.post(f"/api/projects/{pid}/up", json={})
+    assert esperar(lambda: server.sessions[pid].state == "running")
+
+    respuesta = client.post(f"/api/projects/{pid}/services/../../etc/restart")
+    assert respuesta.status_code == 404
+
+
+def test_reiniciar_con_el_stack_apagado(client, proyecto):
+    path, _ = proyecto
+    pid = registry.project_id(path)
+    assert client.post(f"/api/projects/{pid}/services/srv/restart").status_code == 404
+
+
 def test_apagar_lo_que_no_arrancamos(client, proyecto):
     path, _ = proyecto
     pid = registry.project_id(path)

@@ -39,10 +39,6 @@ igual, uno detrás del otro. Arrancarlos juntos ahorra la suma de los
 healthchecks, y a cambio entrevera los logs de los primeros segundos.
 `stack.example.yaml` lo prometía por error y ahora dice lo que el runner hace.
 
-**Reiniciar un servicio suelto.** Hoy es todo o nada. Cuando el frontend se
-cuelga, bajar y subir el stack entero levanta también los contenedores que
-estaban bien.
-
 **Autocompletado en el input de ruta.** El explorador cubre el caso, pero
 escribir `A:\Proy` y que sugiera es más rápido cuando ya sabés a dónde vas. El
 endpoint `/api/browse` ya devuelve lo necesario.

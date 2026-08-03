@@ -134,6 +134,10 @@ portmaster serve        # abre http://127.0.0.1:7666
 Estado de cada servicio, arrancar y apagar stacks, liberar puertos tomados por
 procesos ajenos, y logs en vivo por proyecto.
 
+Cada servicio arrancado desde la interfaz trae un `Reiniciar` propio, que baja y
+sube ese solo. Cuando el frontend se cuelga, los contenedores que estaban bien
+no tienen por qué pagarlo.
+
 Los servicios que se pueden abrir en el navegador traen un botón `Abrir`, y la
 tarjeta del proyecto trae el suyo, que lleva al último de la lista que conteste,
 para no buscar cuál de los tres es el frontend. Cuál lo lleva no se adivina por

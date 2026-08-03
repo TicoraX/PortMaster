@@ -172,6 +172,24 @@ function renderService(service, projectId) {
     stateCell.dataset.tone = tone;
   }
 
+  // Solo hay algo que reiniciar si el stack lo arranco esta interfaz, y eso es
+  // justo lo que dice que el servicio tenga estado propio.
+  if (service.state === "ready" || service.state === "starting") {
+    const again = document.createElement("button");
+    again.type = "button";
+    again.className = "btn btn--quiet";
+    again.textContent = "Reiniciar";
+    again.title = `Reiniciar ${service.name} sin tocar el resto del stack`;
+    again.addEventListener("click", () =>
+      act(again, () =>
+        api(`/api/projects/${projectId}/services/${encodeURIComponent(service.name)}/restart`, {
+          method: "POST",
+        }),
+      ),
+    );
+    node.querySelector(".service__act").append(again);
+  }
+
   node.dataset.project = projectId;
   return node;
 }

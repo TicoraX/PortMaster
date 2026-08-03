@@ -158,6 +158,54 @@ def test_un_socket_pelado_no_se_ofrece_para_abrir(tmp_path, free_ports):
         engine.down()
 
 
+def test_reiniciar_un_servicio_no_toca_al_resto(tmp_path, free_ports):
+    a, b = free_ports(2)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          uno:
+            command: {sys.executable} -c "{SERVER.format(port=a)}"
+            port: {a}
+          dos:
+            command: {sys.executable} -c "{SERVER.format(port=b)}"
+            port: {b}
+            needs: [uno]
+        """,
+    )
+    engine = make_runner(stack)
+    try:
+        engine.up()
+        intacto = engine.procs[0].popen.pid
+        viejo = engine.procs[1].popen.pid
+
+        engine.restart("dos")
+
+        assert engine.procs[1].popen.pid != viejo, "no se reinicio"
+        assert engine.procs[1].ready
+        assert engine.procs[0].popen.pid == intacto, "el otro servicio se movio"
+        assert [p.service.name for p in engine.procs] == ["uno", "dos"], "cambio el orden"
+        assert not psutil.pid_exists(viejo) or not psutil.Process(viejo).is_running()
+    finally:
+        engine.down()
+
+
+def test_reiniciar_algo_que_no_esta(tmp_path):
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "print('hola')"
+            detached: true
+        """,
+    )
+    engine = make_runner(stack)
+    engine.up()
+    with pytest.raises(runner.StartupError, match="no esta corriendo"):
+        engine.restart("fantasma")
+
+
 def test_el_comando_de_apagado_corre_al_bajar(tmp_path):
     """Un detached deja algo vivo fuera de nuestro arbol: matar al hijo no
     alcanza, tiene que correr su propio comando de apagado."""

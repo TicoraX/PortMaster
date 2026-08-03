@@ -72,6 +72,7 @@ class Runner:
     _width: int = 8
     _cancel: threading.Event = field(default_factory=threading.Event)
     _down: bool = False
+    _restarting: bool = False
 
     def up(self, profile: str | None = None) -> None:
         """Arranca el perfil en orden. Si algo falla, apaga lo ya levantado."""
@@ -104,10 +105,31 @@ class Runner:
 
     def follow(self) -> None:
         """Sigue imprimiendo logs hasta Ctrl-C o hasta que no quede nada vivo."""
-        while not self._cancel.is_set() and any(p.popen.poll() is None for p in self.procs):
+        while not self._cancel.is_set() and (
+            # Durante un reinicio no queda nadie vivo por un instante, y sin esto
+            # el stack se daria por terminado justo ahi.
+            self._restarting
+            or any(p.popen.poll() is None for p in self.procs)
+        ):
             if not self._drain():
                 time.sleep(POLL)
         self._drain()
+
+    def restart(self, name: str) -> None:
+        """Reinicia un servicio sin tocar el resto del stack."""
+        index = next((i for i, p in enumerate(self.procs) if p.service.name == name), None)
+        if index is None:
+            raise StartupError(f"{name} no esta corriendo en este stack")
+
+        old = self.procs[index]
+        self._restarting = True
+        try:
+            self._stop_one(old)
+            proc = self._spawn_proc(old.service, old.color)
+            self.procs[index] = proc
+        finally:
+            self._restarting = False
+        self._wait_ready(proc)
 
     def down(self) -> None:
         """Apaga en orden inverso al de arranque. Correrlo dos veces no hace nada."""
@@ -115,12 +137,15 @@ class Runner:
             return
         self._down = True
         for proc in reversed(self.procs):
-            if proc.service.stop:
-                self._stop_command(proc)
-            if proc.popen.poll() is None:
-                self._say(proc, "apagando")
-                _terminate_tree(proc.popen.pid)
+            self._stop_one(proc)
         self._drain()
+
+    def _stop_one(self, proc: Proc) -> None:
+        if proc.service.stop:
+            self._stop_command(proc)
+        if proc.popen.poll() is None:
+            self._say(proc, "apagando")
+            _terminate_tree(proc.popen.pid)
 
     def _stop_command(self, proc: Proc) -> None:
         """Apagado propio del servicio.
@@ -154,12 +179,13 @@ class Runner:
 
     def _start(self, service: Service) -> None:
         color = COLORS[len(self.procs) % len(COLORS)]
-        proc = Proc(service, self._spawn(service), color)
-        self.procs.append(proc)
-        self._say(proc, f"$ {service.command}")
+        self.procs.append(self._spawn_proc(service, color))
 
-        thread = threading.Thread(target=self._pump, args=(proc,), daemon=True)
-        thread.start()
+    def _spawn_proc(self, service: Service, color: str) -> Proc:
+        proc = Proc(service, self._spawn(service), color)
+        self._say(proc, f"$ {service.command}")
+        threading.Thread(target=self._pump, args=(proc,), daemon=True).start()
+        return proc
 
     def _spawn(self, service: Service) -> subprocess.Popen:
         # shell=True es deliberado: `npm run dev` y `docker compose up -d` no son
