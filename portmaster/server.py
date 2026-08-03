@@ -101,6 +101,7 @@ class Session:
     state: str = "starting"
     error: str | None = None
     engine: runner.Runner | None = None
+    thread: threading.Thread | None = None
 
     def start(self) -> None:
         # force_terminal=False no es redundante con no_color: Rich mira FORCE_COLOR
@@ -110,7 +111,8 @@ class Session:
             file=self.sink, force_terminal=False, no_color=True, width=160, soft_wrap=True
         )
         self.engine = runner.Runner(self.stack, console=console)
-        threading.Thread(target=self._run, daemon=True).start()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
 
     def _run(self) -> None:
         assert self.engine is not None
@@ -131,6 +133,15 @@ class Session:
 
     def stop(self) -> None:
         if self.engine is not None:
+            # Apagar mientras arranca: el hilo de arranque es el que sabe que
+            # levanto, asi que se le pide que corte y se lo espera. Despues su
+            # `down` ya corrio y este no hace nada.
+            self.engine.cancel()
+            if self.thread is not None:
+                # ponytail: un detached en curso (`docker compose up -d`
+                # construyendo) no se puede cortar, se espera a que termine. Si
+                # alguna vez molesta, matar el arbol del comando detached.
+                self.thread.join(runner.STOP_TIMEOUT)
             self.engine.down()
         self.state = "stopped"
 

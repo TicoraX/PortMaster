@@ -190,6 +190,22 @@ def test_arranque_y_apagado(client, proyecto):
     assert esperar(lambda: ports.is_free(port)), "el puerto quedo tomado"
 
 
+def test_apagar_mientras_arranca_no_deja_huerfanos(client, proyecto):
+    """El apagado llega con el proceso arriba pero todavia no listo. Sin cortar
+    el arranque, el hilo sigue detras del apagado y el servicio queda vivo."""
+    from portmaster import ports
+
+    path, port = proyecto
+    pid = registry.project_id(path)
+    assert client.post(f"/api/projects/{pid}/up", json={}).status_code == 200
+
+    sesion = server.sessions[pid]
+    assert esperar(lambda: sesion.engine is not None and sesion.engine.procs)
+
+    assert client.post(f"/api/projects/{pid}/down").status_code == 200
+    assert esperar(lambda: ports.is_free(port)), "el arranque siguio detras del apagado"
+
+
 def test_arranque_doble_choca(client, proyecto):
     path, _ = proyecto
     pid = registry.project_id(path)

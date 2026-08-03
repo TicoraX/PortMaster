@@ -70,6 +70,8 @@ class Runner:
     procs: list[Proc] = field(default_factory=list)
     _logs: queue.Queue = field(default_factory=queue.Queue)
     _width: int = 8
+    _cancel: threading.Event = field(default_factory=threading.Event)
+    _down: bool = False
 
     def up(self, profile: str | None = None) -> None:
         """Arranca el perfil en orden. Si algo falla, apaga lo ya levantado."""
@@ -77,21 +79,41 @@ class Runner:
         self._width = max(len(s.name) for s in services)
         try:
             for service in services:
+                self._abort_if_cancelled()
                 self._start(service)
                 self._wait_ready(self.procs[-1])
         except BaseException:
             self.down()
             raise
 
+    def cancel(self) -> None:
+        """Aborta un arranque en curso desde otro hilo.
+
+        Sin esto, apagar mientras arranca no apaga nada: la lista de procesos
+        todavia esta vacia y el arranque sigue levantando servicios detras del
+        apagado. El propio `up` es el que baja lo que alcanzo a levantar.
+
+        Tambien corta `follow`, para que el hilo termine y se lo pueda esperar
+        sin importar en que fase estaba.
+        """
+        self._cancel.set()
+
+    def _abort_if_cancelled(self) -> None:
+        if self._cancel.is_set():
+            raise StartupError("apagado pedido durante el arranque")
+
     def follow(self) -> None:
         """Sigue imprimiendo logs hasta Ctrl-C o hasta que no quede nada vivo."""
-        while any(p.popen.poll() is None for p in self.procs):
+        while not self._cancel.is_set() and any(p.popen.poll() is None for p in self.procs):
             if not self._drain():
                 time.sleep(POLL)
         self._drain()
 
     def down(self) -> None:
-        """Apaga en orden inverso al de arranque."""
+        """Apaga en orden inverso al de arranque. Correrlo dos veces no hace nada."""
+        if self._down:
+            return
+        self._down = True
         for proc in reversed(self.procs):
             if proc.service.stop:
                 self._stop_command(proc)
@@ -177,6 +199,7 @@ class Runner:
 
         deadline = time.monotonic() + self.timeout
         while True:
+            self._abort_if_cancelled()
             self._drain()
             if self._is_ready(proc):
                 proc.ready = True
