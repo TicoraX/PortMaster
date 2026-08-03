@@ -224,6 +224,16 @@ function updateCard(entry, project) {
   root.querySelector(".state").dataset.tone = tone;
   root.querySelector(".state__text").textContent = label;
 
+  // El ultimo abrible, no el primero: el orden de arranque va de los
+  // contenedores al frontend, y lo que uno quiere mirar es el final.
+  const abrible = [...project.services].reverse().find((s) => s.openable && s.port);
+  const open = root.querySelector(".project__open");
+  open.hidden = !abrible;
+  if (abrible) {
+    open.href = `http://localhost:${abrible.port}`;
+    open.title = `Abrir ${abrible.name} en http://localhost:${abrible.port}`;
+  }
+
   const error = root.querySelector(".project__error");
   error.textContent = project.error || "";
   error.hidden = !project.error;

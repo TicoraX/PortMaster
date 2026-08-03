@@ -45,6 +45,7 @@ NODE_SCRIPTS = ("dev", "start:dev", "serve", "start")
 # Subcarpetas donde vive el frontend de un monorepo, y los grupos cuyos hijos se
 # revisan uno por uno.
 NODE_DIRS = ("frontend", "web", "client", "ui", "front", "site")
+PYTHON_DIRS = ("backend", "api", "server")
 WORKSPACE_DIRS = ("apps", "packages", "services")
 
 # Dependencias que delatan un servidor de desarrollo de verdad.
@@ -298,20 +299,34 @@ def _valid(value: object) -> int | None:
 
 
 def _python(root: Path) -> list[Service]:
-    if (root / "manage.py").is_file():
-        return [_served("api", "python manage.py runserver", root)]
+    at_root = _python_at(root, "api")
+    if at_root is not None:
+        # Igual que en Node: si la raiz es el proyecto, no se baja una vuelta.
+        return [at_root]
+
+    found = []
+    for path in _subprojects(root, PYTHON_DIRS):
+        service = _python_at(path, path.name)
+        if service is not None:
+            found.append(service)
+    return found
+
+
+def _python_at(path: Path, name: str) -> Service | None:
+    if (path / "manage.py").is_file():
+        return _served(name, "python manage.py runserver", path)
 
     declared = "\n".join(
-        _read(root / name)
-        for name in ("pyproject.toml", "requirements.txt", "Pipfile", "poetry.lock", "uv.lock")
+        _read(path / archivo)
+        for archivo in ("pyproject.toml", "requirements.txt", "Pipfile", "poetry.lock", "uv.lock")
     ).lower()
     if "fastapi" not in declared and "uvicorn" not in declared:
-        return []
+        return None
 
-    module = _asgi_module(root)
+    module = _asgi_module(path)
     if module is None:
-        return []
-    return [_served("api", f"uvicorn {module}:app --reload", root)]
+        return None
+    return _served(name, f"uvicorn {module}:app --reload", path)
 
 
 def _asgi_module(root: Path) -> str | None:
@@ -335,20 +350,20 @@ def _node(root: Path) -> list[Service]:
         return [at_root]
 
     found = []
-    for path in _node_dirs(root):
+    for path in _subprojects(root, NODE_DIRS):
         service = _package(path, root, path.name, strict=True)
         if service is not None:
             found.append(service)
     return found
 
 
-def _node_dirs(root: Path):
-    """Candidatos a frontend, una sola vuelta.
+def _subprojects(root: Path, names: tuple[str, ...]):
+    """Subcarpetas candidatas, una sola vuelta.
 
     Sin recursion a proposito: un scan profundo entra en `node_modules` y en cada
     template de ejemplo que tenga el repo.
     """
-    for name in NODE_DIRS:
+    for name in names:
         yield root / name
     for group in WORKSPACE_DIRS:
         parent = root / group

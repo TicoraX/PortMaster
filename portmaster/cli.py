@@ -172,6 +172,39 @@ def up_cmd(
         engine.down()
 
 
+@app.command("open")
+def open_cmd(
+    port: int = typer.Argument(None, min=1, max=65535, help="Puerto, si ya lo sabes."),
+) -> None:
+    """Abre en el navegador el primer servicio del stack que conteste HTTP."""
+    if port is None:
+        try:
+            stack = detect.stack_for(Path.cwd())
+        except config.ConfigError as exc:
+            err.print(f"{exc}\nPasa el puerto como argumento: portmaster open 3000")
+            raise typer.Exit(1)
+        # En orden de arranque: los contenedores primero, el frontend al final.
+        # Se recorre al reves porque lo que uno quiere abrir suele ser lo ultimo.
+        candidates = [s.port for s in reversed(stack.resolve()) if s.port]
+    else:
+        candidates = [port]
+
+    for candidate in candidates:
+        if runner.speaks_http(candidate):
+            url = f"http://localhost:{candidate}"
+            console.print(f"Abriendo [bold]{url}[/]")
+            import webbrowser
+
+            webbrowser.open(url)
+            return
+
+    err.print(
+        "Ningun puerto del stack contesta HTTP. "
+        "Arrancalo con 'portmaster up' o pasa el puerto como argumento."
+    )
+    raise typer.Exit(1)
+
+
 @app.command("add")
 def add_cmd(
     path: str = typer.Argument(".", help="Directorio del proyecto."),

@@ -204,6 +204,30 @@ def test_uvicorn_necesita_el_modulo_con_app(tmp_path):
     assert detect.detect(tmp_path).services["api"].command == "uvicorn src.main:app --reload"
 
 
+def test_backend_python_en_subcarpeta(tmp_path):
+    write(tmp_path, "backend/requirements.txt", "fastapi\nuvicorn\n")
+    write(tmp_path, "backend/main.py", "from fastapi import FastAPI\napp = FastAPI()\n")
+
+    servicio = detect.detect(tmp_path).services["backend"]
+    assert servicio.command == "uvicorn main:app --reload"
+    assert servicio.cwd == tmp_path / "backend"
+
+
+def test_backend_python_en_workspace(tmp_path):
+    write(tmp_path, "services/api/manage.py", "import django")
+    assert detect.detect(tmp_path).services["api"].cwd == tmp_path / "services" / "api"
+
+
+def test_la_raiz_python_gana_y_no_baja(tmp_path):
+    """Igual que en Node: si la raiz es el proyecto, los hijos no entran."""
+    write(tmp_path, "manage.py", "import django")
+    write(tmp_path, "backend/manage.py", "import django")
+
+    stack = detect.detect(tmp_path)
+    assert list(stack.services) == ["api"]
+    assert stack.services["api"].cwd == tmp_path
+
+
 def test_orden_y_dependencias(tmp_path):
     write(tmp_path, "compose.yaml", "services:\n  db:\n    image: postgres\n")
     write(tmp_path, "manage.py", "import django")

@@ -79,6 +79,9 @@ su carpeta. Si la raíz sí tiene `package.json`, gana ese y no se baja: en un
 monorepo su script `dev` suele ser el orquestador (turbo, nx) y arrancar además
 los hijos duplicaría todo.
 
+El backend Python sigue la misma regla, en `backend/`, `api/`, `server/` y los
+hijos de los mismos grupos.
+
 En las subcarpetas hace falta además una dependencia que declare un servidor de
 desarrollo (vite, next, nest, astro, nodemon y compañía). Un workspace tiene
 tantas librerías como apps, y una librería con `dev: tsc --watch` entraría como
@@ -103,6 +106,18 @@ están declarados en el archivo.
 `portmaster init` escribe lo detectado como `stack.yaml` para editarlo a mano.
 No sobreescribe uno existente.
 
+### Abrir el stack en el navegador
+
+```bash
+portmaster open         # el ultimo servicio del stack que conteste HTTP
+portmaster open 3000    # o el puerto que le pases
+```
+
+Sirve cuando el stack ya está corriendo en otra terminal. Recorre los puertos
+en orden inverso al de arranque, porque lo que uno quiere mirar suele ser el
+frontend, y abre el primero que contesta. Una base de datos no contesta HTTP,
+así que nunca es el elegido.
+
 ### Interfaz web
 
 Cuando tenés varios proyectos, el CLI se queda corto: trabaja sobre el
@@ -119,9 +134,11 @@ portmaster serve        # abre http://127.0.0.1:7666
 Estado de cada servicio, arrancar y apagar stacks, liberar puertos tomados por
 procesos ajenos, y logs en vivo por proyecto.
 
-Los servicios que se pueden abrir en el navegador traen un botón `Abrir`. Cuál
-lo lleva no se adivina por el nombre: cuando el servicio queda listo, PortMaster
-le hace una petición al puerto. Si contesta HTTP, es abrible. Un `404` cuenta,
+Los servicios que se pueden abrir en el navegador traen un botón `Abrir`, y la
+tarjeta del proyecto trae el suyo, que lleva al último de la lista que conteste,
+para no buscar cuál de los tres es el frontend. Cuál lo lleva no se adivina por
+el nombre: cuando el servicio queda listo, PortMaster le hace una petición al
+puerto. Si contesta HTTP, es abrible. Un `404` cuenta,
 porque la mayoría de las APIs no sirven nada en la raíz; lo que descarta al
 servicio es que no conteste, que es el caso de una base de datos.
 

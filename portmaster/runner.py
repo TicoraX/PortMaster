@@ -205,7 +205,7 @@ class Runner:
                 proc.ready = True
                 port = proc.known_port
                 if port:
-                    proc.http = _speaks_http(port)
+                    proc.http = speaks_http(port)
                 detail = f" ({port})" if port else ""
                 if proc.http:
                     detail += f" · http://localhost:{port}"
@@ -296,7 +296,7 @@ def _why(proc: Proc) -> str:
 HTTP_PROBE_TIMEOUT = 1.0
 
 
-def _speaks_http(port: int) -> bool:
+def speaks_http(port: int) -> bool:
     """Si el puerto contesta HTTP, y por lo tanto se puede abrir en el navegador.
 
     Un postgres listo no es algo que abrir, y saber cual servicio es el frontend
