@@ -15,11 +15,10 @@ correrlo con Docker Desktop abierto: arrancar Fitness, apretar `Apagar`, y que
 `docker ps` quede vacío. Hasta que eso pase, el botón está probado contra un
 proceso de mentira, no contra un contenedor.
 
-**La interfaz en un Chrome de verdad.** Todo lo visual se validó con
-`chrome --headless --screenshot`, que renderiza igual pero no clickea. Sin
-verificar a mano: el explorador de carpetas navegando (entrar, `Subir`,
-`Volver`, `Registrar esta carpeta`), y el botón `Abrir` llevando a la pestaña
-nueva.
+**El botón `Abrir` abriendo pestaña.** El enlace es correcto (`href` al puerto,
+`target="_blank"`, `rel="noopener noreferrer"`) y el destino contesta 200, pero
+en headless la pestaña nueva no se puede observar. Un click en un Chrome de
+verdad lo cierra.
 
 ## Techos marcados en el código
 

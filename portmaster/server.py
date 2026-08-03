@@ -125,7 +125,11 @@ class Session:
                 # en el acto y el stack diria "detenido" con todo arriba.
                 return
             self.engine.follow()
-            self.state = "stopped"
+            # Si el apagado ya empezo, el que manda es el: `follow` vuelve en el
+            # acto al cancelarse y "detenido" taparia el "apagando" mientras el
+            # comando de apagado todavia corre.
+            if self.state != "stopping":
+                self.state = "stopped"
         except Exception as exc:  # el hilo no debe morir en silencio
             self.error = str(exc)
             self.state = "error"

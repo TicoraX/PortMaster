@@ -7,3 +7,4 @@ dist/
 venv/
 .pytest_cache/
 .env
+.gstack/
