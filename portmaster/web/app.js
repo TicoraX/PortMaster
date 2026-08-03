@@ -25,6 +25,7 @@ const ui = {
   tplService: document.getElementById("tpl-service"),
   orphans: document.getElementById("orphans"),
   orphansList: document.getElementById("orphans-list"),
+  orphansHeading: document.getElementById("orphans-heading"),
 };
 
 const cards = new Map(); // id -> {root, logSeq, logsOpen}
@@ -378,13 +379,30 @@ async function refreshOrphans() {
   try {
     const data = await api("/api/ports/orphans");
     const list = data.orphans || [];
-    ui.orphans.hidden = list.length === 0;
-    if (list.length === 0) return;
 
-    // Reconstruye la lista solo si cambió el contenido real.
-    const nextIds = list.map((o) => o.port).join(",");
+    // Siempre visible despues del primer check: el estado vacio le dice al
+    // usuario que la seccion existe y que todo esta limpio.
+    ui.orphans.hidden = false;
+
+    const nextIds = list.map((o) => o.port).join(",") || "__empty__";
     if (ui.orphansList.dataset.ids === nextIds) return;
     ui.orphansList.dataset.ids = nextIds;
+
+    // Actualiza el titulo con el conteo cuando hay intrusos.
+    ui.orphansHeading.textContent = list.length
+      ? `Procesos intrusos (${list.length})`
+      : "Procesos intrusos";
+
+    if (list.length === 0) {
+      const empty = document.createElement("li");
+      empty.className = "orphan orphan--empty";
+      const msg = document.createElement("span");
+      msg.className = "orphan__empty-msg";
+      msg.textContent = "Ningun proceso intruso detectado";
+      empty.append(msg);
+      ui.orphansList.replaceChildren(empty);
+      return;
+    }
 
     ui.orphansList.replaceChildren(
       ...list.map((orphan) => {
@@ -416,7 +434,6 @@ async function refreshOrphans() {
         kill.addEventListener("click", () => {
           act(kill, async () => {
             await api(`/api/ports/${orphan.port}/kill`, { method: "POST" });
-            // Fuerza re-render en el proximo tick.
             delete ui.orphansList.dataset.ids;
             await refreshOrphans();
           });

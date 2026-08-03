@@ -958,6 +958,17 @@ body {
   cursor: default;
 }
 
+.orphan--empty {
+  grid-template-columns: 1fr;
+  padding: var(--space-3) var(--space-4);
+}
+
+.orphan__empty-msg {
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+  font-style: italic;
+}
+
 /* mobile ------------------------------------------------------------------ */
 
 @media (max-width: 34rem) {
