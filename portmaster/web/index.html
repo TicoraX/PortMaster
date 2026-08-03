@@ -18,16 +18,38 @@
       </p>
 
       <div class="find" id="find" hidden>
-        <label class="find__label" for="search">Buscar</label>
-        <input
-          class="find__input"
-          id="search"
-          type="search"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="nombre o ruta"
-        />
-        <span class="find__count" id="count" role="status"></span>
+        <div class="find__bar">
+          <svg class="find__icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none" />
+          </svg>
+          <input
+            class="find__input"
+            id="search"
+            type="search"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Buscar por nombre o ruta…"
+          />
+          <kbd class="kbd" title="Presioná / para buscar">/</kbd>
+          <span class="find__count" id="count" role="status"></span>
+        </div>
+        <div class="filter-chips" id="filter-chips" role="tablist" aria-label="Filtrar por estado">
+          <button class="chip chip--active" type="button" data-status="" role="tab" aria-selected="true">
+            <span>Todos</span>
+          </button>
+          <button class="chip" type="button" data-status="running" role="tab" aria-selected="false">
+            <span class="dot" data-tone="good" aria-hidden="true"></span>
+            <span>Corriendo</span>
+          </button>
+          <button class="chip" type="button" data-status="stopped" role="tab" aria-selected="false">
+            <span class="dot" data-tone="neutral" aria-hidden="true"></span>
+            <span>Detenidos</span>
+          </button>
+          <button class="chip" type="button" data-status="error" role="tab" aria-selected="false">
+            <span class="dot" data-tone="bad" aria-hidden="true"></span>
+            <span>Con error</span>
+          </button>
+        </div>
       </div>
 
       <div id="projects" class="index" aria-busy="true"></div>
@@ -42,6 +64,12 @@
         Todavía no registraste ningún proyecto. Corré <code>portmaster add</code>
         dentro de una carpeta con <code>stack.yaml</code>, o pegá la ruta acá abajo.
       </p>
+
+      <section class="orphans" id="orphans" hidden>
+        <h2 class="orphans__heading">Procesos intrusos</h2>
+        <p class="orphans__desc">Están ocupando puertos de tus proyectos pero no los arrancó PortMaster. Podés cerrarlos desde acá.</p>
+        <ul class="orphans__list" id="orphans-list"></ul>
+      </section>
 
       <form class="enroll" id="enroll">
         <label class="enroll__label" for="path">Registrar un proyecto</label>
@@ -87,36 +115,45 @@
     <p class="flash" id="flash" role="alert" hidden></p>
 
     <template id="tpl-project">
-      <article class="project">
+      <article class="project" data-expanded="false">
         <div class="project__head">
-          <h2 class="project__name"></h2>
-          <p class="state"><span class="dot"></span><span class="state__text"></span></p>
-          <a class="btn btn--open project__open" target="_blank" rel="noopener noreferrer" hidden>
-            Abrir ↗
-          </a>
-          <button class="btn btn--quiet project__drop" type="button" data-act="drop">
-            Quitar
-          </button>
-        </div>
-        <p class="project__path"></p>
-
-        <p class="project__error" hidden></p>
-
-        <ul class="services"></ul>
-
-        <div class="project__actions">
-          <label class="profile">
-            <span class="profile__label">Perfil</span>
-            <select class="profile__select"></select>
-          </label>
-          <button class="btn btn--primary" type="button" data-act="up">Arrancar</button>
-          <button class="btn" type="button" data-act="down">Apagar</button>
-          <button class="btn btn--quiet" type="button" data-act="logs" aria-expanded="false">
-            Logs
-          </button>
+          <div class="project__title">
+            <h2 class="project__name"></h2>
+            <p class="state"><span class="dot"></span><span class="state__text"></span></p>
+          </div>
+          <div class="project__head-actions">
+            <a class="btn btn--open project__open" target="_blank" rel="noopener noreferrer" hidden>
+              Abrir ↗
+            </a>
+            <button class="btn btn--primary" type="button" data-act="up">Arrancar</button>
+            <button class="btn" type="button" data-act="down">Apagar</button>
+            <button class="btn btn--quiet project__toggle" type="button" aria-expanded="false" aria-label="Detalles">
+              <span class="project__toggle-text">Detalles</span>
+              <span class="chevron" aria-hidden="true">▼</span>
+            </button>
+          </div>
         </div>
 
-        <pre class="logs" hidden tabindex="0"></pre>
+        <div class="project__details">
+          <div class="project__body">
+            <p class="project__path"></p>
+            <p class="project__error" hidden></p>
+            <ul class="services"></ul>
+            <div class="project__actions">
+              <label class="profile">
+                <span class="profile__label">Perfil</span>
+                <select class="profile__select"></select>
+              </label>
+              <button class="btn btn--quiet" type="button" data-act="logs" aria-expanded="false">
+                Logs
+              </button>
+              <button class="btn btn--quiet project__drop" type="button" data-act="drop">
+                Quitar proyecto
+              </button>
+            </div>
+            <pre class="logs" hidden tabindex="0"></pre>
+          </div>
+        </div>
       </article>
     </template>
 

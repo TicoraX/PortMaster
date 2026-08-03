@@ -35,7 +35,7 @@ log = logging.getLogger("portmaster.server")
 
 WEB = Path(__file__).parent / "web"
 LOG_LINES = 500
-PAGE_SIZE = 8
+PAGE_SIZE = 4
 
 # Cuotas por ventana de 15 minutos. La interfaz sondea el estado cada 2s, que da
 # unas 450 peticiones por ventana: un limite global de 100 la romperia en el uso
@@ -132,7 +132,7 @@ class Session:
             if self.state != "stopping":
                 self.state = "stopped"
         except Exception as exc:  # el hilo no debe morir en silencio
-            self.error = str(exc)
+            self.error = runner.clean_error_message(str(exc))
             self.state = "error"
             log.warning("stack %s fallo: %s", self.stack.name, exc)
 
@@ -155,7 +155,7 @@ class Session:
         try:
             self.engine.restart(name)
         except Exception as exc:  # el hilo no debe morir en silencio
-            self.error = str(exc)
+            self.error = runner.clean_error_message(str(exc))
             self.state = "error"
             log.warning("reinicio de %s fallo: %s", name, exc)
 
@@ -276,11 +276,14 @@ def create_app(token: str) -> FastAPI:
     @app.get("/api/state", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
     def state(
         q: str = Query("", max_length=200),
+        status: str = Query("", max_length=20),
         page: int = Query(1, ge=1),
         size: int = Query(PAGE_SIZE, ge=1, le=50),
     ) -> dict:
         known = registry.paths()
         paths = _matching(known, q)
+        if status:
+            paths = [p for p in paths if _status_match(p, status)]
         total = len(paths)
         pages = max(1, -(-total // size))
         page = min(page, pages)
@@ -427,6 +430,51 @@ def create_app(token: str) -> FastAPI:
         log.info("proceso cerrado: puerto=%d pid=%d nombre=%s", port, status.pid, status.name)
         return {"ok": True}
 
+    @app.get("/api/ports/orphans", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
+    def orphans() -> dict:
+        """Puertos de proyectos registrados ocupados por procesos que no lanzamos.
+
+        Un proceso es intruso si su puerto aparece en el stack de algun proyecto
+        registrado, el servicio no esta corriendo en nuestra sesion, y hay un
+        proceso externo escuchando en ese puerto.
+        """
+        result = []
+        for path in registry.paths():
+            pid = registry.project_id(path)
+            try:
+                stack = detect.stack_for(path)
+            except config.ConfigError:
+                continue
+
+            with sessions_lock:
+                session = sessions.get(pid)
+            running = session.service_states() if session else {}
+            scanned = ports.scan_many([s.port for s in stack.services.values() if s.port])
+
+            for svc in stack.services.values():
+                if not svc.port:
+                    continue
+                state = running.get(svc.name, "stopped")
+                status = scanned.get(svc.port)
+                if status is None or status.free:
+                    continue
+                # Si el servicio esta corriendo, el proceso es nuestro.
+                if state != "stopped":
+                    continue
+                if status.pid is None:
+                    continue
+                result.append({
+                    "port": svc.port,
+                    "project": stack.name or path.name,
+                    "pid": status.pid,
+                    "name": status.name or "desconocido",
+                    "cmd": (status.cmdline or "")[:120] or None,
+                    "create_time": status.create_time,
+                })
+
+        result.sort(key=lambda x: x["port"])
+        return {"orphans": result}
+
     return app
 
 
@@ -530,6 +578,21 @@ def _matching(paths: list[Path], needle: str) -> list[Path]:
     if not needle:
         return paths
     return [p for p in paths if needle in p.name.lower() or needle in str(p).lower()]
+
+
+def _status_match(path: Path, wanted: str) -> bool:
+    """Filtra por estado general del proyecto."""
+    pid = registry.project_id(path)
+    with sessions_lock:
+        session = sessions.get(pid)
+    state = session.state if session else "stopped"
+    if wanted == "running":
+        return state in ("starting", "running")
+    if wanted == "stopped":
+        return state == "stopped"
+    if wanted == "error":
+        return state in ("error", "invalid")
+    return True
 
 
 def _project_view(path: Path) -> dict:

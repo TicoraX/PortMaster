@@ -23,6 +23,8 @@ const ui = {
   pickerNote: document.getElementById("picker-note"),
   tplProject: document.getElementById("tpl-project"),
   tplService: document.getElementById("tpl-service"),
+  orphans: document.getElementById("orphans"),
+  orphansList: document.getElementById("orphans-list"),
 };
 
 const cards = new Map(); // id -> {root, logSeq, logsOpen}
@@ -31,6 +33,7 @@ let flashTimer = null;
 // Debajo de esto el buscador estorba mas de lo que ayuda.
 const PAGE_MIN = 5;
 let query = "";
+let statusFilter = "";
 let page = 1;
 
 /* token ------------------------------------------------------------------- */
@@ -206,8 +209,18 @@ function renderService(service, projectId) {
 
 function buildCard(project) {
   const root = ui.tplProject.content.firstElementChild.cloneNode(true);
-  const entry = { root, logSeq: 0, logsOpen: false };
+  const entry = { root, logSeq: 0, logsOpen: false, expanded: false, userToggled: false };
   const logs = root.querySelector(".logs");
+
+  const toggleBtn = root.querySelector(".project__toggle");
+  if (toggleBtn) {
+    toggleBtn.addEventListener("click", () => {
+      entry.userToggled = true;
+      entry.expanded = !entry.expanded;
+      root.setAttribute("data-expanded", String(entry.expanded));
+      toggleBtn.setAttribute("aria-expanded", String(entry.expanded));
+    });
+  }
 
   root.querySelector('[data-act="up"]').addEventListener("click", (event) => {
     const profile = root.querySelector(".profile__select").value || null;
@@ -247,6 +260,13 @@ function updateCard(entry, project) {
   const { root } = entry;
   root.querySelector(".project__name").textContent = project.name;
   root.querySelector(".project__path").textContent = project.path;
+
+  if (!entry.userToggled) {
+    entry.expanded = project.state === "running" || project.state === "starting" || Boolean(project.error);
+    root.setAttribute("data-expanded", String(entry.expanded));
+    const toggleBtn = root.querySelector(".project__toggle");
+    if (toggleBtn) toggleBtn.setAttribute("aria-expanded", String(entry.expanded));
+  }
 
   const [label, tone] = PROJECT_LABELS[project.state] || PROJECT_LABELS.stopped;
   root.querySelector(".state").dataset.tone = tone;
@@ -317,13 +337,11 @@ async function pullLogs(id, entry) {
 function render(projects, data) {
   // Sin resultados con un filtro puesto no es lo mismo que no tener proyectos:
   // el cartel de "registrá el primero" ahi seria mentira.
-  ui.empty.hidden = projects.length > 0 || Boolean(query);
+  ui.empty.hidden = projects.length > 0 || Boolean(query) || Boolean(statusFilter);
 
-  // El buscador aparece cuando hay algo que buscar. Con tres proyectos, buscar
-  // es mas trabajo que mirar.
-  const searchable = data.registered > PAGE_MIN || Boolean(query);
-  ui.find.hidden = !searchable;
-  ui.count.textContent = query
+  // El buscador y los chips se muestran siempre que haya al menos un proyecto registrado.
+  ui.find.hidden = data.registered === 0;
+  ui.count.textContent = query || statusFilter
     ? `${data.total} ${data.total === 1 ? "coincidencia" : "coincidencias"}`
     : "";
 
@@ -356,10 +374,71 @@ function render(projects, data) {
 
 /* ciclo ------------------------------------------------------------------- */
 
+async function refreshOrphans() {
+  try {
+    const data = await api("/api/ports/orphans");
+    const list = data.orphans || [];
+    ui.orphans.hidden = list.length === 0;
+    if (list.length === 0) return;
+
+    // Reconstruye la lista solo si cambió el contenido real.
+    const nextIds = list.map((o) => o.port).join(",");
+    if (ui.orphansList.dataset.ids === nextIds) return;
+    ui.orphansList.dataset.ids = nextIds;
+
+    ui.orphansList.replaceChildren(
+      ...list.map((orphan) => {
+        const li = document.createElement("li");
+        li.className = "orphan";
+
+        const portTag = document.createElement("span");
+        portTag.className = "orphan__port";
+        portTag.textContent = `:${orphan.port}`;
+
+        const info = document.createElement("div");
+        info.className = "orphan__info";
+
+        const name = document.createElement("div");
+        name.className = "orphan__name";
+        name.textContent = `${orphan.name}  ·  ${orphan.project}`;
+
+        const meta = document.createElement("div");
+        meta.className = "orphan__meta";
+        meta.textContent = orphan.cmd ? orphan.cmd : `pid ${orphan.pid}`;
+        if (!orphan.cmd) meta.textContent = `pid ${orphan.pid}`;
+
+        info.append(name, meta);
+
+        const kill = document.createElement("button");
+        kill.className = "orphan__kill";
+        kill.textContent = "Cerrar";
+        kill.type = "button";
+        kill.addEventListener("click", () => {
+          act(kill, async () => {
+            await api(`/api/ports/${orphan.port}/kill`, { method: "POST" });
+            // Fuerza re-render en el proximo tick.
+            delete ui.orphansList.dataset.ids;
+            await refreshOrphans();
+          });
+        });
+
+        li.append(portTag, info, kill);
+        return li;
+      }),
+    );
+  } catch {
+    // Fallo silencioso: la seccion de intrusos no es critica.
+  }
+}
+
+const ORPHAN_EVERY = 4; // cada N ciclos de POLL_MS
+let orphanTick = 0;
+
 async function refresh() {
   try {
     const params = new URLSearchParams({ page: String(page) });
     if (query) params.set("q", query);
+    if (statusFilter) params.set("status", statusFilter);
     const data = await api(`/api/state?${params}`);
     render(data.projects, data);
     const n = data.registered;
@@ -369,6 +448,8 @@ async function refresh() {
     ui.connection.textContent = `sin conexión · ${error.message}`;
     ui.connection.dataset.down = "true";
   }
+  orphanTick++;
+  if (orphanTick % ORPHAN_EVERY === 1) await refreshOrphans();
 }
 
 /* explorador de carpetas -------------------------------------------------- */
@@ -469,6 +550,41 @@ ui.pager.addEventListener("click", (event) => {
   if (!move) return;
   page = move === "next" ? page + 1 : Math.max(1, page - 1);
   refresh();
+});
+
+const filterChips = document.getElementById("filter-chips");
+if (filterChips) {
+  filterChips.addEventListener("click", (event) => {
+    const btn = event.target.closest("button[data-status]");
+    if (!btn) return;
+    statusFilter = btn.dataset.status;
+    for (const chip of filterChips.querySelectorAll(".chip")) {
+      chip.classList.toggle("chip--active", chip === btn);
+    }
+    page = 1;
+    refresh();
+  });
+}
+
+document.addEventListener("keydown", (event) => {
+  const tag = document.activeElement ? document.activeElement.tagName : "";
+  const isInput = ["INPUT", "TEXTAREA", "SELECT"].includes(tag);
+  if (event.key === "/" && !isInput) {
+    event.preventDefault();
+    ui.search.focus();
+    ui.search.select();
+  } else if (event.key === "Escape" && document.activeElement === ui.search) {
+    ui.search.blur();
+  } else if (!isInput && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+    if (ui.pager.hidden) return;
+    if (event.key === "ArrowLeft" && page > 1) {
+      page--;
+      refresh();
+    } else if (event.key === "ArrowRight") {
+      page++;
+      refresh();
+    }
+  }
 });
 
 ui.browse.addEventListener("click", () => {
