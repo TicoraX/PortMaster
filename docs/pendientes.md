@@ -23,22 +23,10 @@ nueva.
 
 ## Defectos conocidos
 
-**El suite deja procesos huérfanos.** Después de que termina `pytest`, quedan
-vivos hasta 60 segundos los servidores falsos de los tests, sosteniendo su
-puerto. Se ven con `portmaster ports` y se cierran con `portmaster free`. Algún
-camino de teardown no está apagando el árbol. Es exactamente el bug que esta
-herramienta existe para cazar, así que arreglarlo vale más que el minuto que
-tarda.
-
 **`Apagar` bloquea el request.** `docker compose stop` tarda entre 10 y 30
 segundos con varios contenedores, y la petición HTTP espera todo eso con el
 botón en estado ocupado. La salida es mandarlo a un hilo y agregar un estado
 `stopping` que la interfaz sepa mostrar, igual que ya hace con `starting`.
-
-**`stack.example.yaml` promete arranque en paralelo.** Dice "Sin `needs`,
-arranque en paralelo" y el runner arranca siempre secuencial. O se corrige la
-línea, o se implementa: los servicios sin dependencias entre sí no tienen por
-qué esperarse. Lo segundo cambia el orden de los logs y hay que pensarlo.
 
 ## Techos marcados en el código
 
@@ -67,6 +55,11 @@ patrón ya escrito, aplicado a `_python`.
 así que arranca entero o nada. Un perfil obvio saldría del propio compose
 (`profiles:` ya existe ahí) y otro sería "solo lo que no es contenedor", para
 laburar con el front sin levantar la infra.
+
+**Arranque en paralelo.** Los servicios sin dependencias entre sí se esperan
+igual, uno detrás del otro. Arrancarlos juntos ahorra la suma de los
+healthchecks, y a cambio entrevera los logs de los primeros segundos.
+`stack.example.yaml` lo prometía por error y ahora dice lo que el runner hace.
 
 **Reiniciar un servicio suelto.** Hoy es todo o nada. Cuando el frontend se
 cuelga, bajar y subir el stack entero levanta también los contenedores que
