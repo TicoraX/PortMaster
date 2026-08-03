@@ -213,6 +213,35 @@ def test_arranque_doble_choca(client, proyecto):
     assert client.post(f"/api/projects/{pid}/up", json={}).status_code == 409
 
 
+def test_apagar_contesta_sin_esperar_al_apagado(client, tmp_path):
+    """`docker compose stop` tarda decenas de segundos: el request no los espera."""
+    root = tmp_path / "lento"
+    root.mkdir()
+    (root / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        services:
+          contenedores:
+            command: {sys.executable} -c "print('arriba')"
+            detached: true
+            stop: {sys.executable} -c "import time; time.sleep(3)"
+        """),
+        encoding="utf-8",
+    )
+    registry.add(root)
+    pid = client.get("/api/state").json()["projects"][0]["id"]
+
+    assert client.post(f"/api/projects/{pid}/up", json={}).status_code == 200
+    assert esperar(lambda: server.sessions[pid].state == "running")
+
+    empezo = time.monotonic()
+    assert client.post(f"/api/projects/{pid}/down").status_code == 200
+    assert time.monotonic() - empezo < 2, "el request espero al comando de apagado"
+
+    proyecto = client.get("/api/state").json()["projects"][0]
+    assert proyecto["state"] == "stopping"
+    assert esperar(lambda: server.sessions[pid].state == "stopped")
+
+
 def test_apagar_lo_que_no_arrancamos(client, proyecto):
     path, _ = proyecto
     pid = registry.project_id(path)

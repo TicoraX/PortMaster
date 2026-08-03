@@ -21,13 +21,6 @@ verificar a mano: el explorador de carpetas navegando (entrar, `Subir`,
 `Volver`, `Registrar esta carpeta`), y el botón `Abrir` llevando a la pestaña
 nueva.
 
-## Defectos conocidos
-
-**`Apagar` bloquea el request.** `docker compose stop` tarda entre 10 y 30
-segundos con varios contenedores, y la petición HTTP espera todo eso con el
-botón en estado ocupado. La salida es mandarlo a un hilo y agregar un estado
-`stopping` que la interfaz sepa mostrar, igual que ya hace con `starting`.
-
 ## Techos marcados en el código
 
 Cada uno tiene su comentario `ponytail:` con la salida escrita al lado. Ninguno
@@ -41,6 +34,7 @@ es un bug; son decisiones con fecha de vencimiento conocida.
 | `ports._pid_by_process_scan` | O(procesos), una llamada al SO por proceso | Solo corre en el camino lento. Si pesa, cachear la tabla entre puertos de un mismo escaneo |
 | `detect.VARIABLE` | Solo `${VAR}` y `${VAR:-default}` | Un compose que use `$VAR` a secas deja el puerto desconocido. Se resuelve el día que aparezca uno |
 | `runner` (módulo) | Logs prefijados, sin dashboard `rich.live` | Cuando haya un caso concreto que lo pida |
+| `server.Session.stop` | Un detached en curso no se corta, se lo espera | Si apagar mientras `docker compose up -d` construye una imagen se hace molesto: matar el árbol del comando detached |
 
 ## Lo que se puede agregar
 

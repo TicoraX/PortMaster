@@ -131,6 +131,16 @@ class Session:
             self.state = "error"
             log.warning("stack %s fallo: %s", self.stack.name, exc)
 
+    def stop_async(self) -> None:
+        """Apaga sin hacer esperar al request.
+
+        `docker compose stop` tarda decenas de segundos con varios contenedores.
+        La interfaz sondea el estado igual que en el arranque, asi que lo unico
+        que hace falta es un estado que sepa mostrar mientras tanto.
+        """
+        self.state = "stopping"
+        threading.Thread(target=self.stop, daemon=True).start()
+
     def stop(self) -> None:
         if self.engine is not None:
             # Apagar mientras arranca: el hilo de arranque es el que sabe que
@@ -296,6 +306,8 @@ def create_app(token: str) -> FastAPI:
             live = sessions.get(pid)
             if live is not None and live.state in ("starting", "running"):
                 raise HTTPException(409, "el stack ya esta corriendo")
+            if live is not None and live.state == "stopping":
+                raise HTTPException(409, "el stack se esta apagando")
             session = Session(stack, body.profile)
             sessions[pid] = session
         session.start()
@@ -310,7 +322,8 @@ def create_app(token: str) -> FastAPI:
             session = sessions.get(pid)
         if session is None:
             raise HTTPException(404, "ese stack no fue arrancado desde aca")
-        session.stop()
+        if session.state != "stopping":
+            session.stop_async()
         return {"ok": True}
 
     @app.get(

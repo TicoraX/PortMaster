@@ -93,6 +93,7 @@ const PROJECT_LABELS = {
   stopped: ["detenido", ""],
   starting: ["arrancando", "starting"],
   running: ["corriendo", "ready"],
+  stopping: ["apagando", "starting"],
   error: ["con error", "bad"],
   invalid: ["config invalida", "bad"],
 };
@@ -252,7 +253,9 @@ function updateCard(entry, project) {
   root.querySelector(".profile").hidden = project.profiles.length === 0;
 
   const live = project.state === "starting" || project.state === "running";
-  root.querySelector('[data-act="up"]').disabled = live || project.state === "invalid";
+  const stopping = project.state === "stopping";
+  root.querySelector('[data-act="up"]').disabled =
+    live || stopping || project.state === "invalid";
   root.querySelector('[data-act="down"]').disabled = !live;
 
   if (entry.logsOpen) pullLogs(project.id, entry);
