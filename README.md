@@ -279,6 +279,29 @@ y los ciclos fallan al cargar el archivo, no a mitad del arranque. Un perfil
 arrastra sus dependencias transitivas: pedir `api` sin su base de datos nunca
 es lo que alguien quiso decir.
 
+`default` es opcional y lista qué arranca cuando no pedís perfil. Sin él,
+arranca todo, que es lo que casi siempre querés. Existe para el caso de abajo.
+
+### Perfiles de un compose detectado
+
+Un `compose.yaml` con `profiles:` los trae puestos:
+
+```yaml
+services:
+  db: { image: postgres }
+  seed:
+    image: seed
+    profiles: [tools]
+```
+
+Ahí `seed` queda afuera del arranque por defecto y entra con
+`portmaster up --profile tools`, igual que con `docker compose --profile tools`.
+Ojo con la semántica, porque está invertida: en compose `profiles:` **excluye**
+un servicio hasta que lo pidas, mientras que en `stack.yaml` un perfil es la
+lista de lo que se arranca. `detect` traduce de una a la otra, y por eso
+`portmaster init` sobre ese proyecto escribe también un `default`: sin él, el
+archivo congelado prendería lo que el compose deja apagado a propósito.
+
 `ready` decide cuándo un servicio cuenta como listo, y acepta cinco formas:
 
 | Valor | Espera a que |

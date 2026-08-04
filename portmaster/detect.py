@@ -97,6 +97,8 @@ def detect(root: Path) -> Stack | None:
     services: dict[str, Service] = {}
     previous: tuple[str, ...] = ()
 
+    opcionales = _compose_profiles(root)
+
     for detector in (_compose, _python, _node):
         group = []
         for service in detector(root):
@@ -107,7 +109,11 @@ def detect(root: Path) -> Stack | None:
             # backend a los contenedores.
             wired = replace(service, needs=service.needs or previous)
             services[wired.name] = wired
-            group.append(wired.name)
+            # Un contenedor con perfil no entra en la cadena heredada: si el
+            # frontend lo necesitara, el orden topologico lo volveria a arrastrar
+            # al arranque por defecto y el perfil no serviria de nada.
+            if wired.name not in opcionales:
+                group.append(wired.name)
         if group:
             previous = tuple(group)
 
@@ -122,11 +128,32 @@ def detect(root: Path) -> Stack | None:
             name: replace(service, needs=tuple(d for d in service.needs if d in services))
             for name, service in services.items()
         },
-        profiles={},
+        profiles=_profiles_for(services, opcionales),
         detected=True,
+        # Solo cuando hay algo que dejar afuera: sin perfiles, `None` sigue
+        # queriendo decir "todo", que es lo que era antes de existir este campo.
+        default=tuple(n for n in services if n not in opcionales) if opcionales else None,
     )
     stack.resolve()  # los ciclos fallan al detectar, no a mitad del arranque
     return stack
+
+
+def _profiles_for(
+    services: dict[str, Service], opcionales: dict[str, tuple[str, ...]]
+) -> dict[str, tuple[str, ...]]:
+    """Un perfil de PortMaster por cada perfil declarado en el compose.
+
+    Pedir un perfil arranca lo de siempre **mas** los contenedores de ese
+    perfil, que es lo que hace `docker compose --profile X up`. Un perfil que
+    arrancara solo sus propios contenedores dejaria al resto del stack afuera y
+    no es lo que nadie quiso decir.
+    """
+    base = tuple(n for n in services if n not in opcionales)
+    nombres = {p for perfiles in opcionales.values() for p in perfiles}
+    return {
+        nombre: base + tuple(n for n, perfiles in opcionales.items() if nombre in perfiles)
+        for nombre in sorted(nombres)
+    }
 
 
 def to_yaml(stack: Stack) -> str:
@@ -147,12 +174,35 @@ def to_yaml(stack: Stack) -> str:
             spec["stop"] = service.stop
         services[service.name] = spec
 
-    return yaml.safe_dump(
-        {"name": stack.name, "services": services}, sort_keys=False, allow_unicode=True
-    )
+    # Congelar tiene que ser fiel: sin estas dos claves, un compose con
+    # `profiles:` volveria a cargarse arrancando lo que deja apagado.
+    document: dict[str, object] = {"name": stack.name, "services": services}
+    if stack.default is not None:
+        document["default"] = list(stack.default)
+    if stack.profiles:
+        document["profiles"] = {name: list(members) for name, members in stack.profiles.items()}
+
+    return yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
 
 
 # detectores ---------------------------------------------------------------
+
+
+def _compose_services(root: Path) -> dict | None:
+    """El mapa `services` del compose. None si no hay compose, {} si es ilegible.
+
+    Lo leen dos funciones (los contenedores y sus perfiles) y no queria dos
+    copias de la busqueda del archivo: divergen en el primer nombre nuevo.
+    """
+    path = next((root / name for name in COMPOSE_NAMES if (root / name).is_file()), None)
+    if path is None:
+        return None
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError, UnicodeDecodeError):
+        raw = None
+    declared = raw.get("services") if isinstance(raw, dict) else None
+    return declared if isinstance(declared, dict) else {}
 
 
 def _compose(root: Path) -> list[Service]:
@@ -162,16 +212,10 @@ def _compose(root: Path) -> list[Service]:
     es idempotente. Asi cada contenedor tiene su puerto, su estado y su link en
     la interfaz, en vez de esconderse detras de un unico bloque opaco.
     """
-    path = next((root / name for name in COMPOSE_NAMES if (root / name).is_file()), None)
-    if path is None:
+    declared = _compose_services(root)
+    if declared is None:
         return []
-
-    try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError, UnicodeDecodeError):
-        raw = None
-    declared = raw.get("services") if isinstance(raw, dict) else None
-    if not isinstance(declared, dict) or not declared:
+    if not declared:
         # Compose ilegible o sin servicios: se arranca entero y sin puertos.
         return [
             _container("docker", "docker compose up -d", root, None, (), "docker compose stop")
@@ -213,6 +257,30 @@ def _container(
         detached=True,
         stop=stop,  # el contenedor no muere con el cliente que lo arranco
     )
+
+
+def _compose_profiles(root: Path) -> dict[str, tuple[str, ...]]:
+    """Perfiles declarados por cada contenedor: nombre -> perfiles a los que pertenece.
+
+    Ojo con la semantica, que esta invertida respecto de la de PortMaster: en
+    compose, un servicio con `profiles:` queda **excluido** por defecto y solo
+    entra cuando pedis uno de sus perfiles. En PortMaster un perfil es la lista
+    de servicios a arrancar. Traducir uno al otro es el trabajo de `detect`,
+    aca abajo; mapearlos directo arrancaria lo que compose deja apagado a
+    proposito.
+    """
+    declared = _compose_services(root) or {}
+    found = {}
+    for name, spec in declared.items():
+        value = spec.get("profiles") if isinstance(spec, dict) else None
+        # Viene como lista, o como string suelto si hay uno solo.
+        if isinstance(value, str):
+            value = [value]
+        if isinstance(value, list):
+            perfiles = tuple(str(p) for p in value if isinstance(p, (str, int)))
+            if perfiles:
+                found[str(name)] = perfiles
+    return found
 
 
 def _depends_on(spec: dict) -> tuple[str, ...]:

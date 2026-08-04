@@ -421,3 +421,105 @@ def _stack(tmp_path, body):
     path = tmp_path / "stack.yaml"
     path.write_text(textwrap.dedent(body), encoding="utf-8")
     return config.load(path)
+
+
+COMPOSE_CON_PERFILES = """
+    services:
+      db:
+        image: postgres
+        ports: ["5432:5432"]
+      api:
+        image: api
+        ports: ["8080:8080"]
+        depends_on: [db]
+      seed:
+        image: seed
+        profiles: [tools]
+      mailhog:
+        image: mailhog
+        profiles: ["dev"]
+    """
+
+
+def test_un_contenedor_con_perfil_no_arranca_por_defecto(tmp_path):
+    """En compose, `profiles:` excluye. En PortMaster un perfil es una lista de
+    lo que se arranca. Traducirlos al reves arranca lo que compose apaga."""
+    write(tmp_path, "compose.yaml", COMPOSE_CON_PERFILES)
+    stack = detect.detect(tmp_path)
+
+    por_defecto = [s.name for s in stack.resolve()]
+    assert por_defecto == ["db", "api"]
+    assert "seed" not in por_defecto
+    assert "mailhog" not in por_defecto
+
+
+def test_cada_perfil_del_compose_es_un_perfil(tmp_path):
+    write(tmp_path, "compose.yaml", COMPOSE_CON_PERFILES)
+    stack = detect.detect(tmp_path)
+
+    assert sorted(stack.profiles) == ["dev", "tools"]
+    # Un perfil arranca lo de siempre mas lo suyo, igual que `--profile` en compose.
+    assert [s.name for s in stack.resolve("tools")] == ["db", "api", "seed"]
+    assert [s.name for s in stack.resolve("dev")] == ["db", "api", "mailhog"]
+
+
+def test_un_perfil_como_string_suelto_tambien_cuenta(tmp_path):
+    write(
+        tmp_path,
+        "compose.yaml",
+        """
+        services:
+          db:
+            image: postgres
+          seed:
+            image: seed
+            profiles: tools
+        """,
+    )
+    stack = detect.detect(tmp_path)
+    assert [s.name for s in stack.resolve()] == ["db"]
+    assert "tools" in stack.profiles
+
+
+def test_el_frontend_no_espera_a_un_contenedor_opcional(tmp_path):
+    """Si heredara la cadena entera, el orden topologico arrastraria el
+    contenedor con perfil de vuelta al arranque por defecto."""
+    write(tmp_path, "compose.yaml", COMPOSE_CON_PERFILES)
+    write(tmp_path, "package.json", json.dumps({"scripts": {"dev": "vite"}, "dependencies": {"vite": "5"}}))
+
+    stack = detect.detect(tmp_path)
+    assert "seed" not in stack.services["web"].needs
+    assert "mailhog" not in stack.services["web"].needs
+    assert [s.name for s in stack.resolve()] == ["db", "api", "web"]
+
+
+def test_un_compose_sin_perfiles_arranca_todo(tmp_path):
+    write(
+        tmp_path,
+        "compose.yaml",
+        """
+        services:
+          db:
+            image: postgres
+          api:
+            image: api
+        """,
+    )
+    stack = detect.detect(tmp_path)
+    assert stack.profiles == {}
+    assert stack.default is None, "sin perfiles, el default sigue siendo todo"
+    assert len(stack.resolve()) == 2
+
+
+def test_congelar_un_compose_con_perfiles_no_cambia_lo_que_arranca(tmp_path):
+    """`portmaster init` tiene que ser fiel: el archivo congelado arranca lo
+    mismo que la deteccion, ni un contenedor mas."""
+    write(tmp_path, "compose.yaml", COMPOSE_CON_PERFILES)
+    detectado = detect.detect(tmp_path)
+
+    write(tmp_path, "stack.yaml", detect.to_yaml(detectado))
+    cargado = config.load(tmp_path / "stack.yaml")
+
+    assert [s.name for s in cargado.resolve()] == [s.name for s in detectado.resolve()]
+    assert cargado.profiles == detectado.profiles
+    assert [s.name for s in cargado.resolve("tools")] == ["db", "api", "seed"]

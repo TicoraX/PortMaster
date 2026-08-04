@@ -191,6 +191,15 @@ duración por servicio y causa del fallo contestaría "por qué falló ayer" y
 sesión típica dura lo que dura la sesión. Vuelve a la mesa el día que alguien
 quiera comparar dos arranques.
 
+**El perfil `sin-infra` de P3.** Los perfiles de compose entraron; este no.
+`Stack.resolve` arrastra las dependencias transitivas a propósito, y un perfil
+con solo los servicios que no son contenedores vuelve a arrastrar los
+contenedores por el `needs` del frontend. Para que sirviera habría que cortar
+esas aristas, y eso es cambiar una regla documentada de `resolve` que hoy
+protege un caso más común: pedir `api` sin su base de datos. La forma que sí
+tendría sentido no es un perfil, es que el arranque saltee lo que ya está
+escuchando, y eso es trabajo en el `runner`, no en la configuración.
+
 **Autocompletado en el input de ruta.** El explorador ya cubre el caso. Es
 comodidad sobre una función que ya funciona.
 

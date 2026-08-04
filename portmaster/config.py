@@ -46,6 +46,11 @@ class Stack:
     services: dict[str, Service]
     profiles: dict[str, tuple[str, ...]]
     detected: bool = False
+    # Que arranca sin pedir perfil. None significa "todo", que es lo que un
+    # stack.yaml siempre quiso decir. Existe por los `profiles:` de compose, que
+    # marcan servicios que quedan afuera salvo que los pidas: sin esto, un stack
+    # detectado arrancaria lo que el compose deja apagado a proposito.
+    default: tuple[str, ...] | None = None
 
     def ports(self) -> list[int]:
         """Puertos declarados, en orden de aparicion y sin repetir."""
@@ -59,7 +64,7 @@ class Stack:
         `api` sin su base de datos nunca es lo que alguien quiso decir.
         """
         if profile is None:
-            wanted = list(self.services)
+            wanted = list(self.default if self.default is not None else self.services)
         elif profile in self.profiles:
             wanted = list(self.profiles[profile])
         else:
@@ -133,6 +138,7 @@ def load(path: Path | None = None) -> Stack:
         path=path,
         services=services,
         profiles=profiles,
+        default=_default(raw.get("default"), services),
     )
     stack.resolve()  # falla al cargar si hay ciclos, no en tiempo de arranque
     return stack
@@ -231,6 +237,23 @@ def _env(where: str, value: object) -> dict[str, str]:
             raise ConfigError(f"{where}.env.{key} debe ser un valor simple")
         env[str(key)] = str(item)
     return env
+
+
+def _default(value: object, services: dict[str, Service]) -> tuple[str, ...] | None:
+    """Servicios que arrancan sin pedir perfil. Ausente significa todos.
+
+    Existe para que `portmaster init` pueda congelar un compose con `profiles:`
+    sin cambiar lo que arranca: en compose esos contenedores quedan afuera hasta
+    que los pedis, y sin esta clave el archivo congelado los prenderia a todos.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, list) or not value:
+        raise ConfigError("'default' debe ser una lista no vacia de servicios")
+    for member in value:
+        if member not in services:
+            raise ConfigError(f"'default' incluye '{member}', que no existe")
+    return tuple(str(m) for m in value)
 
 
 def _profiles(value: object, services: dict[str, Service]) -> dict[str, tuple[str, ...]]:
