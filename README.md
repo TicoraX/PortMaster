@@ -177,6 +177,12 @@ portmaster remove .     # des-registrar un proyecto (alias: portmaster rm)
 Estado de cada servicio, arrancar y apagar stacks, liberar puertos tomados por
 procesos ajenos, y logs en vivo por proyecto.
 
+Cuando un servicio se muere solo, el título de la pestaña lleva un contador y
+el encabezado dice cuántos hay caídos. Con `Avisarme` podés además pedir
+notificaciones del navegador, que solo avisan de caídas nuevas y nunca de un
+`Apagar` ni de un `Reiniciar`. El permiso se pide con ese click y nunca al
+cargar la página.
+
 Un proyecto detectado trae `Congelar a stack.yaml`, que es `portmaster init`
 sin salir de la interfaz: útil cuando ves en la tarjeta que detectó un puerto
 que no era. Pide confirmación sobre el mismo botón, escribe la ruta del

@@ -72,7 +72,7 @@ class Runner:
     _width: int = 8
     _cancel: threading.Event = field(default_factory=threading.Event)
     _down: bool = False
-    _restarting: bool = False
+    restarting: bool = False
 
     def up(self, profile: str | None = None) -> None:
         """Arranca el perfil en orden. Si algo falla, apaga lo ya levantado."""
@@ -108,7 +108,7 @@ class Runner:
         while not self._cancel.is_set() and (
             # Durante un reinicio no queda nadie vivo por un instante, y sin esto
             # el stack se daria por terminado justo ahi.
-            self._restarting
+            self.restarting
             or any(p.popen.poll() is None for p in self.procs)
         ):
             if not self._drain():
@@ -122,13 +122,13 @@ class Runner:
             raise StartupError(f"{name} no esta corriendo en este stack")
 
         old = self.procs[index]
-        self._restarting = True
+        self.restarting = True
         try:
             self._stop_one(old)
             proc = self._spawn_proc(old.service, old.color)
             self.procs[index] = proc
         finally:
-            self._restarting = False
+            self.restarting = False
         self._wait_ready(proc)
 
     def down(self) -> None:

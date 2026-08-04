@@ -548,3 +548,81 @@ def test_congelar_dos_veces_no_pisa_el_archivo(client, tmp_path):
 
     assert respuesta.status_code == 409
     assert "editado a mano" in (root / "stack.yaml").read_text(encoding="utf-8")
+
+
+def test_health_ve_todas_las_sesiones_y_no_solo_la_pagina(client, tmp_path, free_ports):
+    """Alimentar el aviso de "algo se cayo" desde /api/state seria mentira apenas
+    hay una segunda pagina."""
+    puertos = free_ports(server.PAGE_SIZE + 1)
+    ids = []
+    for i, port in enumerate(puertos):
+        root = tmp_path / f"app{i}"
+        root.mkdir()
+        (root / "stack.yaml").write_text(
+            f'services:\n  srv:\n    command: {sys.executable} -c "{SERVER.format(port=port)}"\n'
+            f"    port: {port}\n",
+            encoding="utf-8",
+        )
+        ids.append(registry.project_id(registry.add(root)))
+
+    for pid in ids:
+        assert client.post(f"/api/projects/{pid}/up", json={}).status_code == 200
+    assert esperar(lambda: client.get("/api/health").json()["running"] == len(ids), 40)
+
+    # El ultimo cae fuera de la primera pagina.
+    primera = {p["id"] for p in client.get("/api/state").json()["projects"]}
+    assert ids[-1] not in primera
+
+    salud = client.get("/api/health").json()
+    assert salud["running"] == len(ids)
+    assert salud["fallen"] == []
+
+
+def test_health_delata_al_servicio_que_se_murio_solo(client, tmp_path, free_ports):
+    (port,) = free_ports(1)
+    root = tmp_path / "efimero"
+    root.mkdir()
+    corto = (
+        "import socket, time; s = socket.socket(); "
+        f"s.bind(('127.0.0.1', {port})); s.listen(); "
+        "print('arriba', flush=True); time.sleep(2)"
+    )
+    (root / "stack.yaml").write_text(
+        f'services:\n  srv:\n    command: {sys.executable} -c "{corto}"\n    port: {port}\n',
+        encoding="utf-8",
+    )
+    pid = registry.project_id(registry.add(root))
+    client.post(f"/api/projects/{pid}/up", json={})
+
+    def caido():
+        return len(client.get("/api/health").json()["fallen"]) == 1
+
+    assert esperar(caido, 30), "el servicio se murio y health no lo dice"
+    assert client.get("/api/health").json()["fallen"][0]["project"] == pid
+
+
+def test_apagar_a_mano_no_es_una_caida(client, proyecto):
+    """Apagar y morirse llegan al mismo estado por caminos distintos. Solo uno
+    de los dos es noticia."""
+    path, _ = proyecto
+    pid = registry.project_id(path)
+    client.post(f"/api/projects/{pid}/up", json={})
+    assert esperar(lambda: client.get("/api/health").json()["running"] == 1)
+
+    client.post(f"/api/projects/{pid}/down")
+    assert esperar(lambda: client.get("/api/health").json()["running"] == 0)
+    assert client.get("/api/health").json()["fallen"] == []
+
+
+def test_reiniciar_no_cuenta_como_caida(client, proyecto):
+    """Sin esto, el aviso se dispararia con cada Reiniciar: entre matar el
+    proceso viejo y arrancar el nuevo no hay nadie vivo."""
+    path, _ = proyecto
+    pid = registry.project_id(path)
+    client.post(f"/api/projects/{pid}/up", json={})
+    assert esperar(lambda: client.get("/api/health").json()["running"] == 1)
+
+    client.post(f"/api/projects/{pid}/services/srv/restart")
+    for _ in range(30):
+        assert client.get("/api/health").json()["fallen"] == [], "aviso falso al reiniciar"
+        time.sleep(0.1)

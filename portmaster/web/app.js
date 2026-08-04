@@ -26,7 +26,11 @@ const ui = {
   orphans: document.getElementById("orphans"),
   orphansList: document.getElementById("orphans-list"),
   orphansHeading: document.getElementById("orphans-heading"),
+  health: document.getElementById("health"),
+  notify: document.getElementById("notify"),
 };
+
+const TITLE = document.title;
 
 const cards = new Map(); // id -> {root, logSeq, logsOpen}
 let flashTimer = null;
@@ -477,6 +481,65 @@ async function refreshOrphans() {
   }
 }
 
+/* salud ------------------------------------------------------------------- */
+
+/* Un servicio que se muere cambia un punto de color y nada mas. Si la pestaña
+ * esta de fondo, que es donde vive esta herramienta, no te enteras hasta que el
+ * navegador te tira un ERR_CONNECTION_REFUSED diez minutos despues.
+ *
+ * `/api/health` mira todas las sesiones y no la pagina actual: con mas de
+ * cuatro proyectos, alimentar esto de `/api/state` seria una mentira
+ * silenciosa. */
+
+// Servicios caidos en el sondeo anterior, para avisar solo de los nuevos: sin
+// esto, uno caido notifica 24 veces por minuto.
+let fallen = new Set();
+// El primer sondeo no notifica. Al cargar la pagina con algo ya caido, la
+// noticia es vieja y el usuario no la pidio.
+let healthKnown = false;
+
+async function refreshHealth() {
+  let data;
+  try {
+    data = await api("/api/health");
+  } catch {
+    return; // sin conexion ya lo dice el masthead
+  }
+
+  // `service: null` es el stack entero, no un servicio suelto.
+  const clave = (f) => `${f.project}/${f.service ?? ""}`;
+  const ahora = new Set(data.fallen.map(clave));
+  const nuevos = data.fallen.filter((f) => !fallen.has(clave(f)));
+  fallen = ahora;
+
+  document.title = ahora.size ? `(${ahora.size}) ${TITLE}` : TITLE;
+  ui.health.hidden = !ahora.size;
+  ui.health.textContent = ahora.size === 1 ? "1 caído" : `${ahora.size} caídos`;
+
+  const puedePedirse = "Notification" in window && Notification.permission === "default";
+  ui.notify.hidden = !ahora.size || !puedePedirse;
+
+  if (healthKnown && nuevos.length && window.Notification?.permission === "granted") {
+    for (const caido of nuevos) {
+      const que = caido.service ? `${caido.stack}: ${caido.service}` : caido.stack;
+      new Notification(`${que} se cayó`, {
+        body: "PortMaster no lo apagó, se murió solo.",
+        tag: clave(caido), // el navegador tambien deduplica
+      });
+    }
+  }
+  healthKnown = true;
+}
+
+ui.notify.addEventListener("click", async () => {
+  // El permiso se pide con un click y nunca al cargar: un pedido de
+  // notificaciones que aparece solo es lo que hace que la gente lo deniegue
+  // para siempre.
+  if (!("Notification" in window)) return;
+  await Notification.requestPermission();
+  ui.notify.hidden = true;
+});
+
 const ORPHAN_EVERY = 4; // cada N ciclos de POLL_MS
 let orphanTick = 0;
 
@@ -494,6 +557,7 @@ async function refresh() {
     ui.connection.textContent = `sin conexión · ${error.message}`;
     ui.connection.dataset.down = "true";
   }
+  await refreshHealth();
   orphanTick++;
   if (orphanTick % ORPHAN_EVERY === 1) await refreshOrphans();
 }

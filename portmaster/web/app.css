@@ -82,6 +82,21 @@ body {
   color: var(--color-bad);
 }
 
+/* Lo unico global de la pagina que habla de salud y no de inventario. Aparece
+   solo cuando hay algo caido: el resto del tiempo no ocupa lugar. */
+.masthead__health {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-bad);
+  margin: 0;
+}
+
+/* `display` propio le gana a la regla del navegador para [hidden]. */
+.masthead__health[hidden],
+.masthead__notify[hidden] {
+  display: none;
+}
+
 /* sheet ------------------------------------------------------------------- */
 
 .sheet {

@@ -111,6 +111,9 @@ class Session:
     # Vive aca y no en `Proc.http` para que el hilo del sondeo no le escriba
     # estado al runner por atras.
     late_http: set[str] = field(default_factory=set)
+    # Un stack detenido porque el usuario apreto Apagar y uno que se murio solo
+    # llegan al mismo estado por caminos distintos. Solo el segundo es noticia.
+    stopped_by_user: bool = False
 
     def start(self) -> None:
         # force_terminal=False no es redundante con no_color: Rich mira FORCE_COLOR
@@ -172,6 +175,7 @@ class Session:
             log.warning("reinicio de %s fallo: %s", name, exc)
 
     def stop(self) -> None:
+        self.stopped_by_user = True
         if self.engine is not None:
             # Apagar mientras arranca: el hilo de arranque es el que sabe que
             # levanto, asi que se le pide que corte y se lo espera. Despues su
@@ -239,7 +243,11 @@ class Session:
             return {}
         states = {}
         for proc in self.engine.procs:
-            if proc.popen.poll() is not None and not proc.service.detached:
+            # Durante un reinicio el proceso viejo ya murio y el nuevo todavia no
+            # existe. Sin esto, "se cayo solo" se dispararia con cada Reiniciar.
+            if self.engine.restarting:
+                states[proc.service.name] = "starting"
+            elif proc.popen.poll() is not None and not proc.service.detached:
                 states[proc.service.name] = "stopped"
             else:
                 states[proc.service.name] = "ready" if proc.ready else "starting"
@@ -501,6 +509,38 @@ def create_app(token: str) -> FastAPI:
 
         log.info("proceso cerrado: puerto=%d pid=%d nombre=%s", port, status.pid, status.name)
         return {"ok": True}
+
+    @app.get("/api/health", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
+    def health() -> dict:
+        """Salud de todo lo que arrancamos, sin paginar.
+
+        `/api/state` devuelve una pagina de cuatro proyectos: alimentar de ahi un
+        aviso de "algo se cayo" seria una mentira silenciosa apenas hay una
+        segunda pagina. Aca no hay escaneo de puertos ni lectura de configs, solo
+        un `poll()` por proceso vivo, que es lo que lo hace barato como para
+        sondearlo al mismo ritmo que el estado.
+
+        Solo mira las sesiones: un servicio que no arrancamos nosotros no es algo
+        que se nos "haya caido".
+        """
+        with sessions_lock:
+            live = list(sessions.items())
+
+        corriendo, caidos = 0, []
+        for pid, session in live:
+            entrada = {"project": pid, "stack": session.stack.name}
+            if session.state in ("stopped", "error") and not session.stopped_by_user:
+                # El stack entero se murio. La tarjeta lo dice, pero puede estar
+                # en otra pagina: es justo lo que este endpoint viene a resolver.
+                caidos.append({**entrada, "service": None})
+                continue
+            if session.state not in ("starting", "running"):
+                continue
+            corriendo += 1
+            for name, state in session.service_states().items():
+                if state == "stopped":
+                    caidos.append({**entrada, "service": name})
+        return {"running": corriendo, "fallen": caidos}
 
     @app.get("/api/ports/orphans", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
     def orphans() -> dict:
