@@ -28,16 +28,6 @@ es un bug; son decisiones con fecha de vencimiento conocida.
 
 Ideas, no compromisos. Cada una con el motivo por el que todavía no está.
 
-**Perfiles en stacks detectados.** Hoy un stack detectado tiene `profiles: {}`,
-así que arranca entero o nada. Un perfil obvio saldría del propio compose
-(`profiles:` ya existe ahí) y otro sería "solo lo que no es contenedor", para
-laburar con el front sin levantar la infra.
-
-**Arranque en paralelo.** Los servicios sin dependencias entre sí se esperan
-igual, uno detrás del otro. Arrancarlos juntos ahorra la suma de los
-healthchecks, y a cambio entrevera los logs de los primeros segundos.
-`stack.example.yaml` lo prometía por error y ahora dice lo que el runner hace.
-
 **Autocompletado en el input de ruta.** El explorador cubre el caso, pero
 escribir `A:\Proy` y que sugiera es más rápido cuando ya sabés a dónde vas. El
 endpoint `/api/browse` ya devuelve lo necesario.

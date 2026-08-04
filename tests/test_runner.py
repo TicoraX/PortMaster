@@ -380,3 +380,121 @@ def test_env_llega_al_proceso(tmp_path):
 def test_terminate_tree_pid_inexistente():
     # PID 999999 no deberia lanzar psutil.NoSuchProcess
     runner._terminate_tree(999999)
+
+
+LENTO = (
+    "import socket, time; "
+    "time.sleep(2); "
+    "s = socket.socket(); s.bind(('127.0.0.1', {port})); s.listen(); "
+    "time.sleep(120)"
+)
+
+
+def test_los_servicios_sin_dependencias_arrancan_juntos(tmp_path, free_ports):
+    """Solapamiento, no duracion total: medir segundos es intermitente en tres
+    sistemas operativos, y lo que importa es que los intervalos se pisen."""
+    a, b, c = free_ports(3)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          uno:
+            command: {sys.executable} -c "{LENTO.format(port=a)}"
+            port: {a}
+          dos:
+            command: {sys.executable} -c "{LENTO.format(port=b)}"
+            port: {b}
+          tres:
+            command: {sys.executable} -c "{LENTO.format(port=c)}"
+            port: {c}
+            needs: [uno, dos]
+        """,
+    )
+    engine = make_runner(stack)
+    # Cada nivel contra si mismo, no contra un numero de segundos: el arranque
+    # del interprete pesa distinto en cada sistema operativo y un umbral fijo se
+    # vuelve intermitente en CI. `tres` arranca solo y da la unidad de medida.
+    tiempos = {}
+    original = engine._start_level
+
+    def medido(level, colors):
+        inicio = time.monotonic()
+        original(level, colors)
+        tiempos[tuple(s.name for s in level)] = time.monotonic() - inicio
+
+    engine._start_level = medido
+    try:
+        engine.up()
+
+        juntos = tiempos[("uno", "dos")]
+        uno_solo = tiempos[("tres",)]
+        assert juntos < uno_solo * 1.6, (
+            f"dos servicios tardaron {juntos:.1f}s y uno solo {uno_solo:.1f}s: "
+            "arrancaron en serie"
+        )
+        assert all(p.ready for p in engine.procs), "alguno quedo sin su healthcheck"
+        assert {p.service.name for p in engine.procs} == {"uno", "dos", "tres"}
+    finally:
+        engine.down()
+
+
+def test_cada_servicio_recibe_su_propio_healthcheck(tmp_path, free_ports):
+    """`up` esperaba a `procs[-1]`, que con dos hilos en el mismo nivel es el
+    servicio del otro hilo."""
+    a, b = free_ports(2)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          uno:
+            command: {sys.executable} -c "{SERVER.format(port=a)}"
+            port: {a}
+          dos:
+            command: {sys.executable} -c "{SERVER.format(port=b)}"
+            port: {b}
+        """,
+    )
+    engine = make_runner(stack)
+    try:
+        engine.up()
+        assert all(p.ready for p in engine.procs)
+        assert len({p.color for p in engine.procs}) == 2, "dos servicios, un solo color"
+    finally:
+        engine.down()
+
+
+def test_un_fallo_en_el_nivel_no_deja_hermanos_vivos(tmp_path, free_ports):
+    a, b = free_ports(2)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          bueno:
+            command: {sys.executable} -c "{LENTO.format(port=a)}"
+            port: {a}
+          malo:
+            command: {sys.executable} -c "import time; time.sleep(0.2); raise SystemExit(1)"
+            port: {b}
+        """,
+    )
+    engine = make_runner(stack, timeout=10.0)
+    with pytest.raises(runner.StartupError):
+        engine.up()
+
+    deadline = time.time() + 15
+    while time.time() < deadline and not runner.ports.is_free(a):
+        time.sleep(0.1)
+    assert runner.ports.is_free(a), "el hermano del que fallo quedo huerfano"
+
+
+def test_niveles_de_una_cadena_lineal():
+    from portmaster.config import Service
+
+    def svc(name, needs=()):
+        return Service(name, "echo", None, None, "none", tuple(needs), {}, False)
+
+    a, b, c = svc("a"), svc("b", ["a"]), svc("c", ["b"])
+    assert [[s.name for s in nivel] for nivel in runner._levels([a, b, c])] == [["a"], ["b"], ["c"]]
+
+    d = svc("d")
+    assert [[s.name for s in nivel] for nivel in runner._levels([a, d, b])] == [["a", "d"], ["b"]]

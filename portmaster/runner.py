@@ -73,19 +73,77 @@ class Runner:
     _cancel: threading.Event = field(default_factory=threading.Event)
     _down: bool = False
     restarting: bool = False
+    # Protege `procs` y `_down` entre los hilos de un mismo nivel y el apagado.
+    _procs_lock: threading.Lock = field(default_factory=threading.Lock)
 
     def up(self, profile: str | None = None) -> None:
-        """Arranca el perfil en orden. Si algo falla, apaga lo ya levantado."""
+        """Arranca por niveles. Si algo falla, apaga lo ya levantado.
+
+        Los servicios que no dependen entre si arrancan juntos: el stack tarda
+        el healthcheck mas lento de cada nivel en vez de la suma de todos.
+        """
         services = self.stack.resolve(profile)
         self._width = max(len(s.name) for s in services)
+        # Color por posicion, antes de arrancar nada. `COLORS[len(self.procs) %
+        # ...]` era un read-modify-write: dos servicios del mismo nivel podian
+        # salir del mismo color, que es justo lo que hace legibles los logs
+        # cuando se entreveran.
+        colors = {s.name: COLORS[i % len(COLORS)] for i, s in enumerate(services)}
         try:
-            for service in services:
+            for level in _levels(services):
                 self._abort_if_cancelled()
-                self._start(service)
-                self._wait_ready(self.procs[-1])
+                self._start_level(level, colors)
         except BaseException:
             self.down()
             raise
+
+    def _start_level(self, level: list[Service], colors: dict[str, str]) -> None:
+        if len(level) == 1:
+            self._launch(level[0], colors[level[0].name])
+            return
+
+        fallos: list[BaseException] = []
+        threads = [
+            threading.Thread(target=self._launch_capturing, args=(s, colors[s.name], fallos))
+            for s in level
+        ]
+        for thread in threads:
+            thread.start()
+        # Se esperan todos aunque uno falle: cortar antes dejaria a los hermanos
+        # arrancando detras del apagado, que es el mismo bug que `cancel` vino a
+        # resolver para el arranque entero.
+        for thread in threads:
+            thread.join()
+
+        if fallos:
+            if len(fallos) > 1:
+                otros = ", ".join(str(f) for f in fallos[1:])
+                raise StartupError(f"{fallos[0]} (y ademas: {otros})") from fallos[0]
+            raise fallos[0]
+
+    def _launch_capturing(
+        self, service: Service, color: str, fallos: list[BaseException]
+    ) -> None:
+        try:
+            self._launch(service, color)
+        except BaseException as exc:  # el hilo no debe morir en silencio
+            fallos.append(exc)
+
+    def _launch(self, service: Service, color: str) -> None:
+        proc = self._spawn_proc(service, color)
+        if not self._register(proc):
+            # El apagado ya paso por la lista: este proceso no lo va a ver nadie
+            # mas, asi que lo baja quien lo arranco.
+            self._stop_one(proc)
+            raise StartupError("apagado pedido durante el arranque")
+        self._wait_ready(proc)
+
+    def _register(self, proc: Proc) -> bool:
+        with self._procs_lock:
+            if self._down:
+                return False
+            self.procs.append(proc)
+            return True
 
     def cancel(self) -> None:
         """Aborta un arranque en curso desde otro hilo.
@@ -109,7 +167,8 @@ class Runner:
             # Durante un reinicio no queda nadie vivo por un instante, y sin esto
             # el stack se daria por terminado justo ahi.
             self.restarting
-            or any(p.popen.poll() is None for p in self.procs)
+            # Copia: un nivel todavia arrancando puede appendear mientras iteramos.
+            or any(p.popen.poll() is None for p in list(self.procs))
         ):
             if not self._drain():
                 time.sleep(POLL)
@@ -133,10 +192,15 @@ class Runner:
 
     def down(self) -> None:
         """Apaga en orden inverso al de arranque. Correrlo dos veces no hace nada."""
-        if self._down:
-            return
-        self._down = True
-        for proc in reversed(self.procs):
+        with self._procs_lock:
+            if self._down:
+                return
+            self._down = True
+            # Copia bajo el lock: si un hilo del nivel appendea mientras iteramos,
+            # ese proc queda fuera de la lista y lo baja `_launch`, que ve el
+            # `_down` y no lo registra.
+            pendientes = list(reversed(self.procs))
+        for proc in pendientes:
             self._stop_one(proc)
         self._drain()
 
@@ -165,10 +229,6 @@ class Runner:
             self._say(proc, f"el apagado fallo con codigo {done.returncode}")
 
     # arranque -------------------------------------------------------------
-
-    def _start(self, service: Service) -> None:
-        color = COLORS[len(self.procs) % len(COLORS)]
-        self.procs.append(self._spawn_proc(service, color))
 
     def _spawn_proc(self, service: Service, color: str) -> Proc:
         proc = Proc(service, self._spawn(service), color)
@@ -287,6 +347,23 @@ class Runner:
     def _write(self, proc: Proc, text: str) -> None:
         name = proc.service.name.ljust(self._width)
         self.console.print(f"[{proc.color}]{name}[/] [dim]|[/] {text}", highlight=False)
+
+
+def _levels(services: list[Service]) -> list[list[Service]]:
+    """Agrupa el orden de arranque en tandas que pueden arrancar juntas.
+
+    `services` ya viene en orden topologico, asi que cuando se mira un servicio
+    todas sus dependencias tienen nivel asignado y alcanza con una pasada.
+    """
+    nivel_de: dict[str, int] = {}
+    levels: list[list[Service]] = []
+    for service in services:
+        nivel = max((nivel_de[d] + 1 for d in service.needs if d in nivel_de), default=0)
+        nivel_de[service.name] = nivel
+        while len(levels) <= nivel:
+            levels.append([])
+        levels[nivel].append(service)
+    return levels
 
 
 def run_stop(service: Service) -> subprocess.CompletedProcess | None:

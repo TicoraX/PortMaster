@@ -35,8 +35,9 @@ profiles:
 # Reglas:
 #
 # - Solo `command` es obligatorio.
-# - `needs` define el orden. Sin `needs`, el orden es el del archivo: el arranque
-#   es secuencial y cada servicio espera a estar listo antes del siguiente. Los
+# - `needs` define el orden. Los servicios que no dependen entre si arrancan
+#   juntos, y cada tanda espera a estar lista antes de la siguiente: el stack
+#   tarda el healthcheck mas lento de cada nivel, no la suma de todos. Los
 #   ciclos son error al cargar el archivo, no en tiempo de ejecucion.
 # - `ready: port` espera a que el TCP acepte conexion. Es el default cuando hay
 #   `port`; sin `port`, el default es `none`.

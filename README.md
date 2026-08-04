@@ -9,8 +9,9 @@ proyecto, un comando, y el stack entero arriba: puertos libres, Docker,
 backend y frontend, sin cuatro terminales abiertas.
 
 Estado: en construcción, usable. La versión actual levanta un stack completo
-desde `stack.yaml`: libera los puertos, arranca en orden de dependencias,
-espera a que cada servicio esté listo y unifica los logs.
+desde `stack.yaml`: libera los puertos, arranca en orden de dependencias
+(y en paralelo lo que no depende entre sí), espera a que cada servicio esté
+listo y unifica los logs.
 
 ## Instalación
 
@@ -290,6 +291,12 @@ profiles:
 y los ciclos fallan al cargar el archivo, no a mitad del arranque. Un perfil
 arrastra sus dependencias transitivas: pedir `api` sin su base de datos nunca
 es lo que alguien quiso decir.
+
+Los servicios que no dependen entre sí arrancan juntos, y cada tanda espera a
+estar lista antes de la siguiente. El stack tarda el healthcheck más lento de
+cada nivel en lugar de la suma de todos, a cambio de que los logs de los
+primeros segundos se entreveren. Van prefijados por servicio y con un color
+propio cada uno, así que se siguen leyendo.
 
 `default` es opcional y lista qué arranca cuando no pedís perfil. Sin él,
 arranca todo, que es lo que casi siempre querés. Existe para el caso de abajo.
