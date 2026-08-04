@@ -457,3 +457,59 @@ def test_sink_flush_linea_parcial():
     sink.flush()
     assert len(sink.lines) == 2
     assert sink.lines[1][1] == "sin salto final"
+
+
+def test_un_servidor_que_contesta_tarde_igual_consigue_el_boton_abrir(
+    client, tmp_path, free_ports
+):
+    """El caso de Next: el puerto acepta enseguida y el HTTP recien aparece
+    cuando termina de compilar. El sondeo unico del arranque da falso negativo."""
+    (port,) = free_ports(1)
+    # Acepta conexiones ya (para que `ready: port` de listo) y recien despues de
+    # unos segundos empieza a contestar HTTP de verdad.
+    tarde = (
+        "import socket, threading, time; "
+        "s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); "
+        f"s.bind(('127.0.0.1', {port})); s.listen(); "
+        "time.sleep(4); s.close(); "
+        "from http.server import HTTPServer, BaseHTTPRequestHandler; "
+        f"HTTPServer(('127.0.0.1', {port}), BaseHTTPRequestHandler).serve_forever()"
+    )
+    root = tmp_path / "tardio"
+    root.mkdir()
+    (root / "stack.yaml").write_text(
+        f'services:\n  web:\n    command: {sys.executable} -c "{tarde}"\n    port: {port}\n',
+        encoding="utf-8",
+    )
+    pid = registry.project_id(registry.add(root))
+    assert client.post(f"/api/projects/{pid}/up", json={}).status_code == 200
+
+    def abrible():
+        proyecto = client.get("/api/state").json()["projects"][0]
+        return proyecto["services"][0]["openable"]
+
+    assert esperar(abrible, 40), "el re-sondeo nunca le devolvio el boton"
+
+
+def test_un_puerto_mudo_no_frena_la_vista_de_estado(client, proyecto):
+    """El re-sondeo vive en su propio hilo. Si corriera en `_project_view`, un
+    puerto que acepta y no contesta bloquearia el request el timeout entero, y
+    con el al apagado, que comparte el threadpool."""
+    path, port = proyecto
+    pid = registry.project_id(path)
+    client.post(f"/api/projects/{pid}/up", json={})
+
+    def listo():
+        return client.get("/api/state").json()["projects"][0]["services"][0]["state"] == "ready"
+
+    assert esperar(listo)
+
+    # El socket pelado del fixture nunca contesta HTTP: es el peor caso.
+    inicio = time.time()
+    for _ in range(5):
+        assert client.get("/api/state").status_code == 200
+    assert time.time() - inicio < 2, "la vista de estado se llevo el timeout del sondeo"
+
+    inicio = time.time()
+    assert client.post(f"/api/projects/{pid}/down").status_code == 200
+    assert time.time() - inicio < 2, "apagar quedo detras del sondeo"

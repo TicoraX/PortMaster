@@ -359,12 +359,11 @@ def speaks_http(port: int) -> bool:
     Un 404 cuenta: la mayoria de las APIs no sirven nada en la raiz y siguen
     siendo HTTP. Lo que descarta al servicio es que no conteste.
 
-    ponytail: un solo sondeo, en el momento en que el servicio queda listo.
-    Reintentar cuesta el timeout entero por cada puerto que no habla HTTP. El
-    techo conocido es un servidor que compila en la primera peticion y tarda
-    segundos en contestarla, como el modo dev de Next: se queda sin boton hasta
-    el proximo arranque. La salida, si aparece, es re-sondear desde la vista de
-    estado y cachear, no reintentar aca y frenar el arranque.
+    Un solo sondeo, en el momento en que el servicio queda listo: reintentar
+    aca cuesta el timeout entero por cada puerto que no habla HTTP, y lo pagaria
+    el arranque. Al servidor que contesta tarde porque compila en la primera
+    peticion, como el modo dev de Next, lo recupera `Session._probe_late_http`
+    desde su propio hilo.
     """
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}", timeout=HTTP_PROBE_TIMEOUT):

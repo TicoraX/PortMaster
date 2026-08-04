@@ -36,6 +36,10 @@ log = logging.getLogger("portmaster.server")
 WEB = Path(__file__).parent / "web"
 LOG_LINES = 500
 PAGE_SIZE = 4
+# Esperas entre re-sondeos HTTP, en segundos. Cuatro intentos y se abandona: un
+# servicio que no habla HTTP no va a empezar a hacerlo, y lo que se busca cabe
+# en el primer medio minuto de vida del servicio.
+HTTP_RETRIES = (2, 5, 10, 20)
 
 # Cuotas por ventana de 15 minutos. La interfaz sondea el estado cada 2s, que da
 # unas 450 peticiones por ventana: un limite global de 100 la romperia en el uso
@@ -103,6 +107,10 @@ class Session:
     error: str | None = None
     engine: runner.Runner | None = None
     thread: threading.Thread | None = None
+    # Servicios que no contestaron HTTP al quedar listos y si al re-sondearlos.
+    # Vive aca y no en `Proc.http` para que el hilo del sondeo no le escriba
+    # estado al runner por atras.
+    late_http: set[str] = field(default_factory=set)
 
     def start(self) -> None:
         # force_terminal=False no es redundante con no_color: Rich mira FORCE_COLOR
@@ -120,6 +128,7 @@ class Session:
         try:
             self.engine.up(self.profile)
             self.state = "running"
+            threading.Thread(target=self._probe_late_http, daemon=True).start()
             if all(proc.service.detached for proc in self.engine.procs):
                 # Todo detached: los comandos ya terminaron y lo que quedo vivo
                 # (contenedores) esta fuera de nuestro arbol. follow() volveria
@@ -152,6 +161,9 @@ class Session:
 
     def _restart(self, name: str) -> None:
         assert self.engine is not None
+        # El servicio vuelve con un `Proc` nuevo y su propio sondeo: lo que
+        # sabiamos de la vida anterior deja de valer.
+        self.late_http.discard(name)
         try:
             self.engine.restart(name)
         except Exception as exc:  # el hilo no debe morir en silencio
@@ -173,6 +185,41 @@ class Session:
             self.engine.down()
         self.state = "stopped"
 
+    def _probe_late_http(self) -> None:
+        """Vuelve a preguntarle a los puertos que no contestaron al arrancar.
+
+        Un dev server de Next compila recien en la primera peticion: el sondeo
+        unico de `runner.speaks_http` da falso negativo y el proyecto se queda
+        sin boton Abrir hasta el proximo arranque.
+
+        Corre en su propio hilo y no en `_project_view` a proposito. La vista
+        de estado corre una vez por proyecto y por request, cada 2.5s y por
+        pestana abierta, en el threadpool que FastAPI comparte con apagar y con
+        matar procesos: un puerto que acepta y no contesta lo bloquea el timeout
+        entero, y saturarlo dejaria a la herramienta sin poder apagar nada justo
+        cuando algo anda mal.
+
+        Los intentos son finitos por la misma razon. Un servicio que no habla
+        HTTP no va a empezar a hacerlo, y sondearlo para siempre le manda un GET
+        a un dev server cada tantos segundos, que en Next dispara una
+        compilacion.
+        """
+        for espera in HTTP_RETRIES:
+            time.sleep(espera)
+            if self.state != "running" or self.engine is None:
+                return
+            pendientes = [
+                (p.service.name, p.known_port)
+                for p in self.engine.procs
+                if p.ready and p.known_port and not p.http and p.service.name not in self.late_http
+            ]
+            if not pendientes:
+                return
+            for name, port in pendientes:
+                if runner.speaks_http(port):
+                    self.late_http.add(name)
+                    log.info("%s contesto HTTP al re-sondear el puerto %d", name, port)
+
     def service_ports(self) -> dict[str, int]:
         """Puertos descubiertos al arrancar, para los servicios que no los declaran."""
         if self.engine is None:
@@ -183,7 +230,7 @@ class Session:
         """Servicios cuyo puerto contesta HTTP: los unicos que tiene sentido abrir."""
         if self.engine is None:
             return set()
-        return {p.service.name for p in self.engine.procs if p.http}
+        return {p.service.name for p in self.engine.procs if p.http} | self.late_http
 
     def service_states(self) -> dict[str, str]:
         if self.engine is None:

@@ -17,7 +17,6 @@ es un bug; son decisiones con fecha de vencimiento conocida.
 
 | Dónde | Qué se aguanta | Cuándo tocarlo |
 |---|---|---|
-| `runner.speaks_http` | Un solo sondeo al quedar listo | Un dev server que compila en la primera petición (Next) se queda sin botón `Abrir`. La salida es re-sondear desde la vista de estado con caché, no reintentar en el arranque |
 | `server._markers` | Un `stat` por marcador y por carpeta, hasta ~1800 en un listado grande | Si el explorador se siente lento en una carpeta con cientos de hijos: un solo `scandir` por carpeta e intersecar nombres |
 | `server.RateLimit` | Ventana en memoria, un proceso | Si alguna vez hay más de un worker |
 | `ports._pid_by_process_scan` | O(procesos), una llamada al SO por proceso | Solo corre en el camino lento. Si pesa, cachear la tabla entre puertos de un mismo escaneo |
