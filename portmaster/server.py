@@ -378,6 +378,31 @@ def create_app(token: str) -> FastAPI:
         return {"ok": True}
 
     @app.post(
+        "/api/projects/{pid}/freeze",
+        dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)],
+    )
+    def freeze(pid: str) -> dict:
+        """Congela lo detectado en un stack.yaml editable.
+
+        La ruta sale del registro, nunca del cuerpo del request, y el contenido
+        lo genera `detect.to_yaml`. Un stack.yaml es codigo ejecutable por
+        diseno (ver `shell=True` en CLAUDE.md): un endpoint que aceptara
+        cualquiera de las dos cosas del cliente seria ejecucion remota local
+        detras del token, en vez de un boton que hace lo que dice.
+        """
+        path = _lookup(pid)
+        try:
+            target = detect.freeze(path)
+        except config.ConfigError as exc:
+            log.info("congelado rechazado para %s: %s", pid, exc)
+            # Ya existe, o no hay nada que congelar: en los dos casos el estado
+            # del disco es el que manda, no el pedido.
+            raise HTTPException(409, str(exc))
+
+        log.info("stack congelado en %s", target)
+        return {"ok": True, "path": str(target)}
+
+    @app.post(
         "/api/projects/{pid}/up",
         dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)],
     )

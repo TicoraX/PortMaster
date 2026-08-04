@@ -1,11 +1,12 @@
 import sys
 import textwrap
 import time
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from portmaster import registry, server
+from portmaster import config, registry, server
 
 TOKEN = "token-de-prueba-suficientemente-largo"
 SERVER = (
@@ -513,3 +514,37 @@ def test_un_puerto_mudo_no_frena_la_vista_de_estado(client, proyecto):
     inicio = time.time()
     assert client.post(f"/api/projects/{pid}/down").status_code == 200
     assert time.time() - inicio < 2, "apagar quedo detras del sondeo"
+
+
+def _con_compose(tmp_path, nombre="congelable"):
+    root = tmp_path / nombre
+    root.mkdir()
+    (root / "compose.yaml").write_text(
+        'services:\n  db:\n    image: postgres\n    ports: ["5432:5432"]\n', encoding="utf-8"
+    )
+    return root, registry.project_id(registry.add(root))
+
+
+def test_congelar_escribe_un_stack_yaml_que_carga(client, tmp_path):
+    root, pid = _con_compose(tmp_path)
+    cuerpo = client.post(f"/api/projects/{pid}/freeze").json()
+
+    escrito = Path(cuerpo["path"])
+    assert escrito == root / "stack.yaml"
+    # Lo escrito tiene que ser cargable: congelar algo que despues no abre seria peor
+    # que no ofrecerlo.
+    assert [s.name for s in config.load(escrito).resolve()] == ["db"]
+    # Y deja de ser un proyecto detectado.
+    assert client.get("/api/state").json()["projects"][0]["detected"] is False
+
+
+def test_congelar_dos_veces_no_pisa_el_archivo(client, tmp_path):
+    root, pid = _con_compose(tmp_path)
+    client.post(f"/api/projects/{pid}/freeze")
+    original = (root / "stack.yaml").read_text(encoding="utf-8")
+
+    (root / "stack.yaml").write_text(original + "\n# editado a mano\n", encoding="utf-8")
+    respuesta = client.post(f"/api/projects/{pid}/freeze")
+
+    assert respuesta.status_code == 409
+    assert "editado a mano" in (root / "stack.yaml").read_text(encoding="utf-8")

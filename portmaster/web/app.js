@@ -245,6 +245,25 @@ function buildCard(project) {
     );
   });
 
+  // Congelar escribe en el disco del usuario, asi que pide confirmacion. Dos
+  // pasos sobre el mismo boton en vez de un dialogo: la interfaz no tiene
+  // primitiva de confirmacion y `window.confirm` rompe el registro visual.
+  const freezeButton = root.querySelector('[data-act="freeze"]');
+  freezeButton.addEventListener("click", (event) => {
+    const button = event.currentTarget;
+    if (button.dataset.armed !== "true") {
+      button.dataset.armed = "true";
+      button.textContent = `Escribir en ${project.path}\\stack.yaml?`;
+      setTimeout(() => disarmFreeze(button), 6000);
+      return;
+    }
+    disarmFreeze(button);
+    act(button, async () => {
+      const hecho = await api(`/api/projects/${project.id}/freeze`, { method: "POST" });
+      flash(`Escrito ${hecho.path}. Revisalo antes de confiar en el.`, "good");
+    });
+  });
+
   const logsButton = root.querySelector('[data-act="logs"]');
   logsButton.addEventListener("click", () => {
     entry.logsOpen = !entry.logsOpen;
@@ -255,6 +274,11 @@ function buildCard(project) {
 
   cards.set(project.id, entry);
   return entry;
+}
+
+function disarmFreeze(button) {
+  delete button.dataset.armed;
+  button.textContent = "Congelar a stack.yaml";
 }
 
 function updateCard(entry, project) {
@@ -282,6 +306,11 @@ function updateCard(entry, project) {
     open.href = `http://localhost:${abrible.port}`;
     open.title = `Abrir ${abrible.name} en http://localhost:${abrible.port}`;
   }
+
+  // Solo lo detectado se puede congelar: lo que ya tiene archivo, no.
+  const freeze = root.querySelector('[data-act="freeze"]');
+  freeze.hidden = !project.detected;
+  if (freeze.hidden) disarmFreeze(freeze);
 
   const error = root.querySelector(".project__error");
   error.textContent = project.error || "";

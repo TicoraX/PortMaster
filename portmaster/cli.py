@@ -333,19 +333,14 @@ def init_cmd(
 ) -> None:
     """Escribe un stack.yaml con lo detectado, para editarlo a mano."""
     root = Path(path).expanduser().resolve()
-    target = root / config.CONFIG_NAMES[0]
-    if any((root / name).is_file() for name in config.CONFIG_NAMES):
-        err.print(f"{root} ya tiene un stack.yaml. No se sobreescribe.")
+    try:
+        target = detect.freeze(root)
+    except config.ConfigError as exc:
+        err.print(str(exc))
         raise typer.Exit(1)
 
-    stack = detect.detect(root)
-    if stack is None:
-        err.print(f"No se detecto nada conocido en {root} (compose, package.json, manage.py)")
-        raise typer.Exit(1)
-
-    target.write_text(detect.to_yaml(stack), encoding="utf-8")
     console.print(f"Escrito: [bold]{target}[/]")
-    console.print(f"[dim]{len(stack.services)} servicios. Revisalo antes de confiar en el.[/]")
+    console.print("[dim]Revisalo antes de confiar en el.[/]")
 
 
 @app.command("serve")

@@ -23,7 +23,7 @@ from pathlib import Path
 
 import yaml
 
-from .config import ConfigError, Service, Stack, find, load
+from .config import CONFIG_NAMES, ConfigError, Service, Stack, find, load
 
 COMPOSE_NAMES = ("compose.yaml", "compose.yml", "docker-compose.yml", "docker-compose.yaml")
 
@@ -154,6 +154,25 @@ def _profiles_for(
         nombre: base + tuple(n for n, perfiles in opcionales.items() if nombre in perfiles)
         for nombre in sorted(nombres)
     }
+
+
+def freeze(root: Path) -> Path:
+    """Escribe lo detectado como stack.yaml. Devuelve el archivo escrito.
+
+    Vive aca y no en `cli` porque la interfaz ofrece lo mismo, y `CLAUDE.md`
+    pide que el CLI y el servidor sean dos consumidores de la misma funcion.
+    """
+    target = root / CONFIG_NAMES[0]
+    if any((root / name).is_file() for name in CONFIG_NAMES):
+        raise ConfigError(f"{root} ya tiene un stack.yaml. No se sobreescribe.")
+
+    stack = detect(root)
+    if stack is None:
+        raise ConfigError(
+            f"No se detecto nada conocido en {root} (compose, package.json, manage.py)"
+        )
+    target.write_text(to_yaml(stack), encoding="utf-8")
+    return target
 
 
 def to_yaml(stack: Stack) -> str:

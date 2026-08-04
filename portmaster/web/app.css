@@ -544,6 +544,13 @@ body {
   color: var(--color-ink-3);
 }
 
+/* El segundo paso de congelar: el boton dice que archivo va a escribir y se
+   desarma solo. Sin color de peligro, porque no destruye nada. */
+.project__freeze[data-armed] {
+  color: var(--color-ink);
+  border-color: var(--color-ink-3);
+}
+
 .btn {
   font-family: var(--font-body);
   font-size: var(--text-sm);

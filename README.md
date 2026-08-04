@@ -177,6 +177,12 @@ portmaster remove .     # des-registrar un proyecto (alias: portmaster rm)
 Estado de cada servicio, arrancar y apagar stacks, liberar puertos tomados por
 procesos ajenos, y logs en vivo por proyecto.
 
+Un proyecto detectado trae `Congelar a stack.yaml`, que es `portmaster init`
+sin salir de la interfaz: útil cuando ves en la tarjeta que detectó un puerto
+que no era. Pide confirmación sobre el mismo botón, escribe la ruta del
+registro y nunca una que venga del navegador, y no sobreescribe un archivo
+existente.
+
 Cada servicio arrancado desde la interfaz trae un `Reiniciar` propio, que baja y
 sube ese solo. Cuando el frontend se cuelga, los contenedores que estaban bien
 no tienen por qué pagarlo.
