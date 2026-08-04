@@ -24,6 +24,15 @@ es un bug; son decisiones con fecha de vencimiento conocida.
 | `runner` (módulo) | Logs prefijados, sin dashboard `rich.live` | Cuando haya un caso concreto que lo pida |
 | `server.Session.stop` | Un detached en curso no se corta, se lo espera | Si apagar mientras `docker compose up -d` construye una imagen se hace molesto: matar el árbol del comando detached |
 
+## Sin identificar
+
+**Un fallo en la suite, una vez cada veinte corridas.** Apareció una sola vez
+al agregar el arranque en paralelo, y no volvió en 17 corridas completas ni en
+12 de `test_runner.py`. La salida de esa corrida se perdió, así que no se sabe
+qué test fue. No es motivo para frenar nada, y sí para mirar el primer rojo de
+CI con atención en vez de darle a reintentar: si el paralelismo introdujo una
+intermitencia, es exactamente así como se va a manifestar.
+
 ## Lo que se puede agregar
 
 Ideas, no compromisos. Cada una con el motivo por el que todavía no está.
