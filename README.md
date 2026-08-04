@@ -106,6 +106,44 @@ están declarados en el archivo.
 `portmaster init` escribe lo detectado como `stack.yaml` para editarlo a mano.
 No sobreescribe uno existente.
 
+### Bajar lo que sobrevive a la terminal
+
+```bash
+portmaster down
+portmaster down --profile backend
+```
+
+`Ctrl-C` sobre un `portmaster up` apaga a sus hijos, pero un
+`docker compose up -d` termina enseguida y deja los contenedores corriendo.
+`down` ejecuta el `stop` de cada servicio que lo declara, en orden inverso al
+de arranque. Si ningún servicio declara `stop`, lo dice y no hace nada: esos
+son hijos de la terminal y ya se fueron con `Ctrl-C`.
+
+### Diagnóstico
+
+```bash
+portmaster doctor
+```
+
+Revisa, sin arrancar nada, lo que suele impedir un arranque: qué stack se lee o
+se detecta, si cada comando existe en el `PATH`, si el daemon de Docker
+contesta, y qué puertos declarados están ocupados y por quién. Cada chequeo en
+rojo trae la línea para arreglarlo.
+
+```
+ok    token                  C:\Users\vos\.portmaster\token
+ok    stack                  detectado (3 servicios)
+ok    comando docker         C:\Program Files\Docker\...\docker.EXE
+FALLA daemon de docker       no esta en ejecucion
+                             -> abri Docker Desktop
+aviso puerto 3000            ocupado por node.exe (pid 24180), lo pide web
+                             -> portmaster free 3000
+```
+
+Sale con 1 solo si algo impide arrancar. Un puerto ocupado es aviso, porque
+`portmaster up` ofrece liberarlo. Fuera de un proyecto revisa nada más el
+entorno, que es lo que uno quiere recién instalado.
+
 ### Abrir el stack en el navegador
 
 ```bash
@@ -124,11 +162,16 @@ Cuando tenés varios proyectos, el CLI se queda corto: trabaja sobre el
 directorio actual. La interfaz los muestra todos a la vez.
 
 ```bash
-pip install 'portmaster[web]'
+portmaster serve        # abre http://127.0.0.1:7666
+```
+
+Viene con la instalación, no hace falta nada más. Registrar proyectos se puede
+desde la propia interfaz con `Explorar…`, o desde la terminal:
+
+```bash
 portmaster add .        # registrar el proyecto actual
 portmaster list         # listar proyectos registrados (alias: portmaster ls)
 portmaster remove .     # des-registrar un proyecto (alias: portmaster rm)
-portmaster serve        # abre http://127.0.0.1:7666
 ```
 
 Estado de cada servicio, arrancar y apagar stacks, liberar puertos tomados por

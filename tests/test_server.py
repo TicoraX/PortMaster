@@ -173,13 +173,14 @@ def test_paginado(client, tmp_path):
 
     primera = client.get("/api/state").json()
     assert primera["total"] == 11
-    assert primera["pages"] == 2
+    esperadas = -(-11 // server.PAGE_SIZE)
+    assert primera["pages"] == esperadas
     assert len(primera["projects"]) == server.PAGE_SIZE
 
     segunda = client.get("/api/state?page=2").json()
-    assert len(segunda["projects"]) == 11 - server.PAGE_SIZE
+    assert len(segunda["projects"]) == server.PAGE_SIZE
     ids = {p["id"] for p in primera["projects"]} | {p["id"] for p in segunda["projects"]}
-    assert len(ids) == 11, "ningun proyecto se repite ni se pierde entre paginas"
+    assert len(ids) == server.PAGE_SIZE * 2, "ningun proyecto se repite ni se pierde entre paginas"
 
 
 def test_una_pagina_de_mas_cae_en_la_ultima(client, tmp_path):
@@ -437,6 +438,15 @@ def test_browse_normaliza_los_puntos(client, tmp_path):
     (tmp_path / "a" / "b").mkdir(parents=True)
     cuerpo = client.get("/api/browse", params={"path": str(tmp_path / "a" / "b" / "..")}).json()
     assert cuerpo["path"] == str((tmp_path / "a").resolve())
+
+
+def test_busqueda_por_estado(client, tmp_path):
+    registrar(tmp_path, "detenido1", "detenido2")
+    detenidos = client.get("/api/state?status=stopped").json()
+    assert detenidos["total"] == 2
+
+    corriendo = client.get("/api/state?status=running").json()
+    assert corriendo["total"] == 0
 
 
 def test_sink_flush_linea_parcial():

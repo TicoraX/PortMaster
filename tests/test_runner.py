@@ -260,6 +260,11 @@ def test_el_error_dice_la_causa_no_solo_el_codigo(tmp_path):
         engine.up()
 
 
+def test_clean_error_message_docker_daemon():
+    raw = 'error during connect: Get "http://%2F%2F.%2Fpipe%2Fdocker_engine/v1.24/containers/json": open //./pipe/docker_engine: The system cannot find the file specified.'
+    assert runner.clean_error_message(raw) == "Docker no está en ejecución (abrí Docker Desktop)"
+
+
 def test_los_avisos_no_tapan_la_causa(tmp_path):
     """compose escupe un level=warning por cada variable sin definir, despues del
     error de verdad. La ultima linea a secas seria el aviso."""

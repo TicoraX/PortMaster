@@ -9,7 +9,7 @@ import psutil
 from rich.console import Console
 from rich.table import Table
 
-from . import __version__, config, detect, ports, registry, runner
+from . import __version__, config, detect, doctor, ports, registry, runner
 
 app = typer.Typer(
     help="Orquestador de entornos de desarrollo locales.",
@@ -160,7 +160,10 @@ def up_cmd(
         raise typer.Exit(1)
 
     if all(p.service.detached for p in engine.procs):
-        console.print("[green]Todo listo.[/] Servicios detached, nada que seguir.")
+        console.print(
+            "[green]Todo listo.[/] Servicios detached, nada que seguir. "
+            "Para bajarlos: [bold]portmaster down[/]"
+        )
         return
 
     console.print("[green]Todo listo.[/] Ctrl-C para apagar.")
@@ -170,6 +173,71 @@ def up_cmd(
         console.print()
     finally:
         engine.down()
+
+
+MARCA = {"ok": "[green]ok   [/]", "warn": "[yellow]aviso[/]", "fail": "[red]FALLA[/]"}
+
+
+@app.command("doctor")
+def doctor_cmd() -> None:
+    """Revisa que puede impedir el arranque, sin arrancar nada."""
+    checks = doctor.run(Path.cwd())
+
+    ancho = max(len(c.name) for c in checks)
+    for check in checks:
+        # Sin `highlight`: rich le pone color a los numeros y a las rutas, y
+        # esta salida es para copiar y pegar, no para mirar.
+        console.print(
+            f"{MARCA[check.level]} {check.name.ljust(ancho)}  {check.detail}", highlight=False
+        )
+        if check.fix and check.level != "ok":
+            console.print(f"{' ' * (ancho + 8)}[dim]-> {check.fix}[/]", highlight=False)
+
+    if doctor.blocking(checks):
+        raise typer.Exit(1)
+
+
+@app.command("down")
+def down_cmd(
+    profile: str = typer.Option(None, "--profile", "-p", help="Perfil de stack.yaml."),
+) -> None:
+    """Apaga lo que sobrevive a la terminal: contenedores y demas servicios detached."""
+    try:
+        stack = detect.stack_for(Path.cwd())
+        services = stack.resolve(profile)
+    except config.ConfigError as exc:
+        err.print(str(exc))
+        raise typer.Exit(1)
+
+    console.print(f"[bold]{stack.name}[/] [dim]{stack.path}[/]")
+
+    # En orden inverso al de arranque, igual que `Runner.down`: lo que depende
+    # de algo se baja antes que aquello de lo que depende.
+    apagables = [s for s in reversed(services) if s.stop]
+    if not apagables:
+        console.print(
+            "Ningun servicio declara [bold]stop[/]. Los que arranca "
+            "[bold]portmaster up[/] son hijos de esa terminal y se apagan con Ctrl-C."
+        )
+        return
+
+    fallaron = 0
+    for service in apagables:
+        console.print(f"[dim]{service.name} | $ {service.stop}[/]")
+        done = runner.run_stop(service)
+        if done is None:
+            err.print(f"{service.name}: el apagado no termino en {runner.STOP_TIMEOUT}s")
+            fallaron += 1
+            continue
+        for line in (done.stdout or "").splitlines():
+            console.print(f"[dim]{service.name} |[/] {line.rstrip()}")
+        if done.returncode != 0:
+            err.print(f"{service.name}: el apagado fallo con codigo {done.returncode}")
+            fallaron += 1
+
+    if fallaron:
+        raise typer.Exit(1)
+    console.print("[green]Apagado.[/]")
 
 
 @app.command("open")

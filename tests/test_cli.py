@@ -1,5 +1,6 @@
 """Comandos del CLI. Servidores reales, igual que el resto del suite."""
 
+import sys
 import textwrap
 import threading
 import webbrowser
@@ -61,6 +62,104 @@ def test_open_con_puerto_explicito(tmp_path, monkeypatch, servidor_http, abierto
     resultado = runner.invoke(cli.app, ["open", str(servidor_http)])
     assert resultado.exit_code == 0
     assert abierto == [f"http://localhost:{servidor_http}"]
+
+
+def test_doctor_sin_proyecto_no_revienta(tmp_path, monkeypatch):
+    """Recien instalado, en una carpeta cualquiera, es el primer comando que
+    alguien corre: no puede salir con ConfigError."""
+    monkeypatch.chdir(tmp_path)
+    resultado = runner.invoke(cli.app, ["doctor"])
+    assert resultado.exit_code == 0
+    assert "no es un proyecto conocido" in resultado.output
+
+
+def test_doctor_delata_el_puerto_ocupado_y_dice_como_liberarlo(
+    tmp_path, monkeypatch, servidor_http
+):
+    (tmp_path / "stack.yaml").write_text(
+        f"services:\n  web:\n    command: echo web\n    port: {servidor_http}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["doctor"])
+    assert f"portmaster free {servidor_http}" in resultado.output
+    # Un puerto ocupado es aviso, no falla: `up` ofrece liberarlo.
+    assert resultado.exit_code == 0
+
+
+def test_doctor_falla_si_el_comando_no_esta_en_el_path(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text(
+        "services:\n  web:\n    command: noexistecomandoasi --dev\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["doctor"])
+    assert resultado.exit_code == 1
+    assert "noexistecomandoasi" in resultado.output
+
+
+def test_doctor_falla_con_un_stack_roto(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text("services:\n  web:\n    puerto: 3000\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["doctor"])
+    assert resultado.exit_code == 1
+    assert "stack.example.yaml" in resultado.output
+
+
+def test_down_corre_los_stop_en_orden_inverso(tmp_path, monkeypatch):
+    """Un stack de compose puro sobrevive a la terminal: `down` es la unica forma
+    de bajarlo, y el orden importa igual que al arrancar."""
+    marca = tmp_path / "orden.txt"
+    escribir = "import sys; open(r'{f}', 'a').write('{q}\\n')"
+    (tmp_path / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        services:
+          db:
+            command: echo db
+            detached: true
+            stop: {sys.executable} -c "{escribir.format(f=marca, q='db')}"
+          api:
+            command: echo api
+            detached: true
+            needs: [db]
+            stop: {sys.executable} -c "{escribir.format(f=marca, q='api')}"
+        """),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["down"])
+    assert resultado.exit_code == 0
+    assert marca.read_text(encoding="utf-8").split() == ["api", "db"]
+
+
+def test_down_sin_ningun_stop_lo_dice_y_no_falla(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text(
+        "services:\n  web:\n    command: echo web\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["down"])
+    assert resultado.exit_code == 0
+    assert "Ctrl-C" in resultado.output
+
+
+def test_down_con_un_stop_que_falla_sale_1(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        services:
+          db:
+            command: echo db
+            detached: true
+            stop: {sys.executable} -c "raise SystemExit(2)"
+        """),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert runner.invoke(cli.app, ["down"]).exit_code == 1
 
 
 def test_open_sin_nada_arriba_no_abre_nada(tmp_path, monkeypatch, free_ports, abierto):

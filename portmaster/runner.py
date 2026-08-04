@@ -155,19 +155,8 @@ class Runner:
         corriendo. Sin este comando, "apagar" no apaga nada.
         """
         self._say(proc, f"$ {proc.service.stop}")
-        try:
-            done = subprocess.run(
-                proc.service.stop,
-                shell=True,
-                cwd=proc.service.cwd,
-                env={**os.environ, **proc.service.env},
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                errors="replace",
-                timeout=STOP_TIMEOUT,
-            )
-        except subprocess.TimeoutExpired:
+        done = run_stop(proc.service)
+        if done is None:
             self._say(proc, f"el apagado no termino en {STOP_TIMEOUT}s")
             return
         for line in (done.stdout or "").splitlines():
@@ -300,7 +289,44 @@ class Runner:
         self.console.print(f"[{proc.color}]{name}[/] [dim]|[/] {text}", highlight=False)
 
 
+def run_stop(service: Service) -> subprocess.CompletedProcess | None:
+    """Corre el `stop:` de un servicio. None si no termino a tiempo.
+
+    Vive afuera del `Runner` porque `portmaster down` tiene que poder apagar un
+    stack que arranco otro proceso: los contenedores de un `docker compose up -d`
+    sobreviven a la terminal que los levanto, y ahi no hay ningun `Proc` vivo del
+    que colgarse.
+    """
+    assert service.stop
+    try:
+        return subprocess.run(
+            service.stop,
+            shell=True,
+            cwd=service.cwd,
+            env={**os.environ, **service.env},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+            timeout=STOP_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+
+
 WHY_MAX = 200
+
+
+def clean_error_message(text: str) -> str:
+    """Simplifica mensajes de error extensos o tecnicos como fallas de Docker daemon."""
+    lower = text.lower()
+    if any(k in lower for k in ("docker_engine", "docker daemon", "cannot connect to the docker", "is the docker daemon running", "docker.sock")):
+        return "Docker no está en ejecución (abrí Docker Desktop)"
+    if "address already in use" in lower or "wsaeaddrinuse" in lower:
+        return "El puerto ya está ocupado por otro proceso"
+    if "permission denied" in lower or "access is denied" in lower:
+        return "Permiso denegado al ejecutar el comando"
+    return text
 
 
 def _why(proc: Proc) -> str:
@@ -313,9 +339,10 @@ def _why(proc: Proc) -> str:
     for line in reversed(proc.tail):
         text = line.strip()
         if text and "level=warning" not in text:
-            if len(text) > WHY_MAX:
-                text = text[: WHY_MAX - 1].rstrip() + "…"
-            return f": {text}"
+            cleaned = clean_error_message(text)
+            if len(cleaned) > WHY_MAX:
+                cleaned = cleaned[: WHY_MAX - 1].rstrip() + "…"
+            return f": {cleaned}"
     return ""
 
 

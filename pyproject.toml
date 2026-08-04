@@ -19,11 +19,17 @@ dependencies = [
     "rich>=13",
     "psutil>=6.0",
     "pyyaml>=6.0",
+    # La interfaz web no es un extra. Con `pipx` o `uv tool`, que son los dos
+    # metodos que documenta el README, `pip install 'portmaster[web]'` instala
+    # en el interprete del PATH y no en el venv aislado de la herramienta: el
+    # usuario queda en un bucle donde el mensaje de error sugiere un comando
+    # que no arregla nada. Son 15 MB en algo que ya trae psutil y rich.
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
 ]
 
 [project.optional-dependencies]
-web = ["fastapi>=0.115", "uvicorn>=0.30"]
-dev = ["pytest>=8", "httpx>=0.27", "portmaster[web]"]
+dev = ["pytest>=8", "httpx>=0.27"]
 
 [project.urls]
 Homepage = "https://github.com/TicoraX/PortMaster"
