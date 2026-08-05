@@ -53,6 +53,9 @@
             <span class="dot" data-tone="bad" aria-hidden="true"></span>
             <span>Con error</span>
           </button>
+          <button class="chip chip--ports" type="button" id="btn-ports-modal">
+            <span>Mapa de puertos</span>
+          </button>
         </div>
       </div>
 
@@ -95,6 +98,14 @@
         </div>
       </form>
 
+      <dialog class="picker ports-modal" id="ports-modal" aria-label="Mapa de puertos">
+        <div class="picker__head">
+          <p class="picker__path">Mapa de puertos del sistema</p>
+          <button class="btn btn--quiet" type="button" data-ports-modal="close">Cerrar</button>
+        </div>
+        <ul class="orphans__list" id="ports-modal-list"></ul>
+      </dialog>
+
       <dialog class="picker" id="picker" aria-label="Elegir carpeta">
         <div class="picker__head">
           <p class="picker__path" id="picker-path"></p>
@@ -105,11 +116,9 @@
         <div class="picker__foot">
           <div class="picker__nav">
             <button class="btn" type="button" data-picker="back" disabled>Volver</button>
-            <button class="btn" type="button" data-picker="up">Subir</button>
+            <button class="btn" type="button" data-picker="up">Arriba</button>
           </div>
-          <button class="btn btn--primary" type="button" data-picker="pick">
-            Registrar esta carpeta
-          </button>
+          <button class="btn btn--primary" type="button" data-picker="pick">Usar esta carpeta</button>
         </div>
       </dialog>
     </main>
@@ -160,7 +169,10 @@
                 Quitar proyecto
               </button>
             </div>
-            <pre class="logs" hidden tabindex="0"></pre>
+            <div class="logs__box" hidden>
+              <input class="logs__filter" type="search" placeholder="Filtrar logs..." aria-label="Filtrar logs" />
+              <pre class="logs" tabindex="0"></pre>
+            </div>
           </div>
         </div>
       </article>

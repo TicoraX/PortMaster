@@ -120,11 +120,29 @@ def project(root: Path) -> list[Check]:
 
     origen = "detectado" if stack.detected else str(stack.path)
     checks = [Check("stack", "ok", f"{origen} ({len(services)} servicios)")]
+    checks += _dotenv(root)
     checks += _executables(services)
     if any(_program(s.command) == "docker" for s in services):
         checks.append(_docker())
     checks += _ports(services)
     return checks
+
+
+def _dotenv(root: Path) -> list[Check]:
+    examples = [p for p in (root / ".env.example", root / ".env.template") if p.is_file()]
+    if not examples:
+        return []
+    if (root / ".env").is_file():
+        return [Check("variables de entorno", "ok", ".env presente")]
+    ejemplo = examples[0].name
+    return [
+        Check(
+            "variables de entorno",
+            "warn",
+            f"{ejemplo} existe pero falta .env local",
+            f"cp {ejemplo} .env",
+        )
+    ]
 
 
 def _executables(services: list[config.Service]) -> list[Check]:

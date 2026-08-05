@@ -108,6 +108,19 @@ def test_doctor_falla_con_un_stack_roto(tmp_path, monkeypatch):
     assert "stack.example.yaml" in resultado.output
 
 
+def test_doctor_advierte_falta_de_dotenv(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text(
+        "services:\n  web:\n    command: python web\n", encoding="utf-8"
+    )
+    (tmp_path / ".env.example").write_text("FOO=bar\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["doctor"])
+    assert "cp .env.example .env" in resultado.output
+    assert resultado.exit_code == 0
+
+
+
 def test_down_corre_los_stop_en_orden_inverso(tmp_path, monkeypatch):
     """Un stack de compose puro sobrevive a la terminal: `down` es la unica forma
     de bajarlo, y el orden importa igual que al arrancar."""

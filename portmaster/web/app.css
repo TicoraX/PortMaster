@@ -665,6 +665,23 @@ body {
 
 /* logs -------------------------------------------------------------------- */
 
+.logs__box {
+  margin-top: var(--space-md);
+}
+
+.logs__filter {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-ink);
+  background: var(--color-paper-2);
+  border: var(--rule) solid var(--color-rule);
+  border-radius: var(--radius);
+  padding: 0.4rem 0.6rem;
+  margin-bottom: var(--space-xs);
+}
+
 .logs {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
@@ -673,13 +690,17 @@ body {
   background: var(--color-paper-2);
   border: var(--rule) solid var(--color-rule);
   border-radius: var(--radius);
-  margin: var(--space-md) 0 0;
+  margin: 0;
   padding: var(--space-md);
   max-block-size: 22rem;
   overflow: auto;
   overscroll-behavior: contain;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.chip--ports {
+  margin-left: auto;
 }
 
 /* alta de proyecto -------------------------------------------------------- */

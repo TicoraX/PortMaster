@@ -29,6 +29,9 @@ const ui = {
   health: document.getElementById("health"),
   notify: document.getElementById("notify"),
   pathSuggestions: document.getElementById("path-suggestions"),
+  btnPortsModal: document.getElementById("btn-ports-modal"),
+  portsModal: document.getElementById("ports-modal"),
+  portsModalList: document.getElementById("ports-modal-list"),
 };
 
 const TITLE = document.title;
@@ -269,10 +272,19 @@ function buildCard(project) {
     });
   });
 
+  const logsBox = root.querySelector(".logs__box");
+  const logsFilter = root.querySelector(".logs__filter");
+  if (logsFilter) {
+    logsFilter.addEventListener("input", () => {
+      renderLogsText(entry);
+    });
+  }
+
   const logsButton = root.querySelector('[data-act="logs"]');
   logsButton.addEventListener("click", () => {
     entry.logsOpen = !entry.logsOpen;
-    logs.hidden = !entry.logsOpen;
+    if (logsBox) logsBox.hidden = !entry.logsOpen;
+    else logs.hidden = !entry.logsOpen;
     logsButton.setAttribute("aria-expanded", String(entry.logsOpen));
     if (entry.logsOpen) pullLogs(project.id, entry);
   });
@@ -359,14 +371,27 @@ async function pullLogs(id, entry) {
     const data = await api(`/api/projects/${id}/logs?since=${entry.logSeq}`);
     if (!data.lines.length) return;
     entry.logSeq = data.lines[data.lines.length - 1].seq;
-    const logs = entry.root.querySelector(".logs");
-    const atBottom =
-      logs.scrollHeight - logs.scrollTop - logs.clientHeight < 40;
-    logs.append(data.lines.map((line) => line.text).join("\n") + "\n");
-    if (atBottom) logs.scrollTop = logs.scrollHeight;
+    entry.rawLogs = (entry.rawLogs || "") + data.lines.map((l) => l.text).join("\n") + "\n";
+    renderLogsText(entry);
   } catch {
     /* el proximo ciclo reintenta */
   }
+}
+
+function renderLogsText(entry) {
+  const logsEl = entry.root.querySelector(".logs");
+  const filterInput = entry.root.querySelector(".logs__filter");
+  if (!logsEl) return;
+  const atBottom = logsEl.scrollHeight - logsEl.scrollTop - logsEl.clientHeight < 40;
+  const raw = entry.rawLogs || "";
+  const filter = (filterInput ? filterInput.value : "").trim().toLowerCase();
+  if (!filter) {
+    logsEl.textContent = raw;
+  } else {
+    const lines = raw.split("\n");
+    logsEl.textContent = lines.filter((l) => l.toLowerCase().includes(filter)).join("\n");
+  }
+  if (atBottom) logsEl.scrollTop = logsEl.scrollHeight;
 }
 
 function render(projects, data) {
@@ -791,5 +816,112 @@ ui.enroll.addEventListener("submit", (event) => {
   });
 });
 
-refresh();
-setInterval(refresh, POLL_MS);
+/* mapa de puertos modal --------------------------------------------------- */
+
+if (ui.btnPortsModal && ui.portsModal) {
+  ui.btnPortsModal.addEventListener("click", () => {
+    ui.portsModal.showModal();
+    refreshPortsModal();
+  });
+  const closeBtn = ui.portsModal.querySelector('[data-ports-modal="close"]');
+  if (closeBtn) {
+    closeBtn.addEventListener("click", () => {
+      ui.portsModal.close();
+    });
+  }
+}
+
+async function refreshPortsModal() {
+  if (!ui.portsModalList) return;
+  try {
+    const [stateData, orphansData] = await Promise.all([
+      api("/api/state?size=50"),
+      api("/api/ports/orphans"),
+    ]);
+
+    const items = [];
+    for (const project of stateData.projects || []) {
+      for (const service of project.services || []) {
+        if (service.port) {
+          items.push({
+            port: service.port,
+            label: `${project.name} · ${service.name}`,
+            kind: service.state === "ready" ? "corriendo" : "detenido",
+            openable: service.openable,
+          });
+        }
+      }
+    }
+
+    for (const orphan of orphansData.orphans || []) {
+      items.push({
+        port: orphan.port,
+        label: `Intruso · ${orphan.name} (${orphan.project})`,
+        kind: "intruso",
+        isOrphan: true,
+      });
+    }
+
+    items.sort((a, b) => a.port - b.port);
+
+    if (items.length === 0) {
+      const empty = document.createElement("li");
+      empty.className = "orphan orphan--empty";
+      empty.textContent = "Sin puertos asignados ni intrusos";
+      ui.portsModalList.replaceChildren(empty);
+      return;
+    }
+
+    ui.portsModalList.replaceChildren(
+      ...items.map((item) => {
+        const li = document.createElement("li");
+        li.className = "orphan";
+
+        const portTag = document.createElement("span");
+        portTag.className = "orphan__port";
+        portTag.textContent = `:${item.port}`;
+
+        const info = document.createElement("div");
+        info.className = "orphan__info";
+
+        const name = document.createElement("div");
+        name.className = "orphan__name";
+        name.textContent = item.label;
+
+        const meta = document.createElement("div");
+        meta.className = "orphan__meta";
+        meta.textContent = `Estado: ${item.kind}`;
+
+        info.append(name, meta);
+
+        if (item.openable) {
+          const actLink = document.createElement("a");
+          actLink.className = "btn btn--open";
+          actLink.target = "_blank";
+          actLink.rel = "noopener noreferrer";
+          actLink.href = `http://localhost:${item.port}`;
+          actLink.textContent = "Abrir ↗";
+          li.append(portTag, info, actLink);
+        } else if (item.isOrphan) {
+          const killBtn = document.createElement("button");
+          killBtn.className = "orphan__kill";
+          killBtn.textContent = "Cerrar";
+          killBtn.type = "button";
+          killBtn.addEventListener("click", () => {
+            act(killBtn, async () => {
+              await api(`/api/ports/${item.port}/kill`, { method: "POST" });
+              await refreshPortsModal();
+            });
+          });
+          li.append(portTag, info, killBtn);
+        } else {
+          li.append(portTag, info);
+        }
+
+        return li;
+      }),
+    );
+  } catch {
+    // Silencioso
+  }
+}
