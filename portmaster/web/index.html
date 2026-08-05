@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PortMaster</title>
+    <link rel="icon" id="favicon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='40' fill='%2364748b'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="/static/app.css" />
   </head>
   <body>
@@ -96,6 +97,11 @@
           <button class="btn" type="button" id="browse">Explorar…</button>
           <button class="btn btn--primary" type="submit">Registrar</button>
         </div>
+        <div class="enroll__tools">
+          <a class="btn btn--quiet" id="btn-export" href="/api/projects/export" download="portmaster-projects.json">Exportar proyectos</a>
+          <button class="btn btn--quiet" type="button" id="btn-import">Importar JSON</button>
+          <input type="file" id="file-import" accept=".json" hidden />
+        </div>
       </form>
 
       <dialog class="picker ports-modal" id="ports-modal" aria-label="Mapa de puertos">
@@ -153,6 +159,7 @@
           <div class="project__body">
             <p class="project__path"></p>
             <p class="project__error" hidden></p>
+            <p class="project__docker-warning" hidden></p>
             <ul class="services"></ul>
             <div class="project__actions">
               <label class="profile">

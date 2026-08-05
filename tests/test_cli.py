@@ -1,5 +1,6 @@
 """Comandos del CLI. Servidores reales, igual que el resto del suite."""
 
+import json
 import sys
 import textwrap
 import threading
@@ -9,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pytest
 from typer.testing import CliRunner
 
-from portmaster import cli
+from portmaster import cli, registry
 
 runner = CliRunner()
 
@@ -173,6 +174,30 @@ def test_down_con_un_stop_que_falla_sale_1(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     assert runner.invoke(cli.app, ["down"]).exit_code == 1
+
+
+def test_export_e_import_de_proyectos_cli(tmp_path, monkeypatch):
+    root = tmp_path / "proyecto_exportable"
+    root.mkdir()
+    (root / "stack.yaml").write_text("services:\n  web:\n    command: python web\n", encoding="utf-8")
+    registry.add(root)
+
+    export_file = tmp_path / "backup.json"
+    res_export_file = runner.invoke(cli.app, ["export", str(export_file)])
+    assert res_export_file.exit_code == 0
+    assert export_file.is_file()
+
+    exported_paths = json.loads(export_file.read_text(encoding="utf-8"))
+    assert str(root) in exported_paths
+
+    pid = registry.project_id(root)
+    registry.remove(pid)
+    assert not any(p == root for p in registry.paths())
+
+    res_import = runner.invoke(cli.app, ["import", str(export_file)])
+    assert res_import.exit_code == 0
+    assert any(p == root for p in registry.paths())
+
 
 
 def test_open_sin_nada_arriba_no_abre_nada(tmp_path, monkeypatch, free_ports, abierto):

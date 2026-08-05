@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import typer
 import psutil
@@ -341,6 +342,37 @@ def init_cmd(
 
     console.print(f"Escrito: [bold]{target}[/]")
     console.print("[dim]Revisalo antes de confiar en el.[/]")
+
+
+@app.command("export")
+def export_cmd(
+    out: Path | None = typer.Argument(None, help="Archivo JSON de destino (opcional)."),
+) -> None:
+    """Exporta las rutas de todos los proyectos registrados en formato JSON."""
+    data = registry.export_data()
+    text = json.dumps(data, indent=2)
+    if out:
+        out.write_text(text, encoding="utf-8")
+        console.print(f"Exportados {len(data)} proyectos en [bold]{out}[/]")
+    else:
+        console.print(text)
+
+
+@app.command("import")
+def import_cmd(
+    src: Path = typer.Argument(..., help="Archivo JSON con rutas de proyectos."),
+) -> None:
+    """Importa masivamente proyectos registrados desde un archivo JSON."""
+    if not src.is_file():
+        err.print(f"El archivo '{src}' no existe.")
+        raise typer.Exit(1)
+    try:
+        data = json.loads(src.read_text(encoding="utf-8"))
+        imported = registry.import_data(data)
+        console.print(f"Importados [bold]{len(imported)}[/] proyectos desde [bold]{src}[/]")
+    except Exception as exc:
+        err.print(f"Error al importar desde '{src}': {exc}")
+        raise typer.Exit(1)
 
 
 @app.command("serve")

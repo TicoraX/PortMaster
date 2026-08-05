@@ -724,6 +724,22 @@ body {
   gap: var(--space-sm);
 }
 
+.enroll__tools {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.project__docker-warning {
+  font-size: var(--text-xs);
+  color: oklch(50% 0.12 27);
+  background: oklch(58% 0.19 27 / 0.1);
+  border: 1px solid oklch(55% 0.12 27 / 0.3);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius);
+  margin-top: var(--space-xs);
+}
+
 .enroll__input {
   flex: 1 1 20rem;
   min-width: 0;

@@ -66,6 +66,26 @@ def remove(pid: str) -> bool:
     return True
 
 
+def export_data() -> list[str]:
+    """Exporta las rutas de los proyectos registrados como lista JSON."""
+    return [str(p) for p in paths()]
+
+
+def import_data(data: list[str]) -> list[str]:
+    """Importa masivamente rutas de proyectos desde una lista."""
+    if not isinstance(data, list):
+        raise RegistryError("el formato debe ser una lista de rutas de proyectos")
+    imported = []
+    for item in data:
+        if isinstance(item, str):
+            try:
+                path = add(item)
+                imported.append(str(path))
+            except RegistryError:
+                pass
+    return imported
+
+
 def _save(items: list[Path]) -> None:
     HOME.mkdir(parents=True, exist_ok=True)
     ordered = sorted({str(p) for p in items})

@@ -29,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from rich.console import Console
 
-from . import config, detect, ports, registry, runner
+from . import config, detect, doctor, ports, registry, runner
 
 log = logging.getLogger("portmaster.server")
 
@@ -371,7 +371,7 @@ def create_app(token: str | None = None) -> FastAPI:
 
         response = await call_next(request)
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; base-uri 'none'; form-action 'none'; "
+            "default-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; "
             "frame-ancestors 'none'; object-src 'none'"
         )
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -431,6 +431,15 @@ def create_app(token: str | None = None) -> FastAPI:
             log.info("alta de proyecto rechazada: %s", exc)
             raise HTTPException(400, str(exc))
         return _project_view(path)
+
+    @app.get("/api/projects/export", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
+    def export_projects() -> list[str]:
+        return registry.export_data()
+
+    @app.post("/api/projects/import", dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)])
+    def import_projects(paths_list: list[str]) -> dict:
+        imported = registry.import_data(paths_list)
+        return {"imported": imported, "count": len(imported)}
 
     @app.delete(
         "/api/projects/{pid}",
@@ -808,6 +817,11 @@ def _project_view(path: Path) -> dict:
             }
         )
 
+    has_docker = any(doctor._program(s.command) == "docker" for s in stack.services.values())
+    docker_down = False
+    if has_docker:
+        docker_down = doctor._docker().level == "fail"
+
     return {
         **base,
         "name": stack.name,
@@ -816,6 +830,7 @@ def _project_view(path: Path) -> dict:
         "detected": stack.detected,
         "profiles": sorted(stack.profiles),
         "services": services,
+        "docker_down": docker_down,
     }
 
 

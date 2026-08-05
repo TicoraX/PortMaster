@@ -333,6 +333,14 @@ function updateCard(entry, project) {
   error.textContent = project.error || "";
   error.hidden = !project.error;
 
+  const dockerWarn = root.querySelector(".project__docker-warning");
+  if (dockerWarn) {
+    dockerWarn.textContent = project.docker_down
+      ? "Docker Desktop está cerrado — abrilo para arrancar los contenedores"
+      : "";
+    dockerWarn.hidden = !project.docker_down;
+  }
+
   const services = root.querySelector(".services");
   services.replaceChildren(
     ...project.services.map((service) => renderService(service, project.id)),
@@ -430,6 +438,24 @@ function render(projects, data) {
     ...projects.map((project) => cards.get(project.id).root),
   );
   ui.projects.setAttribute("aria-busy", "false");
+  updateFavicon(projects, data);
+}
+
+function updateFavicon(projects, data) {
+  const link = document.getElementById("favicon");
+  if (!link) return;
+  const fallenCount = data && data.fallen ? data.fallen.length : 0;
+  const hasError = projects.some((p) => p.state === "error" || p.state === "invalid");
+  const hasRunning = projects.some((p) => p.state === "running" || p.state === "starting");
+
+  let color = "%2364748b";
+  if (fallenCount > 0 || hasError) {
+    color = "%23ef4444";
+  } else if (hasRunning) {
+    color = "%2322c55e";
+  }
+
+  link.href = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='40' fill='${color}'/%3E%3C/svg%3E`;
 }
 
 /* ciclo ------------------------------------------------------------------- */
@@ -798,6 +824,36 @@ if (ui.path && ui.pathSuggestions) {
         // Silencioso: mientras se tipea una ruta parcial es normal que no exista aun
       }
     }, 150);
+  });
+}
+
+/* importacion de proyectos en JSON --------------------------------------- */
+
+const btnImport = document.getElementById("btn-import");
+const fileImport = document.getElementById("file-import");
+
+if (btnImport && fileImport) {
+  btnImport.addEventListener("click", () => {
+    fileImport.click();
+  });
+  fileImport.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const pathsList = JSON.parse(text);
+      if (!Array.isArray(pathsList)) throw new Error("El archivo debe ser una lista JSON de rutas");
+      const res = await api("/api/projects/import", {
+        method: "POST",
+        body: JSON.stringify(pathsList),
+      });
+      flash(`Importados ${res.count} proyectos.`, "good");
+      refresh();
+    } catch (err) {
+      flash(`Fallo al importar: ${err.message}`, "bad");
+    } finally {
+      fileImport.value = "";
+    }
   });
 }
 

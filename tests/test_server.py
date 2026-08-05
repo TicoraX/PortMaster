@@ -657,3 +657,22 @@ def test_browse_autocompletado_de_rutas(client, tmp_path):
     assert "app_alpha" in nombres
     assert "app_beta" in nombres
 
+
+def test_export_e_import_api(client, tmp_path):
+    root = tmp_path / "app_api"
+    root.mkdir()
+    (root / "stack.yaml").write_text("services:\n  web:\n    command: python web\n", encoding="utf-8")
+    registry.add(root)
+
+    res_exp = client.get("/api/projects/export")
+    assert res_exp.status_code == 200
+    assert str(root) in res_exp.json()
+
+    pid = registry.project_id(root)
+    registry.remove(pid)
+
+    res_imp = client.post("/api/projects/import", json=[str(root)])
+    assert res_imp.status_code == 200
+    assert res_imp.json()["count"] == 1
+
+
