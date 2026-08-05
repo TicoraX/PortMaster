@@ -790,3 +790,33 @@ def test_reiniciar_una_sesion_recuperada_lo_dice_en_vez_de_reventar(
         assert "reinicio del servidor" in respuesta.json()["detail"]
     finally:
         vivo.close()
+
+
+# interfaz -----------------------------------------------------------------
+
+
+def test_la_interfaz_arranca_sola():
+    """app.js se poblaba solo al tocar algo: el bloque de arranque se perdio en
+    a252013 al reescribir el final del archivo, y la pagina cargaba en blanco.
+    Todas las demas llamadas a `refresh` viven adentro de un handler."""
+    fuente = (server.WEB / "app.js").read_text(encoding="utf-8")
+    assert "setInterval(refresh" in fuente, "no hay sondeo periodico"
+    # La llamada inicial, la que puebla la pagina antes del primer intervalo.
+    assert "\nrefresh();" in fuente, "no hay una llamada a refresh fuera de un handler"
+
+
+def test_cada_id_del_html_lo_usa_el_js():
+    """Un id que el JS no toca es un control muerto, y no se nota mirando."""
+    import re
+
+    html = (server.WEB / "index.html").read_text(encoding="utf-8")
+    js = (server.WEB / "app.js").read_text(encoding="utf-8")
+    huerfanos = []
+    for ident in re.findall(r'id="([^"]+)"', html):
+        camel = re.sub(r"-([a-z])", lambda m: m.group(1).upper(), ident)
+        # `btn-export` es un <a href> puro: no necesita JS.
+        if ident in ("btn-export",):
+            continue
+        if ident not in js and camel not in js:
+            huerfanos.append(ident)
+    assert not huerfanos, f"ids del HTML que el JS nunca toca: {huerfanos}"

@@ -1006,3 +1006,11 @@ async function refreshPortsModal() {
     // Silencioso
   }
 }
+
+/* arranque ---------------------------------------------------------------- */
+
+// Sin esto la pagina carga en blanco y solo se puebla cuando tocas algo, porque
+// todas las demas llamadas a `refresh` viven adentro de un handler. Se perdio en
+// a252013 al reescribir el final del archivo.
+refresh();
+setInterval(refresh, POLL_MS);
