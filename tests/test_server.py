@@ -676,3 +676,117 @@ def test_export_e_import_api(client, tmp_path):
     assert res_imp.json()["count"] == 1
 
 
+
+
+def test_la_pagina_no_regala_el_token(client):
+    """GET / es publico, pero contestaba con el token de verdad en un Set-Cookie
+    aunque no lo trajeras: cualquier proceso local conseguia la llave con un
+    curl, y con ella corre comandos."""
+    respuesta = client.get("/", headers={"Authorization": ""})
+    assert respuesta.status_code == 200
+    assert "portmaster_token" not in respuesta.headers.get("set-cookie", "")
+    assert TOKEN not in respuesta.headers.get("set-cookie", "")
+
+
+def test_la_cookie_se_entrega_a_quien_ya_tiene_el_token(client):
+    respuesta = client.get(f"/?token={TOKEN}", headers={"Authorization": ""})
+    assert TOKEN in respuesta.headers.get("set-cookie", "")
+
+
+def test_un_token_inventado_no_consigue_cookie(client):
+    respuesta = client.get("/?token=no-es-el-token-pero-es-largo", headers={"Authorization": ""})
+    assert "portmaster_token" not in respuesta.headers.get("set-cookie", "")
+
+
+def test_la_cookie_autentica_la_api(client):
+    """El <a download> de exportar no manda el header Authorization: sin cookie
+    ese boton no existiria."""
+    client.get(f"/?token={TOKEN}", headers={"Authorization": ""})
+    respuesta = client.get("/api/projects/export", headers={"Authorization": ""})
+    assert respuesta.status_code == 200
+
+
+def test_el_chequeo_de_docker_no_corre_en_cada_request(client, tmp_path, monkeypatch):
+    """Corria una vez por proyecto y por request, con la interfaz sondeando cada
+    2.5s. Tres proyectos con contenedores se llevaban un segundo de cada
+    /api/state y saturaban el threadpool que comparte con apagar y matar."""
+    veces = []
+
+    def contado():
+        veces.append(1)
+        return server.doctor.Check("daemon de docker", "fail", "de prueba")
+
+    monkeypatch.setattr(server.doctor, "_docker", contado)
+    monkeypatch.setattr(server, "_docker_seen", (0.0, False))
+
+    for nombre in ("a", "b", "c"):
+        root = tmp_path / nombre
+        root.mkdir()
+        (root / "stack.yaml").write_text(
+            "services:\n  c:\n    command: docker compose up -d\n    detached: true\n",
+            encoding="utf-8",
+        )
+        registry.add(root)
+
+    for _ in range(4):
+        assert client.get("/api/state").status_code == 200
+
+    assert len(veces) == 1, f"el daemon se chequeo {len(veces)} veces en 12 vistas de proyecto"
+    assert client.get("/api/state").json()["projects"][0]["docker_down"] is True
+
+
+def _sesion_recuperada(tmp_path, monkeypatch, port):
+    """Simula un reinicio de `portmaster serve` con el proceso todavia vivo."""
+    import json
+
+    monkeypatch.setattr(server, "SESSIONS_FILE", registry.HOME / "sessions.json")
+    root = tmp_path / "sobreviviente"
+    root.mkdir()
+    (root / "stack.yaml").write_text(
+        f"services:\n  srv:\n    command: echo hola\n    port: {port}\n", encoding="utf-8"
+    )
+    pid = registry.project_id(registry.add(root))
+    registry.HOME.mkdir(parents=True, exist_ok=True)
+    server.SESSIONS_FILE.write_text(
+        json.dumps({pid: {"path": str(root), "profile": None, "state": "running"}}),
+        encoding="utf-8",
+    )
+    server.sessions.clear()
+    server._load_sessions_state()
+    return pid
+
+
+def test_una_sesion_recuperada_muestra_sus_servicios(client, tmp_path, monkeypatch, free_ports):
+    """Devolvia {} y la tarjeta decia "corriendo" con la lista vacia."""
+    import socket
+
+    (port,) = free_ports(1)
+    vivo = socket.socket()
+    vivo.bind(("127.0.0.1", port))
+    vivo.listen()
+    try:
+        pid = _sesion_recuperada(tmp_path, monkeypatch, port)
+        estados = server.sessions[pid].service_states()
+        assert estados == {"srv": "ready"}
+    finally:
+        vivo.close()
+
+
+def test_reiniciar_una_sesion_recuperada_lo_dice_en_vez_de_reventar(
+    client, tmp_path, monkeypatch, free_ports
+):
+    """Sin motor, restart_async moria con un AssertionError en un hilo daemon:
+    el usuario apretaba el boton y no pasaba nada."""
+    import socket
+
+    (port,) = free_ports(1)
+    vivo = socket.socket()
+    vivo.bind(("127.0.0.1", port))
+    vivo.listen()
+    try:
+        pid = _sesion_recuperada(tmp_path, monkeypatch, port)
+        respuesta = client.post(f"/api/projects/{pid}/services/srv/restart")
+        assert respuesta.status_code == 409
+        assert "reinicio del servidor" in respuesta.json()["detail"]
+    finally:
+        vivo.close()

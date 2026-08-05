@@ -15,6 +15,12 @@ from portmaster import cli, registry
 runner = CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def aislado_cli(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "HOME", tmp_path / "home")
+    monkeypatch.setattr(registry, "PROJECTS", tmp_path / "home" / "projects.json")
+
+
 @pytest.fixture
 def servidor_http(free_ports):
     """Un servidor HTTP de verdad, para distinguirlo de un socket pelado."""

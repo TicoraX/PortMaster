@@ -248,10 +248,18 @@ class Session:
         return {p.service.name for p in self.engine.procs if p.http} | self.late_http
 
     def service_states(self) -> dict[str, str]:
-        if self.engine is None:
-            return {}
         if self.state in ("stopped", "error"):
             return {}
+        if self.engine is None:
+            # Sesion recuperada tras reiniciar el servidor: no tenemos los
+            # procesos, tenemos los puertos. Devolver {} dejaba la tarjeta
+            # diciendo "corriendo" con la lista de servicios vacia.
+            declarados = {n: s.port for n, s in self.stack.services.items() if s.port}
+            scanned = ports.scan_many(list(declarados.values()))
+            return {
+                name: "ready" if not scanned[port].free else "stopped"
+                for name, port in declarados.items()
+            }
         states = {}
         for proc in self.engine.procs:
             # Durante un reinicio el proceso viejo ya murio y el nuevo todavia no
@@ -268,6 +276,35 @@ class Session:
 sessions: dict[str, Session] = {}
 sessions_lock = threading.Lock()
 limiter = RateLimit()
+
+# Cuanto vale un chequeo del daemon de docker antes de repetirlo.
+DOCKER_TTL = 10.0
+_docker_seen: tuple[float, bool] = (0.0, False)
+_docker_lock = threading.Lock()
+
+
+def _docker_is_down() -> bool:
+    """Si el daemon no contesta, con cache.
+
+    `doctor._docker` lanza un subproceso y tarda cientos de milisegundos.
+    `_project_view` corre una vez por proyecto y por request, y la interfaz
+    sondea cada 2.5s por pestana abierta: sin cache, tres proyectos con
+    contenedores se llevaban un segundo entero de cada `/api/state` y saturaban
+    el threadpool que FastAPI comparte con apagar y con matar procesos. Medido:
+    `/api/health` pasaba de 2ms a 9s con la vista de estado bajo carga.
+
+    El chequeo corre adentro del lock a proposito. Afuera, una tanda de
+    requests concurrentes lanza un subproceso cada uno; adentro, el primero lo
+    paga y los demas esperan ese mismo resultado.
+    """
+    global _docker_seen
+    with _docker_lock:
+        cuando, valor = _docker_seen
+        if time.monotonic() - cuando < DOCKER_TTL:
+            return valor
+        caido = doctor._docker().level == "fail"
+        _docker_seen = (time.monotonic(), caido)
+        return caido
 SESSIONS_FILE = registry.HOME / "sessions.json"
 
 
@@ -389,7 +426,11 @@ def create_app(token: str | None = None) -> FastAPI:
     @app.get("/", include_in_schema=False)
     def index(request: Request, token: str = Query("")) -> FileResponse:
         response = FileResponse(WEB / "index.html")
-        tok = token or request.cookies.get("portmaster_token", "") or request.app.state.token
+        # Solo lo que trajo quien pide. El fallback a `app.state.token` que habia
+        # aca hacia que un GET / pelado se contestara con el token de verdad en
+        # un Set-Cookie: cualquier proceso local conseguia la llave con un curl,
+        # y con ella corre comandos, porque stack.yaml es ejecutable por diseno.
+        tok = token or request.cookies.get("portmaster_token", "")
         if tok and secrets.compare_digest(tok, request.app.state.token):
             response.set_cookie(
                 "portmaster_token",
@@ -542,6 +583,13 @@ def create_app(token: str | None = None) -> FastAPI:
             raise HTTPException(404, "ese stack no fue arrancado desde aca")
         if session.state != "running":
             raise HTTPException(409, "el stack no esta corriendo")
+        if session.engine is None:
+            # Sesion recuperada tras reiniciar el servidor: sabemos que los
+            # puertos estan ocupados, no tenemos los procesos. Reiniciar reventaba
+            # con un AssertionError adentro de un hilo daemon, o sea en silencio.
+            raise HTTPException(
+                409, "este stack sobrevivio a un reinicio del servidor: apagalo y volve a arrancarlo"
+            )
         if name not in session.stack.services:
             log.info("reinicio rechazado en %s: servicio %r desconocido", pid, name)
             raise HTTPException(404, "ese servicio no esta en el stack")
@@ -832,9 +880,7 @@ def _project_view(path: Path) -> dict:
         )
 
     has_docker = any(doctor._program(s.command) == "docker" for s in stack.services.values())
-    docker_down = False
-    if has_docker:
-        docker_down = doctor._docker().level == "fail"
+    docker_down = _docker_is_down() if has_docker else False
 
     return {
         **base,
