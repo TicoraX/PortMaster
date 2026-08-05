@@ -495,29 +495,18 @@ async function refreshOrphans() {
     const data = await api("/api/ports/orphans");
     const list = data.orphans || [];
 
-    // Siempre visible despues del primer check: el estado vacio le dice al
-    // usuario que la seccion existe y que todo esta limpio.
-    ui.orphans.hidden = false;
+    ui.orphans.hidden = list.length === 0;
 
     const nextIds = list.map((o) => o.port).join(",") || "__empty__";
     if (ui.orphansList.dataset.ids === nextIds) return;
     ui.orphansList.dataset.ids = nextIds;
 
-    // Actualiza el titulo con el conteo cuando hay intrusos.
-    ui.orphansHeading.textContent = list.length
-      ? `Procesos intrusos (${list.length})`
-      : "Procesos intrusos";
-
     if (list.length === 0) {
-      const empty = document.createElement("li");
-      empty.className = "orphan orphan--empty";
-      const msg = document.createElement("span");
-      msg.className = "orphan__empty-msg";
-      msg.textContent = "Ningun proceso intruso detectado";
-      empty.append(msg);
-      ui.orphansList.replaceChildren(empty);
+      ui.orphansList.replaceChildren();
       return;
     }
+
+    ui.orphansHeading.textContent = `Procesos intrusos (${list.length})`;
 
     ui.orphansList.replaceChildren(
       ...list.map((orphan) => {
