@@ -77,6 +77,9 @@ async function api(path, options = {}) {
   });
 
   if (response.status === 401) {
+    localStorage.removeItem("portmaster.token");
+    sessionStorage.removeItem("portmaster.token");
+    token = "";
     promptAuthModal();
   }
 
