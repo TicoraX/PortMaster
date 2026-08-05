@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PortMaster</title>
     <link rel="icon" id="favicon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='40' fill='%2364748b'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="/static/app.css?v=1.4" />
+    <link rel="stylesheet" href="/static/app.css?v=1.5" />
   </head>
   <body>
     <header class="masthead">
@@ -146,6 +146,10 @@
 
     <footer class="colophon">
       <span>Solo loopback. Nada de esto sale de tu máquina.</span>
+      <!-- Sin esto no hay forma de saber si el navegador esta sirviendo una
+           pagina vieja de su cache. Lo llena el JS con lo que contesta el
+           servidor: si no aparece, lo cargado es viejo. -->
+      <span class="colophon__build" id="build" title="Version que sirve el servidor"></span>
     </footer>
 
     <p class="flash" id="flash" role="alert" hidden></p>
@@ -209,6 +213,6 @@
       </li>
     </template>
 
-    <script src="/static/app.js?v=1.4"></script>
+    <script src="/static/app.js?v=1.5"></script>
   </body>
 </html>

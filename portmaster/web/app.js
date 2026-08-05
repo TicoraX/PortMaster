@@ -1009,6 +1009,21 @@ async function refreshPortsModal() {
 
 /* arranque ---------------------------------------------------------------- */
 
+// Que build sirve el servidor, en el pie. Una pagina vieja servida de la cache
+// del navegador deja este hueco vacio, que es la unica senal a simple vista de
+// que lo que estas mirando no es lo que corre.
+async function showBuild() {
+  const slot = document.getElementById("build");
+  if (!slot) return;
+  try {
+    const data = await api("/api/version");
+    slot.textContent = `v${data.version} · ${data.assets}`;
+  } catch {
+    /* sin token todavia: lo intenta el proximo arranque */
+  }
+}
+showBuild();
+
 // Sin esto la pagina carga en blanco y solo se puebla cuando tocas algo, porque
 // todas las demas llamadas a `refresh` viven adentro de un handler. Se perdio en
 // a252013 al reescribir el final del archivo.

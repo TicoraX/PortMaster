@@ -864,10 +864,18 @@ body {
 /* colofon y avisos -------------------------------------------------------- */
 
 .colophon {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-sm);
   border-top: var(--rule) solid var(--color-rule);
   padding: var(--space-md) var(--space-gutter);
   font-size: var(--text-xs);
   color: var(--color-ink-3);
+}
+
+.colophon__build {
+  font-family: var(--font-mono);
 }
 
 .flash {

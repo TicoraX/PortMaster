@@ -29,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from rich.console import Console
 
-from . import config, detect, doctor, ports, registry, runner
+from . import __version__, config, detect, doctor, ports, registry, runner
 
 log = logging.getLogger("portmaster.server")
 
@@ -641,6 +641,19 @@ def create_app(token: str | None = None) -> FastAPI:
 
         log.info("proceso cerrado: puerto=%d pid=%d nombre=%s", port, status.pid, status.name)
         return {"ok": True}
+
+    @app.get("/api/version", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
+    def version() -> dict:
+        """Version y fecha de los estaticos que este servidor sirve.
+
+        Existe para contestar "estoy viendo la pagina nueva o una vieja de la
+        cache del navegador", que sin esto se responde adivinando.
+        """
+        assets = max((WEB / n).stat().st_mtime for n in ("index.html", "app.js", "app.css"))
+        return {
+            "version": __version__,
+            "assets": time.strftime("%Y-%m-%d %H:%M", time.localtime(assets)),
+        }
 
     @app.get("/api/health", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
     def health() -> dict:
