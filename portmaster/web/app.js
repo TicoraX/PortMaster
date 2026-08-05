@@ -51,16 +51,21 @@ function readToken() {
   const url = new URL(window.location.href);
   const fromUrl = url.searchParams.get("token");
   if (fromUrl) {
+    localStorage.setItem("portmaster.token", fromUrl);
     sessionStorage.setItem("portmaster.token", fromUrl);
     url.searchParams.delete("token");
     // Sacarlo de la barra: no tiene por que quedar en el historial.
-    window.history.replaceState({}, "", url.pathname + url.hash);
+    window.history.replaceState({}, "", url.pathname + url.search + url.hash);
     return fromUrl;
   }
-  return sessionStorage.getItem("portmaster.token") || "";
+  return (
+    localStorage.getItem("portmaster.token") ||
+    sessionStorage.getItem("portmaster.token") ||
+    ""
+  );
 }
 
-const token = readToken();
+let token = readToken();
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -70,6 +75,11 @@ async function api(path, options = {}) {
       ...(options.body ? { "Content-Type": "application/json" } : {}),
     },
   });
+
+  if (response.status === 401) {
+    promptAuthModal();
+  }
+
   if (!response.ok) {
     let detail = `error ${response.status}`;
     try {
@@ -81,6 +91,23 @@ async function api(path, options = {}) {
     throw new Error(detail);
   }
   return response.json();
+}
+
+function promptAuthModal() {
+  const modal = document.getElementById("auth-modal");
+  const input = document.getElementById("auth-token-input");
+  const saveBtn = document.getElementById("auth-token-save");
+  if (!modal || modal.open) return;
+  modal.showModal();
+  saveBtn.onclick = () => {
+    const val = input.value.trim();
+    if (!val) return;
+    localStorage.setItem("portmaster.token", val);
+    sessionStorage.setItem("portmaster.token", val);
+    token = val;
+    modal.close();
+    refresh();
+  };
 }
 
 /* avisos ------------------------------------------------------------------ */

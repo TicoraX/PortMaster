@@ -127,6 +127,21 @@
           <button class="btn btn--primary" type="button" data-picker="pick">Usar esta carpeta</button>
         </div>
       </dialog>
+
+      <dialog class="picker" id="auth-modal" aria-label="Autenticación">
+        <div class="picker__head">
+          <p class="picker__path">Token de PortMaster requerido</p>
+        </div>
+        <div style="padding: var(--space-md);">
+          <p style="font-size: var(--text-xs); color: var(--color-ink-2); margin-bottom: var(--space-sm);">
+            Pegá tu token de acceso (lo encontrás en <code>~/.portmaster/token</code>).
+          </p>
+          <input class="enroll__input" id="auth-token-input" type="password" placeholder="Pegá el token acá..." style="width: 100%; box-sizing: border-box;" />
+        </div>
+        <div class="picker__foot">
+          <button class="btn btn--primary" type="button" id="auth-token-save">Guardar token</button>
+        </div>
+      </dialog>
     </main>
 
     <footer class="colophon">
