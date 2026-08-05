@@ -413,3 +413,7 @@ def serve_cmd(
 def version_cmd() -> None:
     """Muestra la version instalada."""
     console.print(__version__)
+
+
+if __name__ == "__main__":
+    app()
