@@ -323,6 +323,10 @@ def _load_sessions_state() -> None:
 def require_token(request: Request) -> None:
     header = request.headers.get("authorization", "")
     supplied = header[7:] if header.lower().startswith("bearer ") else ""
+    if not supplied:
+        supplied = request.cookies.get("portmaster_token", "")
+    if not supplied:
+        supplied = request.query_params.get("token", "")
     if not secrets.compare_digest(supplied, request.app.state.token):
         log.warning("auth rechazada en %s", request.url.path)
         raise HTTPException(401, "token invalido")
@@ -383,8 +387,18 @@ def create_app(token: str | None = None) -> FastAPI:
         return response
 
     @app.get("/", include_in_schema=False)
-    def index() -> FileResponse:
-        return FileResponse(WEB / "index.html")
+    def index(request: Request, token: str = Query("")) -> FileResponse:
+        response = FileResponse(WEB / "index.html")
+        tok = token or request.cookies.get("portmaster_token", "") or request.app.state.token
+        if tok and secrets.compare_digest(tok, request.app.state.token):
+            response.set_cookie(
+                "portmaster_token",
+                tok,
+                httponly=False,
+                samesite="lax",
+                path="/",
+            )
+        return response
 
     app.mount("/static", StaticFiles(directory=WEB), name="static")
 

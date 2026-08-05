@@ -47,6 +47,11 @@ let page = 1;
 
 /* token ------------------------------------------------------------------- */
 
+function getCookieToken() {
+  const match = document.cookie.match(/(?:^|; )portmaster_token=([^;]*)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
 function readToken() {
   const url = new URL(window.location.href);
   const fromUrl = url.searchParams.get("token");
@@ -61,6 +66,7 @@ function readToken() {
   return (
     localStorage.getItem("portmaster.token") ||
     sessionStorage.getItem("portmaster.token") ||
+    getCookieToken() ||
     ""
   );
 }
