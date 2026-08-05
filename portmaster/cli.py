@@ -379,6 +379,9 @@ def import_cmd(
 def serve_cmd(
     port: int = typer.Option(7666, min=1, max=65535, help="Puerto de la interfaz."),
     no_open: bool = typer.Option(False, "--no-open", help="No abrir el navegador."),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Registrar cada peticion que llega."
+    ),
 ) -> None:
     """Levanta la interfaz web local."""
     try:
@@ -386,7 +389,18 @@ def serve_cmd(
 
         from . import server
     except ImportError:
-        err.print("Falta el extra web. Instalalo con: pip install 'portmaster[web]'")
+        err.print("Falta fastapi o uvicorn. Reinstala portmaster: pipx reinstall portmaster")
+        raise typer.Exit(1)
+
+    # Antes de imprimir la URL: uvicorn atrapa el error de bind y sale por su
+    # cuenta, asi que el `except OSError` de abajo nunca corria y el usuario
+    # veia un ERROR de winerror en vez del comando que lo arregla. Averiguar
+    # quien tiene un puerto es lo que esta herramienta hace.
+    if not ports.is_free(port):
+        ocupante = ports.scan(port)
+        quien = ocupante.name or "un proceso desconocido"
+        err.print(f"El puerto {port} ya esta ocupado por {quien} (pid {ocupante.pid}).")
+        err.print(f"Cerralo con: portmaster free {port}   o arranca con: --port <otro>")
         raise typer.Exit(1)
 
     token = registry.token()
@@ -402,7 +416,17 @@ def serve_cmd(
         webbrowser.open(url)
 
     try:
-        uvicorn.run(server.create_app(token), host="127.0.0.1", port=port, log_level="warning")
+        # Por defecto callado: la interfaz sondea cada 2.5s y el log de acceso
+        # tapa cualquier otra cosa. Con --verbose se ve que pide el navegador,
+        # que es la unica forma de saber si esta hablando con este servidor o
+        # mostrando una pagina vieja de su cache.
+        uvicorn.run(
+            server.create_app(token),
+            host="127.0.0.1",
+            port=port,
+            log_level="info" if verbose else "warning",
+            access_log=verbose,
+        )
     except OSError as exc:
         err.print(f"No se pudo iniciar el servidor en 127.0.0.1:{port}: {exc}")
         err.print(f"El puerto {port} esta ocupado. Podes usar 'portmaster free {port}' o '--port <otro>'.")
