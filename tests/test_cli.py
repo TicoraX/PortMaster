@@ -77,7 +77,7 @@ def test_doctor_delata_el_puerto_ocupado_y_dice_como_liberarlo(
     tmp_path, monkeypatch, servidor_http
 ):
     (tmp_path / "stack.yaml").write_text(
-        f"services:\n  web:\n    command: echo web\n    port: {servidor_http}\n",
+        f"services:\n  web:\n    command: python web\n    port: {servidor_http}\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
