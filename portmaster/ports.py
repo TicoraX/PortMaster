@@ -61,22 +61,28 @@ def _bind_free(port: int) -> bool:
     return True
 
 
-def _pid_by_process_scan(port: int) -> int | None:
+def _pid_by_process_scan(port: int, cache: dict[int, int] | None = None) -> int | None:
     """Barrido proceso por proceso. Solo cuando la tabla no dio el dueno.
 
-    ponytail: O(procesos) y con una llamada al SO por proceso. Corre solo en el
-    camino lento, con el puerto ya confirmado ocupado. Si alguna vez pesa, la
-    salida es cachear la tabla entre puertos de un mismo escaneo.
+    Si se provee un cache del escaneo batch, consulta directamente el dict.
+    De lo contrario, construye una tabla en una sola pasada sobre process_iter.
     """
+    if cache is not None:
+        return cache.get(port)
+    return _process_listeners_cache().get(port)
+
+
+def _process_listeners_cache() -> dict[int, int]:
+    """Mapea cada puerto LISTEN a su PID haciendo una sola pasada por process_iter()."""
+    table: dict[int, int] = {}
     for proc in psutil.process_iter():
         try:
             for conn in proc.net_connections(kind="tcp"):
-                if conn.laddr and conn.laddr.port == port:
-                    if conn.status == psutil.CONN_LISTEN:
-                        return proc.pid
+                if conn.laddr and conn.status == psutil.CONN_LISTEN:
+                    table[conn.laddr.port] = proc.pid
         except (psutil.AccessDenied, psutil.NoSuchProcess):
             continue
-    return None
+    return table
 
 
 def is_free(port: int) -> bool:
@@ -92,9 +98,9 @@ def _quiet(getter):
         return None
 
 
-def _describe(port: int, pid: int | None) -> PortStatus:
+def _describe(port: int, pid: int | None, cache: dict[int, int] | None = None) -> PortStatus:
     if pid is None:
-        pid = _pid_by_process_scan(port)
+        pid = _pid_by_process_scan(port, cache)
     if pid is None:
         return PortStatus(port=port, free=False)
 
@@ -125,12 +131,18 @@ def scan_many(wanted: list[int]) -> dict[int, PortStatus]:
         _check_port(port)
 
     listeners = _listeners(set(wanted))
+    proc_cache: dict[int, int] | None = None
     result = {}
     for port in wanted:
         if port not in listeners and _bind_free(port):
             result[port] = PortStatus(port=port, free=True)
         else:
-            result[port] = _describe(port, listeners.get(port))
+            pid = listeners.get(port)
+            if pid is None:
+                if proc_cache is None:
+                    proc_cache = _process_listeners_cache()
+                pid = proc_cache.get(port)
+            result[port] = _describe(port, pid, proc_cache)
     return result
 
 

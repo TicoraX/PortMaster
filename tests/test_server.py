@@ -626,3 +626,34 @@ def test_reiniciar_no_cuenta_como_caida(client, proyecto):
     for _ in range(30):
         assert client.get("/api/health").json()["fallen"] == [], "aviso falso al reiniciar"
         time.sleep(0.1)
+
+
+def test_persistencia_de_sesiones_al_reiniciar_servidor(client, proyecto):
+    path, port = proyecto
+    pid = registry.project_id(path)
+    client.post(f"/api/projects/{pid}/up", json={})
+    assert esperar(lambda: client.get("/api/state").json()["projects"][0]["state"] == "running")
+
+    # Simulamos reinicio del servidor limpiando la memoria de sessions
+    server._save_sessions_state()
+    assert server.SESSIONS_FILE.is_file()
+
+    server.sessions.clear()
+    server._load_sessions_state()
+
+    # La sesion debe haber sido restaurada en estado running
+    assert pid in server.sessions
+    assert server.sessions[pid].state == "running"
+
+
+def test_browse_autocompletado_de_rutas(client, tmp_path):
+    root = tmp_path / "proyectos"
+    (root / "app_alpha").mkdir(parents=True)
+    (root / "app_beta").mkdir(parents=True)
+
+    res = client.get(f"/api/browse?path={root}")
+    assert res.status_code == 200
+    nombres = [e["name"] for e in res.json()["entries"]]
+    assert "app_alpha" in nombres
+    assert "app_beta" in nombres
+

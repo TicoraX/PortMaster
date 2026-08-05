@@ -28,6 +28,7 @@ const ui = {
   orphansHeading: document.getElementById("orphans-heading"),
   health: document.getElementById("health"),
   notify: document.getElementById("notify"),
+  pathSuggestions: document.getElementById("path-suggestions"),
 };
 
 const TITLE = document.title;
@@ -733,6 +734,48 @@ ui.picker.querySelector('[data-picker="pick"]').addEventListener("click", (event
   });
 });
 
+/* autocompletado no intrusivo en el registro ----------------------------- */
+
+let pathDebounceTimer = null;
+if (ui.path && ui.pathSuggestions) {
+  ui.path.addEventListener("input", () => {
+    clearTimeout(pathDebounceTimer);
+    const val = ui.path.value.trim();
+    if (val.length < 3) {
+      ui.pathSuggestions.replaceChildren();
+      return;
+    }
+
+    pathDebounceTimer = setTimeout(async () => {
+      const sep = val.includes("\\") ? "\\" : "/";
+      const lastSepIdx = val.lastIndexOf(sep);
+      if (lastSepIdx === -1) return;
+
+      const parentDir = val.slice(0, lastSepIdx) || sep;
+      const prefix = val.slice(lastSepIdx + 1).toLowerCase();
+
+      try {
+        const data = await api(`/api/browse?path=${encodeURIComponent(parentDir)}`);
+        if (!data || !data.entries) return;
+
+        const matches = data.entries.filter((entry) =>
+          entry.name.toLowerCase().startsWith(prefix)
+        );
+
+        ui.pathSuggestions.replaceChildren(
+          ...matches.map((m) => {
+            const opt = document.createElement("option");
+            opt.value = m.path;
+            return opt;
+          })
+        );
+      } catch {
+        // Silencioso: mientras se tipea una ruta parcial es normal que no exista aun
+      }
+    }, 150);
+  });
+}
+
 ui.enroll.addEventListener("submit", (event) => {
   event.preventDefault();
   const button = ui.enroll.querySelector("button");
@@ -744,6 +787,7 @@ ui.enroll.addEventListener("submit", (event) => {
       body: JSON.stringify({ path }),
     });
     ui.path.value = "";
+    if (ui.pathSuggestions) ui.pathSuggestions.replaceChildren();
   });
 });
 

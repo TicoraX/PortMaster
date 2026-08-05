@@ -111,3 +111,14 @@ def test_kill_libera_el_puerto():
         if proc.poll() is None:
             proc.kill()
         proc.wait()
+
+
+def test_scan_many_usa_cache_de_procesos(listener):
+    _, port = listener
+    scanned = ports.scan_many([port])
+    assert port in scanned
+    assert scanned[port].free is False
+    cache = ports._process_listeners_cache()
+    assert isinstance(cache, dict)
+    assert cache.get(port) == os.getpid()
+

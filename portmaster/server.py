@@ -143,9 +143,11 @@ class Session:
             # comando de apagado todavia corre.
             if self.state != "stopping":
                 self.state = "stopped"
+            _save_sessions_state()
         except Exception as exc:  # el hilo no debe morir en silencio
             self.error = runner.clean_error_message(str(exc))
             self.state = "error"
+            _save_sessions_state()
             log.warning("stack %s fallo: %s", self.stack.name, exc)
 
     def stop_async(self) -> None:
@@ -187,7 +189,16 @@ class Session:
                 # alguna vez molesta, matar el arbol del comando detached.
                 self.thread.join(runner.STOP_TIMEOUT)
             self.engine.down()
+        else:
+            scanned = ports.scan_many([s.port for s in self.stack.services.values() if s.port])
+            for status in scanned.values():
+                if not status.free and status.pid is not None:
+                    try:
+                        ports.kill(status.pid, status.create_time)
+                    except Exception:
+                        pass
         self.state = "stopped"
+        _save_sessions_state()
 
     def _probe_late_http(self) -> None:
         """Vuelve a preguntarle a los puertos que no contestaron al arrancar.
@@ -257,6 +268,53 @@ class Session:
 sessions: dict[str, Session] = {}
 sessions_lock = threading.Lock()
 limiter = RateLimit()
+SESSIONS_FILE = registry.HOME / "sessions.json"
+
+
+def _save_sessions_state() -> None:
+    try:
+        data = {}
+        with sessions_lock:
+            for pid, session in sessions.items():
+                if session.state in ("starting", "running"):
+                    data[pid] = {
+                        "path": str(session.stack.path),
+                        "profile": session.profile,
+                        "state": session.state,
+                    }
+        registry.HOME.mkdir(parents=True, exist_ok=True)
+        import json
+        SESSIONS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception as exc:
+        log.warning("no se pudo guardar estado de sesiones: %s", exc)
+
+
+def _load_sessions_state() -> None:
+    if not SESSIONS_FILE.is_file():
+        return
+    import json
+    try:
+        raw = json.loads(SESSIONS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            return
+        known_paths = {registry.project_id(p): p for p in registry.paths()}
+        with sessions_lock:
+            for pid, item in raw.items():
+                path = known_paths.get(pid)
+                if not path or not path.is_dir():
+                    continue
+                try:
+                    stack = detect.stack_for(path)
+                except config.ConfigError:
+                    continue
+                scanned = ports.scan_many([s.port for s in stack.services.values() if s.port])
+                any_busy = any(not status.free for status in scanned.values())
+                if any_busy and pid not in sessions:
+                    session = Session(stack, item.get("profile"))
+                    session.state = "running"
+                    sessions[pid] = session
+    except Exception as exc:
+        log.warning("no se pudo cargar estado de sesiones: %s", exc)
 
 
 # seguridad ----------------------------------------------------------------
@@ -294,7 +352,9 @@ class UpRequest(BaseModel):
 # app ----------------------------------------------------------------------
 
 
-def create_app(token: str) -> FastAPI:
+def create_app(token: str | None = None) -> FastAPI:
+    _load_sessions_state()
+    token = token or registry.token()
     app = FastAPI(title="PortMaster", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.token = token
     app.state.allowed_hosts = {"127.0.0.1", "localhost", "[::1]"}
@@ -432,6 +492,7 @@ def create_app(token: str) -> FastAPI:
             session = Session(stack, body.profile)
             sessions[pid] = session
         session.start()
+        _save_sessions_state()
         return {"ok": True}
 
     @app.post(
