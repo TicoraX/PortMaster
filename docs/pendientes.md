@@ -41,10 +41,20 @@ es un bug; son decisiones con fecha de vencimiento conocida.
 
 ## Cerrado
 
-**El fallo intermitente de la suite.** Apareció una vez al agregar el arranque
-en paralelo y quedó abierto un mes. Se corrió `test_runner.py` veinte veces
-seguidas el 6 de agosto sin un solo rojo, sobre 29 corridas previas sin
-reproducirlo. Si vuelve, el primer rojo de CI se mira en vez de reintentarlo.
+**El fallo intermitente de la suite, identificado.** Era
+`test_ports.py::test_next_free_salta_el_ocupado`, y por eso nunca se reprodujo:
+la búsqueda lo daba por sospechoso de `test_runner.py` porque apareció al
+agregar el arranque en paralelo, y veinte corridas de ese archivo salieron
+verdes. Se lo encontró leyendo el log de CI de `1397a40` en Windows.
+
+La fixture `listener` bindea al puerto 0, así que el test arranca a escanear
+dentro del rango efímero, justo donde el SO reparte puertos al resto de la
+suite. Con la ventana de 20 por defecto, un runner cargado no tiene ninguno
+libre ahí y `next_free` levanta `RuntimeError`. El arranque en paralelo lo
+destapó porque multiplicó los sockets abiertos a la vez, no porque lo causara.
+
+No es un bug del producto: `next_free` se llama desde `portmaster ports 3000`,
+con un puerto declarado, donde 20 sobran. El test pide 500.
 
 **`PAGE_MIN`, los estilos inline y el `?v=1.5`.** El cache busting a mano no
 hacía nada desde que el middleware manda `Cache-Control: no-store` en toda

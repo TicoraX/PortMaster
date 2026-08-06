@@ -49,8 +49,14 @@ def test_scan_puerto_libre(listener):
 
 
 def test_next_free_salta_el_ocupado(listener):
+    """La ventana va ancha a proposito. `listener` bindea al puerto 0, asi que
+    arranca en el rango efimero, que es justo donde el SO esta repartiendo
+    puertos al resto de la suite: con los 20 por defecto, un runner cargado se
+    queda sin ninguno libre en la ventana y next_free levanta RuntimeError.
+    En produccion se lo llama con un puerto declarado por el usuario, tipo 3000,
+    donde 20 sobran."""
     _, port = listener
-    assert ports.next_free(port) != port
+    assert ports.next_free(port, limit=500) != port
 
 
 def test_puerto_fuera_de_rango():
