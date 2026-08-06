@@ -459,6 +459,8 @@ def _why(proc: Proc) -> str:
 # que acaba de bindear y todavia no entro a su bucle de atencion, y con 1s
 # bastaba una maquina cargada para darlo por mudo.
 HTTP_PROBE_TIMEOUT = 3.0
+HTTP_PROBE_FIRST_TIMEOUT = 1.0
+HTTP_PROBE_RETRY_DELAY = 0.1
 
 
 def speaks_http(port: int) -> bool:
@@ -477,13 +479,18 @@ def speaks_http(port: int) -> bool:
     peticion, como el modo dev de Next, lo recupera `Session._probe_late_http`
     desde su propio hilo.
     """
-    try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}", timeout=HTTP_PROBE_TIMEOUT):
+    timeouts = (HTTP_PROBE_FIRST_TIMEOUT, HTTP_PROBE_TIMEOUT - HTTP_PROBE_FIRST_TIMEOUT)
+    for i, timeout in enumerate(timeouts):
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}", timeout=timeout):
+                return True
+        except urllib.error.HTTPError:
             return True
-    except urllib.error.HTTPError:
-        return True
-    except (urllib.error.URLError, OSError, ValueError):
-        return False
+        except (urllib.error.URLError, OSError, ValueError):
+            if i == len(timeouts) - 1:
+                return False
+            time.sleep(HTTP_PROBE_RETRY_DELAY)
+    return False
 
 
 def _http_ok(url: str) -> bool:
