@@ -14,7 +14,6 @@ como superficie sensible aunque solo escuche en loopback:
 from __future__ import annotations
 
 import logging
-import os
 import secrets
 import threading
 import time
@@ -30,6 +29,9 @@ from pydantic import BaseModel, Field
 from rich.console import Console
 
 from . import __version__, config, detect, doctor, ports, registry, runner
+
+# `browse_module` porque el endpoint de /api/browse ya se llama browse.
+from . import browse as browse_module
 
 log = logging.getLogger("portmaster.server")
 
@@ -483,7 +485,7 @@ def create_app(token: str | None = None) -> FastAPI:
     @app.get("/api/browse", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
     def browse(path: str = "") -> dict:
         try:
-            return _browse(path)
+            return browse_module.listing(path)
         except ValueError as exc:
             log.info("browse rechazado: %s", exc)
             raise HTTPException(400, str(exc))
@@ -751,86 +753,6 @@ def create_app(token: str | None = None) -> FastAPI:
 
 
 # vistas -------------------------------------------------------------------
-
-
-# exploracion de carpetas -------------------------------------------------
-#
-# El navegador no puede dar rutas absolutas (webkitdirectory las oculta a
-# proposito), asi que el listado sale de aca. Solo nombres de carpetas y de los
-# archivos marcadores: nunca contenido, nunca archivos sueltos.
-
-MARKERS = ("stack.yaml", "stack.yml", *detect.COMPOSE_NAMES, "package.json", "manage.py")
-
-# Carpetas que nunca son un proyecto y solo hacen ruido al navegar.
-BROWSE_SKIP = {"node_modules", "__pycache__", "venv", "env", "dist", "build", "target"}
-BROWSE_LIMIT = 300
-
-
-def _browse(raw: str) -> dict:
-    if not raw:
-        return _roots()
-
-    path = Path(raw).expanduser()
-    if not path.is_absolute():
-        raise ValueError(f"la ruta debe ser absoluta: {raw}")
-    try:
-        path = path.resolve(strict=True)
-    except OSError:
-        raise ValueError(f"no existe: {raw}") from None
-    if not path.is_dir():
-        raise ValueError(f"no es un directorio: {path}")
-
-    names = _subdirs(path)
-    return {
-        "path": str(path),
-        # "" manda a la vista de raices; None es no tener a donde subir.
-        "parent": "" if path.parent == path else str(path.parent),
-        "markers": _markers(path),
-        "truncated": len(names) > BROWSE_LIMIT,
-        "entries": [
-            {"name": name, "path": str(path / name), "markers": _markers(path / name)}
-            for name in names[:BROWSE_LIMIT]
-        ],
-    }
-
-
-def _subdirs(path: Path) -> list[str]:
-    found = []
-    try:
-        with os.scandir(path) as items:
-            for item in items:
-                if item.name.startswith(".") or item.name in BROWSE_SKIP:
-                    continue
-                try:
-                    if item.is_dir():
-                        found.append(item.name)
-                except OSError:
-                    continue  # enlace roto o unidad desconectada
-    except OSError:
-        return []  # sin permisos se ve vacia, que no es un error del usuario
-    return sorted(found, key=str.lower)
-
-
-def _markers(path: Path) -> list[str]:
-    """Archivos que delatan un proyecto.
-
-    ponytail: un stat por marcador y por carpeta, hasta ~1800 en un listado
-    grande. Es local y en SSD no se nota. Si alguna vez pesa, la salida es un
-    solo scandir por carpeta e intersecar los nombres.
-    """
-    return [name for name in MARKERS if (path / name).is_file()]
-
-
-def _roots() -> dict:
-    """Punto de partida: la home del usuario y las unidades montadas."""
-    seen = {str(Path.home())}
-    entries = [{"name": "Inicio", "path": str(Path.home()), "markers": []}]
-    for partition in psutil.disk_partitions(all=False):
-        mount = partition.mountpoint
-        if mount not in seen and os.path.isdir(mount):
-            seen.add(mount)
-            entries.append({"name": mount, "path": mount, "markers": []})
-    return {"path": "", "parent": None, "markers": [], "truncated": False, "entries": entries}
 
 
 def _lookup(pid: str) -> Path:
