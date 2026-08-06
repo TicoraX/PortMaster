@@ -1,0 +1,52 @@
+name: release
+
+# Se dispara con el tag, no con el push a main: publicar es irreversible en PyPI
+# (un numero de version no se puede reusar ni despues de borrarlo) y merecer un
+# gesto explicito.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # El numero sale de portmaster/__init__.py, que es la unica fuente. Si el
+      # tag no coincide, se corta antes de publicar: un v1.0.1 que sube un
+      # paquete que se llama 1.0.0 no se puede deshacer.
+      - name: El tag tiene que coincidir con la version del paquete
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(python -c "import re,pathlib; print(re.search(r'\"(.+)\"', pathlib.Path('portmaster/__init__.py').read_text()).group(1))")
+          echo "tag=$tag paquete=$pkg"
+          [ "$tag" = "$pkg" ]
+
+      - run: pip install build
+      - run: python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # El entorno permite exigir aprobacion manual desde la configuracion del
+    # repo antes de que corra este job.
+    environment: pypi
+    permissions:
+      # Trusted publishing: PyPI verifica este token de OIDC contra el publisher
+      # configurado para el repo. Sin API token en secrets, que es un secreto de
+      # larga vida que no caduca si se filtra.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
