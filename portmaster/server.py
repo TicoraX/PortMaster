@@ -305,7 +305,16 @@ def _docker_is_down() -> bool:
         caido = doctor._docker().level == "fail"
         _docker_seen = (time.monotonic(), caido)
         return caido
-SESSIONS_FILE = registry.HOME / "sessions.json"
+def _sessions_file() -> Path:
+    """Resuelto al usarlo y no al importar.
+
+    Como constante quedaba fijada al `registry.HOME` del momento del import, y
+    entonces `mkdir` creaba un directorio y `write_text` escribia en otro. En
+    los tests eso mandaba el estado al home real del usuario, y con
+    `PORTMASTER_TOKEN` en el entorno, donde nadie llega a crear `~/.portmaster`,
+    la persistencia fallaba con un warning que no lee nadie.
+    """
+    return registry.HOME / "sessions.json"
 
 
 def _save_sessions_state() -> None:
@@ -321,17 +330,18 @@ def _save_sessions_state() -> None:
                     }
         registry.HOME.mkdir(parents=True, exist_ok=True)
         import json
-        SESSIONS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        _sessions_file().write_text(json.dumps(data, indent=2), encoding="utf-8")
     except Exception as exc:
         log.warning("no se pudo guardar estado de sesiones: %s", exc)
 
 
 def _load_sessions_state() -> None:
-    if not SESSIONS_FILE.is_file():
+    archivo = _sessions_file()
+    if not archivo.is_file():
         return
     import json
     try:
-        raw = json.loads(SESSIONS_FILE.read_text(encoding="utf-8"))
+        raw = json.loads(archivo.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             return
         known_paths = {registry.project_id(p): p for p in registry.paths()}
@@ -868,6 +878,11 @@ def _project_view(path: Path) -> dict:
 
     with sessions_lock:
         session = sessions.get(pid)
+    # El estado del proyecto se lee antes que el de sus servicios, y no despues.
+    # `_run` pasa a "running" recien cuando todos quedaron listos: leyendolo al
+    # final, un arranque que termina entre las dos lecturas devuelve el proyecto
+    # "corriendo" con los servicios todavia "arrancando".
+    estado = session.state if session else "stopped"
     running = session.service_states() if session else {}
     discovered = session.service_ports() if session else {}
     openable = session.service_http() if session else set()
@@ -914,7 +929,7 @@ def _project_view(path: Path) -> dict:
     return {
         **base,
         "name": stack.name,
-        "state": session.state if session else "stopped",
+        "state": estado,
         "error": session.error if session else None,
         "detected": stack.detected,
         "profiles": sorted(stack.profiles),

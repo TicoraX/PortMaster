@@ -72,13 +72,19 @@ def test_open_con_puerto_explicito(tmp_path, monkeypatch, servidor_http, abierto
     assert abierto == [f"http://localhost:{servidor_http}"]
 
 
+def _sin_saltos(salida: str) -> str:
+    """Rich parte las lineas al ancho de la consola, que en CI es 80 y en una
+    terminal cualquiera es otro. Lo que se afirma es el mensaje, no el layout."""
+    return " ".join(salida.split())
+
+
 def test_doctor_sin_proyecto_no_revienta(tmp_path, monkeypatch):
     """Recien instalado, en una carpeta cualquiera, es el primer comando que
     alguien corre: no puede salir con ConfigError."""
     monkeypatch.chdir(tmp_path)
     resultado = runner.invoke(cli.app, ["doctor"])
     assert resultado.exit_code == 0
-    assert "no es un proyecto conocido" in resultado.output
+    assert "no es un proyecto conocido" in _sin_saltos(resultado.output)
 
 
 def test_doctor_delata_el_puerto_ocupado_y_dice_como_liberarlo(

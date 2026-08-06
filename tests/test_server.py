@@ -557,7 +557,10 @@ def test_un_servidor_que_contesta_tarde_igual_consigue_el_boton_abrir(
         proyecto = client.get("/api/state").json()["projects"][0]
         return proyecto["services"][0]["openable"]
 
-    assert esperar(abrible, 40), "el re-sondeo nunca le devolvio el boton"
+    # HTTP_RETRIES suma 37s, y el primer intento no arranca hasta que el stack
+    # esta listo. Con 40 el ultimo re-sondeo caia justo fuera de la ventana.
+    total = sum(server.HTTP_RETRIES) + 20
+    assert esperar(abrible, total), "el re-sondeo nunca le devolvio el boton"
 
 
 def test_un_puerto_mudo_no_frena_la_vista_de_estado(client, proyecto):
@@ -704,7 +707,7 @@ def test_persistencia_de_sesiones_al_reiniciar_servidor(client, proyecto):
 
     # Simulamos reinicio del servidor limpiando la memoria de sessions
     server._save_sessions_state()
-    assert server.SESSIONS_FILE.is_file()
+    assert server._sessions_file().is_file()
 
     server.sessions.clear()
     server._load_sessions_state()
@@ -803,11 +806,10 @@ def test_el_chequeo_de_docker_no_corre_en_cada_request(client, tmp_path, monkeyp
     assert client.get("/api/state").json()["projects"][0]["docker_down"] is True
 
 
-def _sesion_recuperada(tmp_path, monkeypatch, port):
+def _sesion_recuperada(tmp_path, port):
     """Simula un reinicio de `portmaster serve` con el proceso todavia vivo."""
     import json
 
-    monkeypatch.setattr(server, "SESSIONS_FILE", registry.HOME / "sessions.json")
     root = tmp_path / "sobreviviente"
     root.mkdir()
     (root / "stack.yaml").write_text(
@@ -815,7 +817,7 @@ def _sesion_recuperada(tmp_path, monkeypatch, port):
     )
     pid = registry.project_id(registry.add(root))
     registry.HOME.mkdir(parents=True, exist_ok=True)
-    server.SESSIONS_FILE.write_text(
+    server._sessions_file().write_text(
         json.dumps({pid: {"path": str(root), "profile": None, "state": "running"}}),
         encoding="utf-8",
     )
@@ -833,7 +835,7 @@ def test_una_sesion_recuperada_muestra_sus_servicios(client, tmp_path, monkeypat
     vivo.bind(("127.0.0.1", port))
     vivo.listen()
     try:
-        pid = _sesion_recuperada(tmp_path, monkeypatch, port)
+        pid = _sesion_recuperada(tmp_path, port)
         estados = server.sessions[pid].service_states()
         assert estados == {"srv": "ready"}
     finally:
@@ -852,7 +854,7 @@ def test_reiniciar_una_sesion_recuperada_lo_dice_en_vez_de_reventar(
     vivo.bind(("127.0.0.1", port))
     vivo.listen()
     try:
-        pid = _sesion_recuperada(tmp_path, monkeypatch, port)
+        pid = _sesion_recuperada(tmp_path, port)
         respuesta = client.post(f"/api/projects/{pid}/services/srv/restart")
         assert respuesta.status_code == 409
         assert "reinicio del servidor" in respuesta.json()["detail"]
