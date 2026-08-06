@@ -20,6 +20,33 @@ SERVER = (
     "time.sleep(120)"
 )
 
+# Contesta HTTP y nada mas. Escrito a mano en vez de usar `http.server` porque
+# el suyo llama a socket.getfqdn() entre el bind y el listen: es una resolucion
+# inversa de DNS, y en el runner de macOS se cuelga mas de 20 segundos. El test
+# quedaba rojo por el DNS del CI y no por nada del runner.
+HTTP_SERVER = """
+import socket
+
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", {port}))
+s.listen()
+print("SERVIDOR ARRIBA", flush=True)
+while True:
+    conn, _ = s.accept()
+    conn.recv(4096)
+    conn.sendall(b"HTTP/1.1 200 OK\\r\\nContent-Length: 2\\r\\nConnection: close\\r\\n\\r\\nok")
+    conn.close()
+"""
+
+
+def http_server_script(tmp_path, port):
+    """En archivo y no en `python -c`: el cuerpo tiene comillas y saltos, y
+    pasarlo por un shell (los comandos corren con shell=True) los destroza."""
+    path = tmp_path / "servidor_http.py"
+    path.write_text(HTTP_SERVER.format(port=port), encoding="utf-8")
+    return path
+
 
 def stack_from(tmp_path, body):
     path = tmp_path / "stack.yaml"
@@ -114,19 +141,21 @@ def test_detached_exitoso(tmp_path):
 
 def test_un_puerto_que_habla_http_se_puede_abrir(tmp_path, free_ports):
     (port,) = free_ports(1)
+    script = http_server_script(tmp_path, port)
     stack = stack_from(
         tmp_path,
         f"""
         services:
           web:
-            command: {sys.executable} -m http.server {port} --bind 127.0.0.1
+            command: {sys.executable} "{script}"
             port: {port}
         """,
     )
     engine = make_runner(stack)
     try:
         engine.up()
-        # Aunque la raiz no sirva nada util, sigue siendo HTTP y se puede abrir.
+        # Lo que distingue a un frontend de una base de datos es que conteste
+        # HTTP, no que sirva algo util en la raiz.
         assert engine.procs[0].http is True
     finally:
         engine.down()
