@@ -29,7 +29,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "httpx>=0.27"]
+dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6"]
 
 [project.urls]
 Homepage = "https://github.com/TicoraX/PortMaster"
@@ -37,6 +37,16 @@ Issues = "https://github.com/TicoraX/PortMaster/issues"
 
 [project.scripts]
 portmaster = "portmaster.cli:app"
+
+[tool.ruff.lint]
+# El default de ruff (E4, E7, E9, F) mas orden de imports. Lo que interesa es F:
+# nombre indefinido, import sin usar, variable perdida. Un bloque de codigo que
+# se cae en un merge sale ahi y no lo ve ningun test.
+#
+# Fuera quedan E501, B904 y el resto del catalogo de estilo: sumaban 32 hallazgos
+# en codigo que funciona, y adoptarlos obligaba a un commit de reformateo que
+# nadie pidio.
+select = ["E4", "E7", "E9", "F", "I"]
 
 [build-system]
 requires = ["hatchling"]
