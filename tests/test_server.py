@@ -195,6 +195,11 @@ def proxy_de_docker(free_ports):
         deadline = time.time() + 10
         while time.time() < deadline and ports.is_free(port):
             time.sleep(0.1)
+        # En macOS el interprete vive dentro de un bundle y el proceso se sigue
+        # llamando "Python" por mas que el binario se copie con otro nombre, asi
+        # que ahi no hay forma de hacerse pasar por el proxy.
+        if (ports.scan(port).name or "").lower() != nombre:
+            pytest.skip("el proceso no toma el nombre del ejecutable en esta plataforma")
         yield port
     finally:
         if proc.poll() is None:

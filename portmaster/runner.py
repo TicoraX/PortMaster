@@ -454,7 +454,11 @@ def _why(proc: Proc) -> str:
     return ""
 
 
-HTTP_PROBE_TIMEOUT = 1.0
+# Solo se agota cuando alguien acepta la conexion y no contesta: un puerto
+# cerrado corta en el acto y no cuesta nada. Ese caso es justo el de un servidor
+# que acaba de bindear y todavia no entro a su bucle de atencion, y con 1s
+# bastaba una maquina cargada para darlo por mudo.
+HTTP_PROBE_TIMEOUT = 3.0
 
 
 def speaks_http(port: int) -> bool:

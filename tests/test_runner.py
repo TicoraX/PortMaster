@@ -114,8 +114,7 @@ def test_detached_exitoso(tmp_path):
 
 HTTP_SERVER = (
     "from http.server import HTTPServer, BaseHTTPRequestHandler; "
-    "srv = HTTPServer(('127.0.0.1', {port}), BaseHTTPRequestHandler); "
-    "print('sirviendo', flush=True); srv.serve_forever()"
+    "HTTPServer(('127.0.0.1', {port}), BaseHTTPRequestHandler).serve_forever()"
 )
 
 
@@ -128,11 +127,6 @@ def test_un_puerto_que_habla_http_se_puede_abrir(tmp_path, free_ports):
           web:
             command: {sys.executable} -c "{HTTP_SERVER.format(port=port)}"
             port: {port}
-            # Con `ready: port` el listo salta en cuanto HTTPServer hace bind, y
-            # el sondeo HTTP puede caer antes de que `serve_forever` conteste: la
-            # conexion entra al backlog y se queda esperando. En un runner de CI
-            # cargado eso da falso negativo. El log dice cuando sirve de verdad.
-            ready: "log:sirviendo"
         """,
     )
     engine = make_runner(stack)
