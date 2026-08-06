@@ -1,9 +1,19 @@
 name: tests
 
+# Por push y no por pull_request. El evento de PR dejo de producir runs en este
+# repo el 6 de agosto: ni el push de un agente a una rama con PR abierto ni un
+# PR nuevo dispararon nada, con Actions habilitado y el workflow activo. Por
+# push cada rama corre sus tests igual, el PR muestra el check de su rama, y no
+# hay dos runs por commit como pasaria dejando los dos eventos.
 on:
   push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
+
+# Empujar tres veces seguidas cancela las corridas viejas en vez de encolar tres
+# matrices de cuatro cuadros.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
