@@ -1,6 +1,7 @@
 """Procesos reales. Un orquestador probado con mocks no prueba nada."""
 
 import io
+import socket
 import sys
 import textwrap
 import time
@@ -111,12 +112,6 @@ def test_detached_exitoso(tmp_path):
     assert engine.procs[0].ready
 
 
-HTTP_SERVER = (
-    "from http.server import HTTPServer, BaseHTTPRequestHandler; "
-    "HTTPServer(('127.0.0.1', {port}), BaseHTTPRequestHandler).serve_forever()"
-)
-
-
 def test_un_puerto_que_habla_http_se_puede_abrir(tmp_path, free_ports):
     (port,) = free_ports(1)
     stack = stack_from(
@@ -124,15 +119,14 @@ def test_un_puerto_que_habla_http_se_puede_abrir(tmp_path, free_ports):
         f"""
         services:
           web:
-            command: {sys.executable} -c "{HTTP_SERVER.format(port=port)}"
+            command: {sys.executable} -m http.server {port} --bind 127.0.0.1
             port: {port}
         """,
     )
     engine = make_runner(stack)
     try:
         engine.up()
-        # BaseHTTPRequestHandler contesta 501 a un GET: no sirve nada, pero es
-        # HTTP, que es justo lo que distingue a un frontend de una base de datos.
+        # Aunque la raiz no sirva nada util, sigue siendo HTTP y se puede abrir.
         assert engine.procs[0].http is True
     finally:
         engine.down()
@@ -332,6 +326,47 @@ def test_timeout_de_healthcheck(tmp_path, free_ports):
     engine = make_runner(stack, timeout=2.0)
     with pytest.raises(runner.StartupError, match="no estuvo listo"):
         engine.up()
+
+
+def test_el_timeout_avisa_si_abrio_otro_puerto(tmp_path, free_ports):
+    """El caso vite: declaras 5177, el proceso se corre a 5178 y no falla."""
+    declarado, real = free_ports(2)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "{SERVER.format(port=real)}"
+            port: {declarado}
+        """,
+    )
+    engine = make_runner(stack, timeout=2.0)
+    with pytest.raises(runner.StartupError, match=f"pero abrio {real}"):
+        engine.up()
+
+
+def test_el_timeout_avisa_quien_tiene_el_puerto(tmp_path, free_ports):
+    """El puerto declarado lo tiene un intruso y el servicio nunca abre nada."""
+    (declarado,) = free_ports(1)
+    intruso = socket.socket()
+    intruso.bind(("127.0.0.1", declarado))
+    intruso.listen()
+    try:
+        stack = stack_from(
+            tmp_path,
+            f"""
+            services:
+              srv:
+                command: {sys.executable} -c "import time; time.sleep(120)"
+                port: {declarado}
+                ready: "log:NUNCA APARECE"
+            """,
+        )
+        engine = make_runner(stack, timeout=2.0)
+        with pytest.raises(runner.StartupError, match="ya lo tenia"):
+            engine.up()
+    finally:
+        intruso.close()
 
 
 def test_un_fallo_apaga_lo_ya_levantado(tmp_path, free_ports):

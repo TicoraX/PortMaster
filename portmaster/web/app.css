@@ -861,6 +861,21 @@ body {
   gap: var(--space-sm);
 }
 
+.auth {
+  padding: var(--space-md);
+}
+
+.auth__hint {
+  font-size: var(--text-xs);
+  color: var(--color-ink-2);
+  margin-bottom: var(--space-sm);
+}
+
+.auth__input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 /* colofon y avisos -------------------------------------------------------- */
 
 .colophon {

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import json
+from pathlib import Path
 
-import typer
 import psutil
+import typer
 from rich.console import Console
 from rich.table import Table
 
@@ -85,7 +85,7 @@ def _release(port: int, yes: bool, force: bool) -> bool:
         return False
 
     try:
-        ports.kill(status.pid, status.create_time, force=force)
+        ports.kill(status.pid, status.create_time, force=force, port=status.port)
     except ports.KillRefused as exc:
         err.print(f"Rechazado: {exc}")
         return False
@@ -128,11 +128,34 @@ def _confirm_detected(services: list[config.Service], yes: bool) -> bool:
     return yes or typer.confirm("Arrancar?", default=True)
 
 
+def _free_ports(services: list[config.Service], yes: bool, force: bool) -> None:
+    """Libera los puertos declarados que tenga otro proceso, antes de arrancar."""
+    for service in services:
+        if not service.port:
+            continue
+        status = ports.scan(service.port)
+        if status.free:
+            continue
+        motor = ports.proxy_owner(status)
+        if motor:
+            console.print(
+                f"[dim]{service.name}: el puerto {service.port} ya lo publica {motor}, "
+                f"no hay nada que liberar.[/]"
+            )
+            continue
+        if not _release(service.port, yes, force):
+            err.print(f"Puerto {service.port} sigue ocupado ({service.name}). Cancelado.")
+            raise typer.Exit(1)
+
+
 @app.command("up")
 def up_cmd(
     profile: str = typer.Option(None, "--profile", "-p", help="Perfil de stack.yaml."),
     yes: bool = typer.Option(False, "--yes", "-y", help="No preguntar nada, arrancar."),
     force: bool = typer.Option(False, "--force", help="kill() si ignora terminate()."),
+    free: bool = typer.Option(
+        True, "--free/--no-free", help="Liberar los puertos declarados antes de arrancar."
+    ),
     timeout: float = typer.Option(60.0, help="Segundos de espera por servicio."),
 ) -> None:
     """Levanta el stack: libera puertos, arranca en orden y sigue los logs."""
@@ -148,10 +171,8 @@ def up_cmd(
     if stack.detected and not _confirm_detected(services, yes):
         raise typer.Exit(1)
 
-    for service in services:
-        if service.port and not _release(service.port, yes, force):
-            err.print(f"Puerto {service.port} sigue ocupado ({service.name}). Cancelado.")
-            raise typer.Exit(1)
+    if free:
+        _free_ports(services, yes, force)
 
     engine = runner.Runner(stack, console=console, timeout=timeout)
     try:

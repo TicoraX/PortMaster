@@ -1,6 +1,7 @@
 """Comandos del CLI. Servidores reales, igual que el resto del suite."""
 
 import json
+import socket
 import sys
 import textwrap
 import threading
@@ -71,13 +72,19 @@ def test_open_con_puerto_explicito(tmp_path, monkeypatch, servidor_http, abierto
     assert abierto == [f"http://localhost:{servidor_http}"]
 
 
+def _sin_saltos(salida: str) -> str:
+    """Rich parte las lineas al ancho de la consola, que en CI es 80 y en una
+    terminal cualquiera es otro. Lo que se afirma es el mensaje, no el layout."""
+    return " ".join(salida.split())
+
+
 def test_doctor_sin_proyecto_no_revienta(tmp_path, monkeypatch):
     """Recien instalado, en una carpeta cualquiera, es el primer comando que
     alguien corre: no puede salir con ConfigError."""
     monkeypatch.chdir(tmp_path)
     resultado = runner.invoke(cli.app, ["doctor"])
     assert resultado.exit_code == 0
-    assert "no es un proyecto conocido" in resultado.output
+    assert "no es un proyecto conocido" in _sin_saltos(resultado.output)
 
 
 def test_doctor_delata_el_puerto_ocupado_y_dice_como_liberarlo(
@@ -180,6 +187,50 @@ def test_down_con_un_stop_que_falla_sale_1(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     assert runner.invoke(cli.app, ["down"]).exit_code == 1
+
+
+def _stack_con_puerto(tmp_path, port):
+    (tmp_path / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        services:
+          web:
+            command: {sys.executable} -c "import time; time.sleep(30)"
+            port: {port}
+        """),
+        encoding="utf-8",
+    )
+
+
+def test_up_cancela_si_no_puede_liberar_el_puerto(tmp_path, monkeypatch, free_ports):
+    """El puerto lo tiene el propio pytest, que kill() se niega a matar."""
+    (port,) = free_ports(1)
+    ocupado = socket.socket()
+    ocupado.bind(("127.0.0.1", port))
+    ocupado.listen()
+    try:
+        _stack_con_puerto(tmp_path, port)
+        monkeypatch.chdir(tmp_path)
+        resultado = runner.invoke(cli.app, ["up", "--yes"])
+        assert resultado.exit_code == 1
+        assert "Cancelado" in resultado.output
+    finally:
+        ocupado.close()
+
+
+def test_up_no_free_ni_lo_intenta(tmp_path, monkeypatch, free_ports):
+    """Con --no-free el puerto ocupado no se toca: el arranque llega y falla solo."""
+    (port,) = free_ports(1)
+    ocupado = socket.socket()
+    ocupado.bind(("127.0.0.1", port))
+    ocupado.listen()
+    try:
+        _stack_con_puerto(tmp_path, port)
+        monkeypatch.chdir(tmp_path)
+        resultado = runner.invoke(cli.app, ["up", "--yes", "--no-free"])
+        assert "Cancelado" not in resultado.output
+        assert "ocupado por PID" not in resultado.output
+    finally:
+        ocupado.close()
 
 
 def test_export_e_import_de_proyectos_cli(tmp_path, monkeypatch):

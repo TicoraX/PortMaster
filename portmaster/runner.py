@@ -294,7 +294,7 @@ class Runner:
             if time.monotonic() > deadline:
                 raise StartupError(
                     f"{service.name} no estuvo listo en {self.timeout:.0f}s "
-                    f"(ready: {service.ready}){_why(proc)}"
+                    f"(ready: {service.ready}){_port_hint(proc)}{_why(proc)}"
                 )
             time.sleep(POLL)
 
@@ -406,6 +406,37 @@ def clean_error_message(text: str) -> str:
     return text
 
 
+def _port_hint(proc: Proc) -> str:
+    """Que paso con el puerto declarado, cuando el healthcheck ya se agoto.
+
+    Un dev server que encuentra su puerto ocupado se corre al siguiente sin
+    fallar: vite salta de 5177 a 5178 y sigue como si nada. El arranque queda
+    esperando en el puerto viejo hasta el timeout y el error no dice por que.
+    Solo corre en el camino del fallo, asi que los escaneos no los paga nadie
+    que este arrancando bien.
+    """
+    declarado = proc.service.port
+    if not declarado:
+        return ""
+
+    abiertos = ports.opened_by(proc.popen.pid)
+    otros = [p for p in abiertos if p != declarado]
+    if otros:
+        return (
+            f"; declaraste el puerto {declarado} pero abrio {', '.join(map(str, otros))}"
+            f" (arrancalo con el puerto fijo, o cambia el port: del stack.yaml)"
+        )
+
+    dueno = ports.scan(declarado)
+    if not dueno.free and dueno.pid is not None:
+        quien = dueno.name or f"pid {dueno.pid}"
+        return (
+            f"; el puerto {declarado} ya lo tenia {quien} (pid {dueno.pid}):"
+            f" liberalo con `portmaster free {declarado}` y reintenta"
+        )
+    return ""
+
+
 def _why(proc: Proc) -> str:
     """Ultima linea con contenido de la salida del servicio.
 
@@ -423,7 +454,13 @@ def _why(proc: Proc) -> str:
     return ""
 
 
-HTTP_PROBE_TIMEOUT = 1.0
+# Solo se agota cuando alguien acepta la conexion y no contesta: un puerto
+# cerrado corta en el acto y no cuesta nada. Ese caso es justo el de un servidor
+# que acaba de bindear y todavia no entro a su bucle de atencion, y con 1s
+# bastaba una maquina cargada para darlo por mudo.
+HTTP_PROBE_TIMEOUT = 3.0
+HTTP_PROBE_FIRST_TIMEOUT = 1.0
+HTTP_PROBE_RETRY_DELAY = 0.1
 
 
 def speaks_http(port: int) -> bool:
@@ -442,13 +479,18 @@ def speaks_http(port: int) -> bool:
     peticion, como el modo dev de Next, lo recupera `Session._probe_late_http`
     desde su propio hilo.
     """
-    try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}", timeout=HTTP_PROBE_TIMEOUT):
+    timeouts = (HTTP_PROBE_FIRST_TIMEOUT, HTTP_PROBE_TIMEOUT - HTTP_PROBE_FIRST_TIMEOUT)
+    for i, timeout in enumerate(timeouts):
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}", timeout=timeout):
+                return True
+        except urllib.error.HTTPError:
             return True
-    except urllib.error.HTTPError:
-        return True
-    except (urllib.error.URLError, OSError, ValueError):
-        return False
+        except (urllib.error.URLError, OSError, ValueError):
+            if i == len(timeouts) - 1:
+                return False
+            time.sleep(HTTP_PROBE_RETRY_DELAY)
+    return False
 
 
 def _http_ok(url: str) -> bool:

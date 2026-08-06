@@ -6,6 +6,18 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    # Uno solo: ruff lee el codigo, no el sistema operativo. Repetirlo en los
+    # cuatro cuadros de la matriz no dice nada nuevo.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install ruff
+      - run: ruff check portmaster tests
+
   test:
     # El modulo de puertos habla directo con el SO y los tres sistemas divergen:
     # SO_REUSEADDR en Windows, tabla de conexiones sin root en macOS. Correr en

@@ -1,6 +1,8 @@
 """Sockets y procesos reales, sin mocks: es justo lo que hay que verificar."""
 
 import os
+import pathlib
+import shutil
 import socket
 import subprocess
 import sys
@@ -47,8 +49,14 @@ def test_scan_puerto_libre(listener):
 
 
 def test_next_free_salta_el_ocupado(listener):
+    """La ventana va ancha a proposito. `listener` bindea al puerto 0, asi que
+    arranca en el rango efimero, que es justo donde el SO esta repartiendo
+    puertos al resto de la suite: con los 20 por defecto, un runner cargado se
+    queda sin ninguno libre en la ventana y next_free levanta RuntimeError.
+    En produccion se lo llama con un puerto declarado por el usuario, tipo 3000,
+    donde 20 sobran."""
     _, port = listener
-    assert ports.next_free(port) != port
+    assert ports.next_free(port, limit=500) != port
 
 
 def test_puerto_fuera_de_rango():
@@ -60,6 +68,20 @@ def test_puerto_fuera_de_rango():
 def test_kill_rechaza_el_proceso_propio():
     with pytest.raises(ports.KillRefused):
         ports.kill(os.getpid())
+
+
+def test_proxy_owner_reconoce_a_docker_y_deja_pasar_al_resto():
+    # Es la linea que decide si `up` cancela o sigue con el stack a medio levantar.
+    proxy = ports.PortStatus(5432, False, 4436, "wslrelay.exe")
+    assert ports.proxy_owner(proxy) == "WSL"
+    assert ports.proxy_owner(ports.PortStatus(3000, False, 99, "node.exe")) is None
+    assert ports.proxy_owner(ports.PortStatus(3000, True)) is None
+
+
+def test_kill_rechaza_un_pid_vacio():
+    # psutil.Process(None) es el proceso actual: sin el guard, esto mata a pytest.
+    with pytest.raises(ports.KillRefused):
+        ports.kill(None)
 
 
 def test_kill_rechaza_pids_protegidos():
@@ -80,6 +102,35 @@ def test_kill_rechaza_pid_reciclado(child):
     with pytest.raises(ports.KillRefused):
         ports.kill(child.pid, create_time=1.0)
     assert child.poll() is None
+
+
+def test_kill_rechaza_el_proxy_de_docker():
+    """Un proceso llamado como el proxy de Docker o WSL no se mata.
+
+    Ese proxy escucha los puertos de todos los contenedores a la vez: matarlo
+    para liberar uno apaga el motor entero. La copia va al directorio del
+    interprete porque un python suelto en otra carpeta no encuentra sus DLLs.
+    """
+    nombre = "wslrelay.exe" if os.name == "nt" else "docker-proxy"
+    impostor = pathlib.Path(sys.executable).with_name(nombre)
+    try:
+        shutil.copy2(sys.executable, impostor)
+    except OSError:
+        pytest.skip("directorio del interprete no escribible")
+
+    proc = subprocess.Popen([str(impostor), "-c", "import time; time.sleep(60)"])
+    try:
+        status = psutil.Process(proc.pid)
+        assert status.name().lower() == nombre
+
+        with pytest.raises(ports.KillRefused, match="proxy compartido"):
+            ports.kill(proc.pid)
+        assert proc.poll() is None, "el proxy sobrevivio al rechazo"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        impostor.unlink(missing_ok=True)
 
 
 def test_kill_cierra_el_proceso(child):

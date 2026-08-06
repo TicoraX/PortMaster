@@ -194,7 +194,7 @@ class Session:
             for status in scanned.values():
                 if not status.free and status.pid is not None:
                     try:
-                        ports.kill(status.pid, status.create_time)
+                        ports.kill(status.pid, status.create_time, port=status.port)
                     except Exception:
                         pass
         self.state = "stopped"
@@ -305,7 +305,16 @@ def _docker_is_down() -> bool:
         caido = doctor._docker().level == "fail"
         _docker_seen = (time.monotonic(), caido)
         return caido
-SESSIONS_FILE = registry.HOME / "sessions.json"
+def _sessions_file() -> Path:
+    """Resuelto al usarlo y no al importar.
+
+    Como constante quedaba fijada al `registry.HOME` del momento del import, y
+    entonces `mkdir` creaba un directorio y `write_text` escribia en otro. En
+    los tests eso mandaba el estado al home real del usuario, y con
+    `PORTMASTER_TOKEN` en el entorno, donde nadie llega a crear `~/.portmaster`,
+    la persistencia fallaba con un warning que no lee nadie.
+    """
+    return registry.HOME / "sessions.json"
 
 
 def _save_sessions_state() -> None:
@@ -321,17 +330,18 @@ def _save_sessions_state() -> None:
                     }
         registry.HOME.mkdir(parents=True, exist_ok=True)
         import json
-        SESSIONS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        _sessions_file().write_text(json.dumps(data, indent=2), encoding="utf-8")
     except Exception as exc:
         log.warning("no se pudo guardar estado de sesiones: %s", exc)
 
 
 def _load_sessions_state() -> None:
-    if not SESSIONS_FILE.is_file():
+    archivo = _sessions_file()
+    if not archivo.is_file():
         return
     import json
     try:
-        raw = json.loads(SESSIONS_FILE.read_text(encoding="utf-8"))
+        raw = json.loads(archivo.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             return
         known_paths = {registry.project_id(p): p for p in registry.paths()}
@@ -629,7 +639,7 @@ def create_app(token: str | None = None) -> FastAPI:
             raise HTTPException(403, "el proceso no es visible con estos permisos")
 
         try:
-            ports.kill(status.pid, status.create_time)
+            ports.kill(status.pid, status.create_time, port=port)
         except ports.KillRefused as exc:
             log.warning("kill rechazado en %d: %s", port, exc)
             raise HTTPException(409, str(exc))
@@ -719,6 +729,11 @@ def create_app(token: str | None = None) -> FastAPI:
                 if state != "stopped":
                     continue
                 if status.pid is None:
+                    continue
+                # El proxy de Docker no es un intruso: detras hay un contenedor
+                # de este mismo proyecto, publicado. Ofrecer "Cerrar" ahi es
+                # ofrecer apagar el motor entero.
+                if ports.proxy_owner(status):
                     continue
                 result.append({
                     "port": svc.port,
@@ -863,6 +878,11 @@ def _project_view(path: Path) -> dict:
 
     with sessions_lock:
         session = sessions.get(pid)
+    # El estado del proyecto se lee antes que el de sus servicios, y no despues.
+    # `_run` pasa a "running" recien cuando todos quedaron listos: leyendolo al
+    # final, un arranque que termina entre las dos lecturas devuelve el proyecto
+    # "corriendo" con los servicios todavia "arrancando".
+    estado = session.state if session else "stopped"
     running = session.service_states() if session else {}
     discovered = session.service_ports() if session else {}
     openable = session.service_http() if session else set()
@@ -876,6 +896,17 @@ def _project_view(path: Path) -> dict:
         # (docker stop), el puerto libre es la verdad y el proceso no dice nada.
         if state == "ready" and service.detached and status is not None and status.free:
             state = "stopped"
+        # Y al reves: el puerto lo publica el proxy de Docker, asi que el
+        # contenedor esta arriba lo haya arrancado esta interfaz o no. Sin esto
+        # un stack levantado desde la terminal se ve "detenido" con los tres
+        # puertos en rojo.
+        #
+        # ponytail: asume que el contenedor de ese puerto es el de este
+        # proyecto, la misma apuesta que hace `ready: port` en el runner.
+        # Preguntarle a `docker ps` por cada puerto costaria un subproceso, y
+        # esto se sondea cada 2.5s.
+        if state == "stopped" and service.detached and _published(status):
+            state = "ready"
         services.append(
             {
                 "name": service.name,
@@ -898,13 +929,18 @@ def _project_view(path: Path) -> dict:
     return {
         **base,
         "name": stack.name,
-        "state": session.state if session else "stopped",
+        "state": estado,
         "error": session.error if session else None,
         "detected": stack.detected,
         "profiles": sorted(stack.profiles),
         "services": services,
         "docker_down": docker_down,
     }
+
+
+def _published(status: ports.PortStatus | None) -> bool:
+    """El puerto lo tiene el proxy de Docker, o sea que hay un contenedor arriba."""
+    return status is not None and not status.free and ports.proxy_owner(status) is not None
 
 
 def _occupant(status: ports.PortStatus | None, ours: bool) -> dict | None:

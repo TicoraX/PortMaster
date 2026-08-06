@@ -1,3 +1,6 @@
+import os
+import shutil
+import subprocess
 import sys
 import textwrap
 import time
@@ -6,7 +9,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from portmaster import config, registry, server
+from portmaster import config, ports, registry, server
 
 TOKEN = "token-de-prueba-suficientemente-largo"
 SERVER = (
@@ -83,6 +86,16 @@ def test_headers_de_seguridad(client):
     assert headers["x-content-type-options"] == "nosniff"
     assert headers["x-frame-options"] == "DENY"
     assert headers["referrer-policy"] == "no-referrer"
+
+
+def test_los_estaticos_no_se_cachean(client):
+    """El HTML pide app.js y app.css sin `?v=`, apoyado en este header. Si el
+    mount de StaticFiles dejara de pasar por el middleware, el navegador se
+    quedaria con la version vieja hasta un hard refresh y nadie se enteraria."""
+    for asset in ("/static/app.js", "/static/app.css"):
+        respuesta = client.get(asset)
+        assert respuesta.status_code == 200
+        assert respuesta.headers["cache-control"] == "no-store"
 
 
 def test_rate_limit_en_kill(client):
@@ -167,6 +180,76 @@ def registrar(tmp_path, *nombres):
         root.mkdir(parents=True)
         (root / "stack.yaml").write_text("services:\n  a:\n    command: echo a\n", encoding="utf-8")
         registry.add(root)
+
+
+@pytest.fixture
+def proxy_de_docker(free_ports):
+    """Un proceso con el nombre del proxy de Docker, escuchando un puerto.
+
+    Copiado al directorio del interprete porque un python suelto en otra
+    carpeta no encuentra sus DLLs. Del interprete base y no del venv: en
+    Windows el python.exe del venv relanza al real como hijo, y quien termina
+    escuchando el puerto es ese hijo, con su nombre y no con el del impostor.
+    """
+    (port,) = free_ports(1)
+    nombre = "wslrelay.exe" if os.name == "nt" else "docker-proxy"
+    base = getattr(sys, "_base_executable", None) or sys.executable
+    impostor = Path(base).with_name(nombre)
+    try:
+        shutil.copy2(base, impostor)
+    except OSError:
+        pytest.skip("directorio del interprete no escribible")
+
+    proc = subprocess.Popen([str(impostor), "-c", SERVER.format(port=port)])
+    try:
+        deadline = time.time() + 10
+        while time.time() < deadline and ports.is_free(port):
+            time.sleep(0.1)
+        # En macOS el interprete vive dentro de un bundle y el proceso se sigue
+        # llamando "Python" por mas que el binario se copie con otro nombre, asi
+        # que ahi no hay forma de hacerse pasar por el proxy.
+        if (ports.scan(port).name or "").lower() != nombre:
+            pytest.skip("el proceso no toma el nombre del ejecutable en esta plataforma")
+        yield port
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        impostor.unlink(missing_ok=True)
+
+
+def _proyecto_compose(tmp_path, port):
+    root = tmp_path / "condocker"
+    root.mkdir()
+    (root / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        services:
+          db:
+            command: docker compose up -d db
+            detached: true
+            port: {port}
+        """),
+        encoding="utf-8",
+    )
+    registry.add(root)
+
+
+def test_un_contenedor_arriba_no_es_un_intruso(client, tmp_path, proxy_de_docker):
+    """Lo que publica el proxy de Docker es el propio stack, no un okupa."""
+    _proyecto_compose(tmp_path, proxy_de_docker)
+
+    intrusos = client.get("/api/ports/orphans").json()["orphans"]
+    assert [o for o in intrusos if o["port"] == proxy_de_docker] == []
+
+
+def test_un_contenedor_arriba_figura_corriendo(client, tmp_path, proxy_de_docker):
+    """Un stack levantado desde la terminal no se ve detenido y en rojo."""
+    _proyecto_compose(tmp_path, proxy_de_docker)
+
+    proyecto = client.get("/api/state").json()["projects"][0]
+    (db,) = proyecto["services"]
+    assert db["state"] == "ready"
+    assert db["occupant"] is None
 
 
 def test_paginado(client, tmp_path):
@@ -489,7 +572,10 @@ def test_un_servidor_que_contesta_tarde_igual_consigue_el_boton_abrir(
         proyecto = client.get("/api/state").json()["projects"][0]
         return proyecto["services"][0]["openable"]
 
-    assert esperar(abrible, 40), "el re-sondeo nunca le devolvio el boton"
+    # HTTP_RETRIES suma 37s, y el primer intento no arranca hasta que el stack
+    # esta listo. Con 40 el ultimo re-sondeo caia justo fuera de la ventana.
+    total = sum(server.HTTP_RETRIES) + 20
+    assert esperar(abrible, total), "el re-sondeo nunca le devolvio el boton"
 
 
 def test_un_puerto_mudo_no_frena_la_vista_de_estado(client, proyecto):
@@ -636,7 +722,7 @@ def test_persistencia_de_sesiones_al_reiniciar_servidor(client, proyecto):
 
     # Simulamos reinicio del servidor limpiando la memoria de sessions
     server._save_sessions_state()
-    assert server.SESSIONS_FILE.is_file()
+    assert server._sessions_file().is_file()
 
     server.sessions.clear()
     server._load_sessions_state()
@@ -735,11 +821,10 @@ def test_el_chequeo_de_docker_no_corre_en_cada_request(client, tmp_path, monkeyp
     assert client.get("/api/state").json()["projects"][0]["docker_down"] is True
 
 
-def _sesion_recuperada(tmp_path, monkeypatch, port):
+def _sesion_recuperada(tmp_path, port):
     """Simula un reinicio de `portmaster serve` con el proceso todavia vivo."""
     import json
 
-    monkeypatch.setattr(server, "SESSIONS_FILE", registry.HOME / "sessions.json")
     root = tmp_path / "sobreviviente"
     root.mkdir()
     (root / "stack.yaml").write_text(
@@ -747,7 +832,7 @@ def _sesion_recuperada(tmp_path, monkeypatch, port):
     )
     pid = registry.project_id(registry.add(root))
     registry.HOME.mkdir(parents=True, exist_ok=True)
-    server.SESSIONS_FILE.write_text(
+    server._sessions_file().write_text(
         json.dumps({pid: {"path": str(root), "profile": None, "state": "running"}}),
         encoding="utf-8",
     )
@@ -765,7 +850,7 @@ def test_una_sesion_recuperada_muestra_sus_servicios(client, tmp_path, monkeypat
     vivo.bind(("127.0.0.1", port))
     vivo.listen()
     try:
-        pid = _sesion_recuperada(tmp_path, monkeypatch, port)
+        pid = _sesion_recuperada(tmp_path, port)
         estados = server.sessions[pid].service_states()
         assert estados == {"srv": "ready"}
     finally:
@@ -784,7 +869,7 @@ def test_reiniciar_una_sesion_recuperada_lo_dice_en_vez_de_reventar(
     vivo.bind(("127.0.0.1", port))
     vivo.listen()
     try:
-        pid = _sesion_recuperada(tmp_path, monkeypatch, port)
+        pid = _sesion_recuperada(tmp_path, port)
         respuesta = client.post(f"/api/projects/{pid}/services/srv/restart")
         assert respuesta.status_code == 409
         assert "reinicio del servidor" in respuesta.json()["detail"]
