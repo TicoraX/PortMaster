@@ -30,7 +30,12 @@ Levantar el stack entero:
 ```bash
 portmaster up
 portmaster up --profile backend    # solo un subconjunto
+portmaster up --no-free            # no tocar los puertos ocupados
 ```
+
+Antes de arrancar libera los puertos declarados que tenga otro proceso, y
+pregunta antes de cerrar cada uno. Los que ya publica Docker los saltea: ahí
+no hay nada que liberar, el contenedor ya está arriba.
 
 ```
 demo  stack.yaml
@@ -254,6 +259,10 @@ Estas reglas están en el código, no en la documentación:
 - Manda `terminate()` y espera 5 segundos. `kill()` solo con `--force`
   explícito, porque un `npm run dev` matado a lo bruto deja hijos huérfanos.
 - Sin permisos, lo dice y corta. No reintenta escalando privilegios.
+- Nunca cierra el proxy de Docker o de WSL. Un puerto publicado por un
+  contenedor no lo escucha el contenedor: lo escucha un proceso compartido por
+  todos, y cerrarlo apaga el motor entero. En vez de eso te dice qué contenedor
+  parar.
 
 ## Configuración
 

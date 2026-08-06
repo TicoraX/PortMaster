@@ -226,6 +226,16 @@ def next_free(start: int, limit: int = 20) -> int:
     raise RuntimeError(f"sin puerto libre entre {start} y {start + limit - 1}")
 
 
+def proxy_owner(status: PortStatus) -> str | None:
+    """Motor que publica el puerto, si el dueno es un proxy de Docker o WSL.
+
+    Un puerto en manos de ese proxy no es algo que liberar: el contenedor ya
+    esta publicado, y `docker compose up -d` sobre uno que ya corre no hace
+    nada. Sin esto, arrancar un stack a medio levantar se cancela solo.
+    """
+    return PROXY_NAMES.get((status.name or "").lower())
+
+
 def containers_on(port: int) -> list[str]:
     """Contenedores que publican `port`, vacio si docker no contesta.
 

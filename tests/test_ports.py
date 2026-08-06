@@ -64,6 +64,14 @@ def test_kill_rechaza_el_proceso_propio():
         ports.kill(os.getpid())
 
 
+def test_proxy_owner_reconoce_a_docker_y_deja_pasar_al_resto():
+    # Es la linea que decide si `up` cancela o sigue con el stack a medio levantar.
+    proxy = ports.PortStatus(5432, False, 4436, "wslrelay.exe")
+    assert ports.proxy_owner(proxy) == "WSL"
+    assert ports.proxy_owner(ports.PortStatus(3000, False, 99, "node.exe")) is None
+    assert ports.proxy_owner(ports.PortStatus(3000, True)) is None
+
+
 def test_kill_rechaza_un_pid_vacio():
     # psutil.Process(None) es el proceso actual: sin el guard, esto mata a pytest.
     with pytest.raises(ports.KillRefused):
