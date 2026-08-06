@@ -17,6 +17,15 @@ sobre un contenedor que ya está arriba, que es justo lo que hace que arrancar u
 stack a medio levantar no cancele. Necesita distinguir esos dos casos antes de
 tocarse.
 
+## Para decidir
+
+**El reintento de `speaks_http` quedó redundante.** `e286e38` lo agregó contra
+la carrera que `00f93ac` arregla desde la raíz: con `ready: port` preguntando
+por `ports.accepts`, el sondeo ya no se topa con un socket bindeado que todavía
+no escucha. No molesta (un puerto cerrado corta en el acto, así que los dos
+intentos cuestan el sleep de 0.1s) y no se tocó. Si alguien lo quiere sacar,
+que sea a propósito y no de arrastre.
+
 ## Sin verificar contra la realidad
 
 **El botón `Abrir` abriendo pestaña.** El enlace es correcto (`href` al puerto,

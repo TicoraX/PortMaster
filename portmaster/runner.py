@@ -478,11 +478,18 @@ def speaks_http(port: int) -> bool:
     Un 404 cuenta: la mayoria de las APIs no sirven nada en la raiz y siguen
     siendo HTTP. Lo que descarta al servicio es que no conteste.
 
-    Un solo sondeo, en el momento en que el servicio queda listo: reintentar
-    aca cuesta el timeout entero por cada puerto que no habla HTTP, y lo pagaria
-    el arranque. Al servidor que contesta tarde porque compila en la primera
-    peticion, como el modo dev de Next, lo recupera `Session._probe_late_http`
-    desde su propio hilo.
+    Dos intentos cortos, no uno solo ni muchos: reintentar sin limite costaria
+    el timeout entero por cada puerto que no habla HTTP, y lo pagaria el
+    arranque. Un puerto cerrado corta con ECONNREFUSED en el acto, asi que los
+    dos intentos ahi no cuestan mas que el sleep del medio.
+
+    El segundo intento es cinturon y tirantes desde que `ready: port` pregunta
+    por `ports.accepts`: la carrera que cubria, sondear un socket que bindeo y
+    todavia no llamo a listen(), ya no llega hasta aca.
+
+    Al servidor que contesta tarde porque compila en la primera peticion, como
+    el modo dev de Next, lo recupera `Session._probe_late_http` desde su propio
+    hilo.
     """
     timeouts = (HTTP_PROBE_FIRST_TIMEOUT, HTTP_PROBE_TIMEOUT - HTTP_PROBE_FIRST_TIMEOUT)
     for i, timeout in enumerate(timeouts):
