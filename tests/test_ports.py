@@ -48,6 +48,31 @@ def test_scan_puerto_libre(listener):
     assert status.pid is None
 
 
+def test_accepts_distingue_bindeado_de_escuchando():
+    """La ventana entre bind() y listen() que rompia el arranque en macOS.
+
+    HTTPServer bindea, resuelve el FQDN con un DNS inverso, y recien despues
+    llama a listen(). Durante esa ventana `is_free` ya dice ocupado, porque el
+    bind falla, pero nadie acepta conexiones todavia. El arranque se declaraba
+    listo ahi y el sondeo HTTP se comia un connection refused.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    try:
+        assert ports.is_free(port) is False, "un puerto bindeado no esta libre"
+        assert ports.accepts(port) is False, "bindeado sin listen() no acepta a nadie"
+        sock.listen()
+        assert ports.accepts(port) is True, "con listen() si acepta"
+    finally:
+        sock.close()
+
+
+def test_accepts_en_un_puerto_cerrado(free_ports):
+    (port,) = free_ports(1)
+    assert ports.accepts(port) is False
+
+
 def test_next_free_salta_el_ocupado(listener):
     """La ventana va ancha a proposito. `listener` bindea al puerto 0, asi que
     arranca en el rango efimero, que es justo donde el SO esta repartiendo

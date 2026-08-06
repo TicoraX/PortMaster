@@ -316,7 +316,12 @@ class Runner:
         if ready == "none":
             return True
         if ready == "port":
-            return not ports.is_free(proc.service.port)
+            # `accepts` y no `not is_free`: is_free tambien cuenta como ocupado
+            # un socket bindeado que todavia no llamo a listen(), y ahi el
+            # servicio se declaraba listo antes de aceptar a nadie. El sondeo
+            # HTTP que sigue se comia un connection refused y el servicio
+            # perdia el boton Abrir. Ver ports.accepts.
+            return ports.accepts(proc.service.port)
         if ready == "listen":
             proc.port = ports.listening(proc.popen.pid)
             return proc.port is not None

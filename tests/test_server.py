@@ -318,7 +318,16 @@ def test_arranque_y_apagado(client, proyecto):
         estado = client.get("/api/state").json()["projects"][0]
         return estado["services"][0]["state"] == "ready"
 
-    assert esperar(corriendo), "el servicio nunca quedo listo"
+    # El motivo va en el mensaje: este test fallo una vez en CI (ubuntu 3.10)
+    # con un "nunca quedo listo" pelado, que no distingue un arranque que
+    # reviento de uno que solo tardo mas que la ventana.
+    if not esperar(corriendo):
+        final = client.get("/api/state").json()["projects"][0]
+        raise AssertionError(
+            f"el servicio nunca quedo listo: proyecto {final['state']},"
+            f" error {final.get('error')!r},"
+            f" servicios {[(s['name'], s['state']) for s in final['services']]}"
+        )
 
     logs = client.get(f"/api/projects/{pid}/logs").json()
     assert any("arriba" in linea["text"] for linea in logs["lines"])

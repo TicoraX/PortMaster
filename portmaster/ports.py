@@ -112,6 +112,37 @@ def is_free(port: int) -> bool:
     return port not in _listeners({port}) and _bind_free(port)
 
 
+# Un connect() a algo que escucha entra al backlog en el acto; contra un puerto
+# cerrado el kernel corta con ECONNREFUSED sin esperar. Solo se agota si hay un
+# firewall tragando paquetes, que en loopback no pasa.
+ACCEPT_TIMEOUT = 0.5
+
+
+def accepts(port: int, timeout: float = ACCEPT_TIMEOUT) -> bool:
+    """Si algo acepta conexiones en el puerto, aca y ahora.
+
+    Distinto de `not is_free(port)`: un socket bindeado y todavia sin `listen()`
+    hace fallar el bind, asi que cuenta como ocupado, pero no acepta a nadie.
+    Esa ventana existe de verdad. En `HTTPServer.__init__` de CPython:
+
+        server_bind()      # bind() y despues socket.getfqdn(host)
+        server_activate()  # listen()
+
+    `getfqdn` es una resolucion inversa de DNS, y en macOS sin resolver rapido
+    tarda segundos. Un arranque que se declara listo ahi ve el puerto ocupado
+    por su propio socket a medio abrir, y despues no consigue hablarle.
+
+    Para "el servicio ya esta arriba" se pregunta esto. Para "puedo usar este
+    puerto" se sigue preguntando `is_free`, donde un bindeado si es un no.
+    """
+    _check_port(port)
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def _quiet(getter):
     try:
         return getter()
