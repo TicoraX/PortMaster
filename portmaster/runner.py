@@ -294,7 +294,7 @@ class Runner:
             if time.monotonic() > deadline:
                 raise StartupError(
                     f"{service.name} no estuvo listo en {self.timeout:.0f}s "
-                    f"(ready: {service.ready}){_why(proc)}"
+                    f"(ready: {service.ready}){_port_hint(proc)}{_why(proc)}"
                 )
             time.sleep(POLL)
 
@@ -404,6 +404,37 @@ def clean_error_message(text: str) -> str:
     if "permission denied" in lower or "access is denied" in lower:
         return "Permiso denegado al ejecutar el comando"
     return text
+
+
+def _port_hint(proc: Proc) -> str:
+    """Que paso con el puerto declarado, cuando el healthcheck ya se agoto.
+
+    Un dev server que encuentra su puerto ocupado se corre al siguiente sin
+    fallar: vite salta de 5177 a 5178 y sigue como si nada. El arranque queda
+    esperando en el puerto viejo hasta el timeout y el error no dice por que.
+    Solo corre en el camino del fallo, asi que los escaneos no los paga nadie
+    que este arrancando bien.
+    """
+    declarado = proc.service.port
+    if not declarado:
+        return ""
+
+    abiertos = ports.opened_by(proc.popen.pid)
+    otros = [p for p in abiertos if p != declarado]
+    if otros:
+        return (
+            f"; declaraste el puerto {declarado} pero abrio {', '.join(map(str, otros))}"
+            f" (arrancalo con el puerto fijo, o cambia el port: del stack.yaml)"
+        )
+
+    dueno = ports.scan(declarado)
+    if not dueno.free and dueno.pid is not None:
+        quien = dueno.name or f"pid {dueno.pid}"
+        return (
+            f"; el puerto {declarado} ya lo tenia {quien} (pid {dueno.pid}):"
+            f" liberalo con `portmaster free {declarado}` y reintenta"
+        )
+    return ""
 
 
 def _why(proc: Proc) -> str:

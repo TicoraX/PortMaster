@@ -182,29 +182,37 @@ def _listeners(wanted: set[int]) -> dict[int, int | None]:
     return found
 
 
-def listening(pid: int) -> int | None:
-    """Primer puerto en LISTEN del proceso pid o de sus descendientes.
+def opened_by(pid: int) -> list[int]:
+    """Puertos en LISTEN del proceso pid y de sus descendientes, ordenados.
 
-    Para servicios cuyo puerto no esta declarado: en vez de adivinarlo parseando
-    la config del framework, se arranca el proceso y se le pregunta. El arbol
-    entero porque con shell=True el hijo directo es el shell, y quien escucha es
-    un nieto.
+    El arbol entero porque con shell=True el hijo directo es el shell, y quien
+    escucha es un nieto.
     """
     try:
         parent = psutil.Process(pid)
         tree = [parent, *parent.children(recursive=True)]
     except psutil.NoSuchProcess:
-        return None
+        return []
 
-    found = []
+    found = set()
     for process in tree:
         try:
             for conn in process.net_connections(kind="inet"):
                 if conn.status == psutil.CONN_LISTEN and conn.laddr:
-                    found.append(conn.laddr.port)
+                    found.add(conn.laddr.port)
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
-    return min(found) if found else None
+    return sorted(found)
+
+
+def listening(pid: int) -> int | None:
+    """Primer puerto en LISTEN del proceso pid o de sus descendientes.
+
+    Para servicios cuyo puerto no esta declarado: en vez de adivinarlo parseando
+    la config del framework, se arranca el proceso y se le pregunta.
+    """
+    found = opened_by(pid)
+    return found[0] if found else None
 
 
 def next_free(start: int, limit: int = 20) -> int:
