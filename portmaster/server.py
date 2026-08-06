@@ -720,6 +720,11 @@ def create_app(token: str | None = None) -> FastAPI:
                     continue
                 if status.pid is None:
                     continue
+                # El proxy de Docker no es un intruso: detras hay un contenedor
+                # de este mismo proyecto, publicado. Ofrecer "Cerrar" ahi es
+                # ofrecer apagar el motor entero.
+                if ports.proxy_owner(status):
+                    continue
                 result.append({
                     "port": svc.port,
                     "project": stack.name or path.name,
@@ -876,6 +881,17 @@ def _project_view(path: Path) -> dict:
         # (docker stop), el puerto libre es la verdad y el proceso no dice nada.
         if state == "ready" and service.detached and status is not None and status.free:
             state = "stopped"
+        # Y al reves: el puerto lo publica el proxy de Docker, asi que el
+        # contenedor esta arriba lo haya arrancado esta interfaz o no. Sin esto
+        # un stack levantado desde la terminal se ve "detenido" con los tres
+        # puertos en rojo.
+        #
+        # ponytail: asume que el contenedor de ese puerto es el de este
+        # proyecto, la misma apuesta que hace `ready: port` en el runner.
+        # Preguntarle a `docker ps` por cada puerto costaria un subproceso, y
+        # esto se sondea cada 2.5s.
+        if state == "stopped" and service.detached and _published(status):
+            state = "ready"
         services.append(
             {
                 "name": service.name,
@@ -905,6 +921,11 @@ def _project_view(path: Path) -> dict:
         "services": services,
         "docker_down": docker_down,
     }
+
+
+def _published(status: ports.PortStatus | None) -> bool:
+    """El puerto lo tiene el proxy de Docker, o sea que hay un contenedor arriba."""
+    return status is not None and not status.free and ports.proxy_owner(status) is not None
 
 
 def _occupant(status: ports.PortStatus | None, ours: bool) -> dict | None:

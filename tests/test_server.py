@@ -1,3 +1,6 @@
+import os
+import shutil
+import subprocess
 import sys
 import textwrap
 import time
@@ -6,7 +9,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from portmaster import config, registry, server
+from portmaster import config, ports, registry, server
 
 TOKEN = "token-de-prueba-suficientemente-largo"
 SERVER = (
@@ -167,6 +170,71 @@ def registrar(tmp_path, *nombres):
         root.mkdir(parents=True)
         (root / "stack.yaml").write_text("services:\n  a:\n    command: echo a\n", encoding="utf-8")
         registry.add(root)
+
+
+@pytest.fixture
+def proxy_de_docker(free_ports):
+    """Un proceso con el nombre del proxy de Docker, escuchando un puerto.
+
+    Copiado al directorio del interprete porque un python suelto en otra
+    carpeta no encuentra sus DLLs. Del interprete base y no del venv: en
+    Windows el python.exe del venv relanza al real como hijo, y quien termina
+    escuchando el puerto es ese hijo, con su nombre y no con el del impostor.
+    """
+    (port,) = free_ports(1)
+    nombre = "wslrelay.exe" if os.name == "nt" else "docker-proxy"
+    base = getattr(sys, "_base_executable", None) or sys.executable
+    impostor = Path(base).with_name(nombre)
+    try:
+        shutil.copy2(base, impostor)
+    except OSError:
+        pytest.skip("directorio del interprete no escribible")
+
+    proc = subprocess.Popen([str(impostor), "-c", SERVER.format(port=port)])
+    try:
+        deadline = time.time() + 10
+        while time.time() < deadline and ports.is_free(port):
+            time.sleep(0.1)
+        yield port
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        impostor.unlink(missing_ok=True)
+
+
+def _proyecto_compose(tmp_path, port):
+    root = tmp_path / "condocker"
+    root.mkdir()
+    (root / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        services:
+          db:
+            command: docker compose up -d db
+            detached: true
+            port: {port}
+        """),
+        encoding="utf-8",
+    )
+    registry.add(root)
+
+
+def test_un_contenedor_arriba_no_es_un_intruso(client, tmp_path, proxy_de_docker):
+    """Lo que publica el proxy de Docker es el propio stack, no un okupa."""
+    _proyecto_compose(tmp_path, proxy_de_docker)
+
+    intrusos = client.get("/api/ports/orphans").json()["orphans"]
+    assert [o for o in intrusos if o["port"] == proxy_de_docker] == []
+
+
+def test_un_contenedor_arriba_figura_corriendo(client, tmp_path, proxy_de_docker):
+    """Un stack levantado desde la terminal no se ve detenido y en rojo."""
+    _proyecto_compose(tmp_path, proxy_de_docker)
+
+    proyecto = client.get("/api/state").json()["projects"][0]
+    (db,) = proyecto["services"]
+    assert db["state"] == "ready"
+    assert db["occupant"] is None
 
 
 def test_paginado(client, tmp_path):
