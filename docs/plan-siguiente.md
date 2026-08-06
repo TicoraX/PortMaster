@@ -1,5 +1,11 @@
 # Plan: qué sigue en PortMaster
 
+> **Ejecutado y cerrado el 6 de agosto de 2026.** Entró todo: 0a, 0b, P1, P3,
+> P4, P5, P6, y también los dos que el informe había mandado abajo del corte,
+> P2 en su forma barata (`~/.portmaster/sessions.json`) y P7. Este documento
+> queda como registro de cómo se decidió, no como plan pendiente. Lo que sigue
+> abierto vive en `pendientes.md`.
+
 Fecha: 3 de agosto de 2026. Rama `main`, commit `fb2ccf2`, 142 tests en verde.
 
 Este documento propone el próximo tramo de trabajo. La pregunta que contesta es
