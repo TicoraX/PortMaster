@@ -308,26 +308,34 @@ def esperar(condicion, segundos=20):
     return False
 
 
+def esperar_listo(client):
+    """Espera a que el primer servicio quede listo, y si no llega dice por que.
+
+    El motivo va en el mensaje porque este fallo aparecio dos veces en CI
+    (ubuntu 3.10) como un "nunca quedo listo" pelado, que no distingue un
+    arranque que reviento de uno que solo tardo mas que la ventana.
+    """
+
+    def listo():
+        estado = client.get("/api/state").json()["projects"][0]
+        return estado["services"][0]["state"] == "ready"
+
+    if esperar(listo):
+        return
+    final = client.get("/api/state").json()["projects"][0]
+    raise AssertionError(
+        f"el servicio nunca quedo listo: proyecto {final['state']},"
+        f" error {final.get('error')!r},"
+        f" servicios {[(s['name'], s['state']) for s in final['services']]}"
+    )
+
+
 def test_arranque_y_apagado(client, proyecto):
     path, port = proyecto
     pid = registry.project_id(path)
 
     assert client.post(f"/api/projects/{pid}/up", json={}).status_code == 200
-
-    def corriendo():
-        estado = client.get("/api/state").json()["projects"][0]
-        return estado["services"][0]["state"] == "ready"
-
-    # El motivo va en el mensaje: este test fallo una vez en CI (ubuntu 3.10)
-    # con un "nunca quedo listo" pelado, que no distingue un arranque que
-    # reviento de uno que solo tardo mas que la ventana.
-    if not esperar(corriendo):
-        final = client.get("/api/state").json()["projects"][0]
-        raise AssertionError(
-            f"el servicio nunca quedo listo: proyecto {final['state']},"
-            f" error {final.get('error')!r},"
-            f" servicios {[(s['name'], s['state']) for s in final['services']]}"
-        )
+    esperar_listo(client)
 
     logs = client.get(f"/api/projects/{pid}/logs").json()
     assert any("arriba" in linea["text"] for linea in logs["lines"])
@@ -594,11 +602,7 @@ def test_un_puerto_mudo_no_frena_la_vista_de_estado(client, proyecto):
     path, port = proyecto
     pid = registry.project_id(path)
     client.post(f"/api/projects/{pid}/up", json={})
-
-    def listo():
-        return client.get("/api/state").json()["projects"][0]["services"][0]["state"] == "ready"
-
-    assert esperar(listo)
+    esperar_listo(client)
 
     # El socket pelado del fixture nunca contesta HTTP: es el peor caso.
     inicio = time.time()
