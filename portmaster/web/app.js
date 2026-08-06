@@ -39,8 +39,6 @@ const TITLE = document.title;
 const cards = new Map(); // id -> {root, logSeq, logsOpen}
 let flashTimer = null;
 
-// Debajo de esto el buscador estorba mas de lo que ayuda.
-const PAGE_MIN = 5;
 let query = "";
 let statusFilter = "";
 let page = 1;

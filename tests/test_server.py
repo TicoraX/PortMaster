@@ -88,6 +88,16 @@ def test_headers_de_seguridad(client):
     assert headers["referrer-policy"] == "no-referrer"
 
 
+def test_los_estaticos_no_se_cachean(client):
+    """El HTML pide app.js y app.css sin `?v=`, apoyado en este header. Si el
+    mount de StaticFiles dejara de pasar por el middleware, el navegador se
+    quedaria con la version vieja hasta un hard refresh y nadie se enteraria."""
+    for asset in ("/static/app.js", "/static/app.css"):
+        respuesta = client.get(asset)
+        assert respuesta.status_code == 200
+        assert respuesta.headers["cache-control"] == "no-store"
+
+
 def test_rate_limit_en_kill(client):
     ruta = "/api/ports/1/kill"
     for _ in range(server.QUOTA_KILL):
