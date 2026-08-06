@@ -112,12 +112,6 @@ def test_detached_exitoso(tmp_path):
     assert engine.procs[0].ready
 
 
-HTTP_SERVER = (
-    "from http.server import HTTPServer, BaseHTTPRequestHandler; "
-    "HTTPServer(('127.0.0.1', {port}), BaseHTTPRequestHandler).serve_forever()"
-)
-
-
 def test_un_puerto_que_habla_http_se_puede_abrir(tmp_path, free_ports):
     (port,) = free_ports(1)
     stack = stack_from(
@@ -125,15 +119,14 @@ def test_un_puerto_que_habla_http_se_puede_abrir(tmp_path, free_ports):
         f"""
         services:
           web:
-            command: {sys.executable} -c "{HTTP_SERVER.format(port=port)}"
+            command: {sys.executable} -m http.server {port} --bind 127.0.0.1
             port: {port}
         """,
     )
     engine = make_runner(stack)
     try:
         engine.up()
-        # BaseHTTPRequestHandler contesta 501 a un GET: no sirve nada, pero es
-        # HTTP, que es justo lo que distingue a un frontend de una base de datos.
+        # Aunque la raiz no sirva nada util, sigue siendo HTTP y se puede abrir.
         assert engine.procs[0].http is True
     finally:
         engine.down()
