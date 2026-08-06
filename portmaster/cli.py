@@ -85,7 +85,7 @@ def _release(port: int, yes: bool, force: bool) -> bool:
         return False
 
     try:
-        ports.kill(status.pid, status.create_time, force=force)
+        ports.kill(status.pid, status.create_time, force=force, port=status.port)
     except ports.KillRefused as exc:
         err.print(f"Rechazado: {exc}")
         return False

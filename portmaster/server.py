@@ -194,7 +194,7 @@ class Session:
             for status in scanned.values():
                 if not status.free and status.pid is not None:
                     try:
-                        ports.kill(status.pid, status.create_time)
+                        ports.kill(status.pid, status.create_time, port=status.port)
                     except Exception:
                         pass
         self.state = "stopped"
@@ -629,7 +629,7 @@ def create_app(token: str | None = None) -> FastAPI:
             raise HTTPException(403, "el proceso no es visible con estos permisos")
 
         try:
-            ports.kill(status.pid, status.create_time)
+            ports.kill(status.pid, status.create_time, port=port)
         except ports.KillRefused as exc:
             log.warning("kill rechazado en %d: %s", port, exc)
             raise HTTPException(409, str(exc))

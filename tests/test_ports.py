@@ -1,6 +1,8 @@
 """Sockets y procesos reales, sin mocks: es justo lo que hay que verificar."""
 
 import os
+import pathlib
+import shutil
 import socket
 import subprocess
 import sys
@@ -62,6 +64,12 @@ def test_kill_rechaza_el_proceso_propio():
         ports.kill(os.getpid())
 
 
+def test_kill_rechaza_un_pid_vacio():
+    # psutil.Process(None) es el proceso actual: sin el guard, esto mata a pytest.
+    with pytest.raises(ports.KillRefused):
+        ports.kill(None)
+
+
 def test_kill_rechaza_pids_protegidos():
     for pid in (0, 1, 4):
         with pytest.raises(ports.KillRefused):
@@ -80,6 +88,35 @@ def test_kill_rechaza_pid_reciclado(child):
     with pytest.raises(ports.KillRefused):
         ports.kill(child.pid, create_time=1.0)
     assert child.poll() is None
+
+
+def test_kill_rechaza_el_proxy_de_docker():
+    """Un proceso llamado como el proxy de Docker o WSL no se mata.
+
+    Ese proxy escucha los puertos de todos los contenedores a la vez: matarlo
+    para liberar uno apaga el motor entero. La copia va al directorio del
+    interprete porque un python suelto en otra carpeta no encuentra sus DLLs.
+    """
+    nombre = "wslrelay.exe" if os.name == "nt" else "docker-proxy"
+    impostor = pathlib.Path(sys.executable).with_name(nombre)
+    try:
+        shutil.copy2(sys.executable, impostor)
+    except OSError:
+        pytest.skip("directorio del interprete no escribible")
+
+    proc = subprocess.Popen([str(impostor), "-c", "import time; time.sleep(60)"])
+    try:
+        status = psutil.Process(proc.pid)
+        assert status.name().lower() == nombre
+
+        with pytest.raises(ports.KillRefused, match="proxy compartido"):
+            ports.kill(proc.pid)
+        assert proc.poll() is None, "el proxy sobrevivio al rechazo"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        impostor.unlink(missing_ok=True)
 
 
 def test_kill_cierra_el_proceso(child):

@@ -7,12 +7,33 @@ consumen las mismas funciones.
 from __future__ import annotations
 
 import socket
+import subprocess
 from dataclasses import dataclass
 
 import psutil
 
 # System Idle Process y System en Windows (0, 4), e init/systemd/launchd en POSIX (1). Matarlos no es una opcion.
 PROTECTED_PIDS = {0, 1, 4}
+
+# Un puerto publicado por un contenedor no lo escucha el contenedor: lo escucha
+# un proxy que Docker o WSL comparten entre todos. En esta maquina un unico
+# com.docker.backend.exe servia 3000 y 3100, y un unico wslrelay.exe servia 5432
+# y 5433. "Liberar el puerto 5432" terminaba en un terminate() sobre ese proxy,
+# que apaga Docker Desktop entero con todos sus contenedores.
+PROXY_NAMES = {
+    "com.docker.backend.exe": "Docker Desktop",
+    "com.docker.proxy.exe": "Docker Desktop",
+    "docker desktop.exe": "Docker Desktop",
+    "vpnkit.exe": "Docker Desktop",
+    "dockerd.exe": "Docker",
+    "dockerd": "Docker",
+    "docker-proxy": "Docker",
+    "wslrelay.exe": "WSL",
+    "wslhost.exe": "WSL",
+    "wslservice.exe": "WSL",
+}
+
+DOCKER_PS_TIMEOUT = 5
 
 TERMINATE_TIMEOUT = 5
 
@@ -197,15 +218,51 @@ def next_free(start: int, limit: int = 20) -> int:
     raise RuntimeError(f"sin puerto libre entre {start} y {start + limit - 1}")
 
 
-def kill(pid: int, create_time: float | None = None, force: bool = False) -> None:
+def containers_on(port: int) -> list[str]:
+    """Contenedores que publican `port`, vacio si docker no contesta.
+
+    Solo para armar el mensaje de un kill rechazado, nunca en el camino
+    caliente: cuesta un subproceso.
+    """
+    try:
+        done = subprocess.run(
+            ["docker", "ps", "--filter", f"publish={port}", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=DOCKER_PS_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return done.stdout.split()
+
+
+def _proxy_message(nombre: str, motor: str, port: int | None) -> str:
+    base = (
+        f"ese puerto lo publica {motor} a traves de {nombre}, un proxy compartido"
+        f" por todos los contenedores: cerrarlo apagaria {motor} entero"
+    )
+    nombres = containers_on(port) if port is not None else []
+    if nombres:
+        return f"{base}. Para el contenedor con: docker stop {' '.join(nombres)}"
+    return f"{base}. Pararlo desde Docker, no desde el puerto"
+
+
+def kill(
+    pid: int, create_time: float | None = None, force: bool = False, port: int | None = None
+) -> None:
     """Cierra el proceso pid. terminate() primero, kill() solo con force.
 
     create_time es el valor visto por scan(); si no coincide, el PID fue
-    reciclado por otro proceso y se aborta.
+    reciclado por otro proceso y se aborta. port solo enriquece el mensaje
+    cuando el dueno resulta ser un proxy de Docker o WSL.
 
     Lanza KillRefused si el proceso esta protegido, psutil.NoSuchProcess si ya
     no existe, y psutil.AccessDenied si faltan permisos.
     """
+    # psutil.Process(None) es el proceso actual: sin esto, un scan que no vio al
+    # dueno del puerto termina en PortMaster matandose a si mismo.
+    if pid is None:
+        raise KillRefused("no hay PID que cerrar")
     if pid in PROTECTED_PIDS:
         raise KillRefused(f"PID {pid} es un proceso del sistema")
 
@@ -218,6 +275,11 @@ def kill(pid: int, create_time: float | None = None, force: bool = False) -> Non
     proc = psutil.Process(pid)
     if create_time is not None and proc.create_time() != create_time:
         raise KillRefused(f"el PID {pid} ya no es el proceso que se escaneo")
+
+    nombre = _quiet(proc.name) or ""
+    motor = PROXY_NAMES.get(nombre.lower())
+    if motor is not None:
+        raise KillRefused(_proxy_message(nombre, motor, port))
 
     proc.terminate()
     try:
