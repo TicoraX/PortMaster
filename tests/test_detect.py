@@ -523,3 +523,90 @@ def test_congelar_un_compose_con_perfiles_no_cambia_lo_que_arranca(tmp_path):
     assert [s.name for s in cargado.resolve()] == [s.name for s in detectado.resolve()]
     assert cargado.profiles == detectado.profiles
     assert [s.name for s in cargado.resolve("tools")] == ["db", "api", "seed"]
+
+
+# go y rust ----------------------------------------------------------------
+
+
+def test_go_con_framework(tmp_path):
+    write(tmp_path, "go.mod", "module ejemplo\n\nrequire github.com/gin-gonic/gin v1.9.1\n")
+    write(tmp_path, "main.go", "package main\n\nfunc main() {}\n")
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["api"].command == "go run ."
+    assert stack.services["api"].ready == "listen"
+
+
+def test_go_con_solo_la_stdlib(tmp_path):
+    """net/http no aparece en go.mod: la llamada en el fuente es la unica senal."""
+    write(tmp_path, "go.mod", "module ejemplo\n\ngo 1.22\n")
+    write(
+        tmp_path,
+        "main.go",
+        """
+        package main
+
+        import "net/http"
+
+        func main() { http.ListenAndServe(":8080", nil) }
+        """,
+    )
+    assert detect.detect(tmp_path).services["api"].command == "go run ."
+
+
+def test_go_que_no_sirve_nada_no_se_detecta(tmp_path):
+    """Una herramienta de linea de comandos: arrancarla esperaria un puerto que
+    nunca abre, hasta el timeout."""
+    write(tmp_path, "go.mod", "module herramienta\n\ngo 1.22\n")
+    write(tmp_path, "main.go", 'package main\n\nfunc main() { println("hola") }\n')
+    assert detect.detect(tmp_path) is None
+
+
+def test_go_en_cmd(tmp_path):
+    write(tmp_path, "go.mod", "module ejemplo\n\nrequire github.com/go-chi/chi/v5 v5.0.0\n")
+    write(tmp_path, "cmd/server/main.go", "package main\n\nfunc main() {}\n")
+    assert detect.detect(tmp_path).services["api"].command == "go run ./cmd/server"
+
+
+def test_go_en_subcarpeta_de_backend(tmp_path):
+    write(tmp_path, "backend/go.mod", "module api\n\nrequire github.com/gin-gonic/gin v1.9.1\n")
+    write(tmp_path, "backend/main.go", "package main\n\nfunc main() {}\n")
+
+    servicio = detect.detect(tmp_path).services["backend"]
+    assert servicio.command == "go run ."
+    assert servicio.cwd == tmp_path.resolve() / "backend"
+
+
+def test_rust_con_framework(tmp_path):
+    write(tmp_path, "Cargo.toml", '[dependencies]\naxum = "0.7"\n')
+    write(tmp_path, "src/main.rs", "fn main() {}\n")
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["api"].command == "cargo run"
+    assert stack.services["api"].ready == "listen"
+
+
+def test_rust_sin_framework_no_se_detecta(tmp_path):
+    write(tmp_path, "Cargo.toml", '[dependencies]\nclap = "4"\n')
+    write(tmp_path, "src/main.rs", "fn main() {}\n")
+    assert detect.detect(tmp_path) is None
+
+
+def test_rust_libreria_no_se_detecta(tmp_path):
+    """Sin src/main.rs no hay binario que arrancar, aunque dependa de hyper."""
+    write(tmp_path, "Cargo.toml", '[dependencies]\nhyper = "1"\n')
+    write(tmp_path, "src/lib.rs", "pub fn nada() {}\n")
+    assert detect.detect(tmp_path) is None
+
+
+def test_el_frontend_espera_al_backend_de_go(tmp_path):
+    write(tmp_path, "go.mod", "module ejemplo\n\nrequire github.com/gin-gonic/gin v1.9.1\n")
+    write(tmp_path, "main.go", "package main\n\nfunc main() {}\n")
+    write(
+        tmp_path,
+        "frontend/package.json",
+        json.dumps({"scripts": {"dev": "vite"}, "devDependencies": {"vite": "^5"}}),
+    )
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["frontend"].needs == ("api",)

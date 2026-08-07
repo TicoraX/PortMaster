@@ -3,10 +3,14 @@
 Mira la raiz del proyecto y arma el mismo `Stack` congelado que produce
 `config.load`, para que `runner`, `server` y `cli` no distingan el origen.
 
-Tres detectores, en el orden en que hay que arrancarlos: contenedores, backend,
-frontend. Cada uno devuelve los servicios que reconoce, o una lista vacia. El
-compose devuelve uno por contenedor, para que cada uno tenga su puerto y su
-estado propios.
+Los detectores corren en el orden en que hay que arrancarlos: contenedores,
+backend (Python, Go, Rust), frontend. Cada uno devuelve los servicios que
+reconoce, o una lista vacia. El compose devuelve uno por contenedor, para que
+cada uno tenga su puerto y su estado propios.
+
+Ninguno detecta un proyecto que no sirva nada por un puerto. Una libreria o una
+herramienta de linea de comandos entraria como servicio y el arranque esperaria
+un puerto que nunca abre, hasta el timeout.
 
 Ningun detector adivina el puerto de un proceso que no lo declara: compose si lo
 declara y se lee del archivo, y los otros dos usan `ready: listen`, que descubre
@@ -45,7 +49,8 @@ NODE_SCRIPTS = ("dev", "start:dev", "serve", "start")
 # Subcarpetas donde vive el frontend de un monorepo, y los grupos cuyos hijos se
 # revisan uno por uno.
 NODE_DIRS = ("frontend", "web", "client", "ui", "front", "site")
-PYTHON_DIRS = ("backend", "api", "server")
+# Sirven para Python, Go y Rust: el nombre de la carpeta no dice el lenguaje.
+BACKEND_DIRS = ("backend", "api", "server")
 WORKSPACE_DIRS = ("apps", "packages", "services")
 
 # Dependencias que delatan un servidor de desarrollo de verdad.
@@ -66,6 +71,19 @@ DEV_SERVERS = (
     "nodemon",
     "ts-node-dev",
 )
+
+# Frameworks web de Rust. No hay servidor HTTP en la stdlib, asi que si el
+# Cargo.toml no nombra a ninguno, el binario no sirve nada por un puerto.
+RUST_SERVERS = ("axum", "actix-web", "rocket", "warp", "tide", "poem", "salvo", "hyper")
+
+# Frameworks web de Go. A diferencia de Rust, esta lista no alcanza: net/http es
+# stdlib y un servidor escrito con ella no deja rastro en go.mod. Por eso ademas
+# se busca la llamada que lo delata en el fuente.
+GO_SERVERS = ("gin-gonic/gin", "labstack/echo", "gofiber/fiber", "go-chi/chi", "gorilla/mux")
+GO_SERVES = ("ListenAndServe", "http.Serve(")
+
+# Donde buscar el paquete main de un proyecto Go.
+GO_MAINS = ("main.go", "cmd/server/main.go", "cmd/api/main.go", "cmd/app/main.go")
 
 
 def stack_for(root: Path) -> Stack:
@@ -99,7 +117,7 @@ def detect(root: Path) -> Stack | None:
 
     opcionales = _compose_profiles(root)
 
-    for detector in (_compose, _python, _node):
+    for detector in (_compose, _python, _go, _rust, _node):
         group = []
         for service in detector(root):
             if service.name in services:
@@ -392,7 +410,7 @@ def _python(root: Path) -> list[Service]:
         return [at_root]
 
     found = []
-    for path in _subprojects(root, PYTHON_DIRS):
+    for path in _subprojects(root, BACKEND_DIRS):
         service = _python_at(path, path.name)
         if service is not None:
             found.append(service)
@@ -426,6 +444,66 @@ def _asgi_module(root: Path) -> str | None:
             if line.startswith(("app = ", "app=", "app: ")):
                 return candidate[: -len(".py")].replace("/", ".")
     return None
+
+
+def _go(root: Path) -> list[Service]:
+    """Un servicio Go en la raiz, o en una subcarpeta de backend."""
+    return _backend_at(root, _go_at)
+
+
+def _go_at(path: Path, name: str) -> Service | None:
+    if not (path / "go.mod").is_file():
+        return None
+
+    modulo = _read(path / "go.mod")
+    marco = any(server in modulo for server in GO_SERVERS)
+
+    # El paquete main, que ademas es lo que hay que pasarle a `go run`.
+    for candidato in GO_MAINS:
+        fuente = path / candidato
+        if not fuente.is_file():
+            continue
+        # net/http es stdlib: un servidor escrito con ella no aparece en go.mod,
+        # asi que la llamada en el fuente es la unica senal. Sin marco ni
+        # llamada es una herramienta de linea de comandos, y arrancarla se
+        # quedaria esperando un puerto que nunca abre.
+        if not marco and not any(s in _read(fuente) for s in GO_SERVES):
+            continue
+        objetivo = "." if candidato == "main.go" else f"./{candidato.rsplit('/', 1)[0]}"
+        return _served(name, f"go run {objetivo}", path)
+    return None
+
+
+def _rust(root: Path) -> list[Service]:
+    """Un servicio Rust en la raiz, o en una subcarpeta de backend."""
+    return _backend_at(root, _rust_at)
+
+
+def _rust_at(path: Path, name: str) -> Service | None:
+    if not (path / "Cargo.toml").is_file() or not (path / "src" / "main.rs").is_file():
+        return None  # sin src/main.rs es una libreria, no hay nada que arrancar
+    declared = _read(path / "Cargo.toml").lower()
+    if not any(server in declared for server in RUST_SERVERS):
+        return None
+    return _served(name, "cargo run", path)
+
+
+def _backend_at(root: Path, detector) -> list[Service]:
+    """La raiz si es el proyecto, y si no las subcarpetas de backend.
+
+    Es la forma que ya tenian `_python` y `_node`: si la raiz es el proyecto no
+    se baja una vuelta, porque el servicio se llamaria como la subcarpeta que no
+    existe.
+    """
+    at_root = detector(root, "api")
+    if at_root is not None:
+        return [at_root]
+    found = []
+    for path in _subprojects(root, BACKEND_DIRS):
+        service = detector(path, path.name)
+        if service is not None:
+            found.append(service)
+    return found
 
 
 def _node(root: Path) -> list[Service]:

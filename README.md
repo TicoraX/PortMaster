@@ -85,8 +85,18 @@ su carpeta. Si la raíz sí tiene `package.json`, gana ese y no se baja: en un
 monorepo su script `dev` suele ser el orquestador (turbo, nx) y arrancar además
 los hijos duplicaría todo.
 
-El backend Python sigue la misma regla, en `backend/`, `api/`, `server/` y los
-hijos de los mismos grupos.
+El backend sigue la misma regla, en `backend/`, `api/`, `server/` y los hijos de
+los mismos grupos. Reconoce Django (`manage.py`), FastAPI (`uvicorn` con un
+módulo ASGI), Go (`go.mod` con un paquete `main`) y Rust (`Cargo.toml` con
+`src/main.rs`).
+
+En Rust hace falta un framework declarado en el `Cargo.toml`: axum, actix-web,
+rocket y compañía. No hay servidor HTTP en la stdlib, así que sin uno el binario
+no sirve nada por un puerto. En Go no alcanza con eso, porque `net/http` es
+stdlib y un servidor escrito con ella no deja rastro en `go.mod`: se busca
+además la llamada a `ListenAndServe` en el fuente. Un binario que no sirve nada
+no se detecta, porque arrancarlo dejaría al stack esperando un puerto que nunca
+abre.
 
 En las subcarpetas hace falta además una dependencia que declare un servidor de
 desarrollo (vite, next, nest, astro, nodemon y compañía). Un workspace tiene

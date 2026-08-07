@@ -73,10 +73,12 @@ respuesta, mounts incluidos. Cubierto por `test_los_estaticos_no_se_cachean`.
 
 Ideas, no compromisos. Cada una con el motivo por el que todavía no está.
 
-**Más ecosistemas en `detect`.** Hoy cubre compose, Node, FastAPI y Django. Go,
-Rust, .NET, Rails y Laravel quedan afuera, y la promesa del README es que un
-comando levanta lo que sea. Cada detector nuevo son ~30 líneas con su test, y
-es la parte del producto donde el esfuerzo se convierte más directo en alcance.
+**Más ecosistemas en `detect`.** Entraron Go y Rust. Quedan .NET, Rails y
+Laravel. Cada detector nuevo son ~30 líneas con su test, y la parte que cuesta
+pensar no es reconocer el lenguaje: es distinguir un binario que sirve algo por
+un puerto de una herramienta de línea de comandos, porque detectar la segunda
+deja al arranque esperando hasta el timeout. Para Rails y Laravel la señal es
+clara (`bin/rails`, `artisan`); para .NET hay que mirar el `.csproj`.
 
 **`env_file:` en `stack.yaml`.** Hoy las variables se declaran una por una.
 
