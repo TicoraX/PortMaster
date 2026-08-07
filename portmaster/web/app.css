@@ -490,7 +490,8 @@ body {
 
 /* Un puerto que otro proyecto registrado tambien declara. No es rojo: todavia
    no rompio nada, y conviven mientras no corran a la vez. */
-.service__shared {
+.service__shared,
+.service__taken {
   color: var(--color-warn);
   cursor: help;
 }

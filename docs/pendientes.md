@@ -1,17 +1,12 @@
 # Pendientes
 
-Estado al 6 de agosto de 2026, 192 tests. Lo que quedó abierto, ordenado por lo
+Estado al 7 de agosto de 2026, 225 tests. Lo que quedó abierto, ordenado por lo
 que cuesta dejarlo así, no por lo que cuesta arreglarlo.
+
+No queda ningún bug conocido sin atender.
 
 El plan del 3 de agosto (`plan-siguiente.md`) se ejecutó entero y quedó cerrado.
 Este documento es la brújula del tramo que sigue.
-
-## Bugs conocidos
-
-**El aviso del puerto tomado no llega a la tarjeta web.** El arranque por
-consola lo dice (ver abajo), pero `/api/state` solo manda un estado por
-servicio (`ready`, `starting`, `stopped`) y ahí no entra el matiz. Falta un
-campo en el payload y un badge, como el de puerto compartido.
 
 ## Para decidir
 
@@ -57,6 +52,10 @@ arrancar: un `connect` por servicio, una sola vez, en `_spawn_proc`. No dice
 quién es el dueño, y para el que mira contesta lo mismo. El servicio sigue
 declarándose listo, porque en el caso del contenedor eso es correcto; lo que
 cambia es que el mensaje deja de mentir por omisión.
+
+En la interfaz es un `?` al lado del puerto, del mismo color y con la misma
+mecánica que el `△` de puerto compartido. El arranque por la web es donde más
+importa: a diferencia de `up`, no libera puertos antes de arrancar.
 
 **El fallo intermitente de la suite, identificado.** Era
 `test_ports.py::test_next_free_salta_el_ocupado`, y por eso nunca se reprodujo:

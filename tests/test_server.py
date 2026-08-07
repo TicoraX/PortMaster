@@ -1,5 +1,6 @@
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import textwrap
@@ -397,6 +398,45 @@ def test_arranque_doble_choca(client, proyecto):
     pid = registry.project_id(path)
     assert client.post(f"/api/projects/{pid}/up", json={}).status_code == 200
     assert client.post(f"/api/projects/{pid}/up", json={}).status_code == 409
+
+
+def test_la_tarjeta_marca_el_puerto_que_ya_estaba_ocupado(client, tmp_path, free_ports):
+    """El arranque por la web no libera puertos, asi que este caso es alcanzable."""
+    (port,) = free_ports(1)
+    intruso = socket.socket()
+    intruso.bind(("127.0.0.1", port))
+    intruso.listen()
+    root = tmp_path / "conintruso"
+    root.mkdir()
+    (root / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        services:
+          srv:
+            command: {sys.executable} -c "import time; time.sleep(60)"
+            port: {port}
+        """),
+        encoding="utf-8",
+    )
+    registry.add(root)
+    pid = client.get("/api/state").json()["projects"][0]["id"]
+
+    try:
+        assert client.post(f"/api/projects/{pid}/up", json={}).status_code == 200
+        esperar_listo(client)
+        servicio = client.get("/api/state").json()["projects"][0]["services"][0]
+        assert servicio["port_taken"] is True
+    finally:
+        client.post(f"/api/projects/{pid}/down")
+        intruso.close()
+
+
+def test_un_puerto_libre_no_marca_la_tarjeta(client, proyecto):
+    path, _ = proyecto
+    pid = registry.project_id(path)
+    assert client.post(f"/api/projects/{pid}/up", json={}).status_code == 200
+    esperar_listo(client)
+    servicio = client.get("/api/state").json()["projects"][0]["services"][0]
+    assert servicio["port_taken"] is False
 
 
 def test_apagar_contesta_sin_esperar_al_apagado(client, tmp_path):

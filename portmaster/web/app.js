@@ -203,6 +203,18 @@ function renderService(service, projectId) {
     portCell.append(" ", mark);
   }
 
+  // El puerto ya estaba ocupado cuando arrancamos, asi que el verde puede ser
+  // de otro proceso. Marca y no estado: con un compose ya arriba es lo normal.
+  if (service.port_taken) {
+    const mark = document.createElement("span");
+    mark.className = "service__taken";
+    mark.textContent = "?";
+    mark.title =
+      `El puerto ${service.port} ya estaba ocupado antes de arrancar: ` +
+      "el listo puede ser de otro proceso";
+    portCell.append(" ", mark);
+  }
+
   // El boton de abrir sale solo cuando el puerto contesto HTTP. Un postgres
   // listo tiene puerto y abrirlo en el navegador no lleva a ningun lado.
   if (service.openable && service.port) {

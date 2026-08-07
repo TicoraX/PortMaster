@@ -15,9 +15,12 @@ Primera versión publicada. Lo que sigue es el alcance completo, no un diff.
   apagado del árbol completo de procesos al salir.
 - `portmaster down` baja un stack de compose puro, corriendo los `stop:` en
   orden inverso.
+- `portmaster switch` baja los proyectos registrados que le pisan los puertos a
+  uno y lo levanta, sin tocar los que no compiten.
 - `stack.yaml` declara servicios, dependencias, puertos, healthchecks, perfiles
   y variables. Sin archivo, `detect` infiere el stack de compose, Django,
-  FastAPI, Node en la raíz o en subcarpetas, y backends Python en subcarpetas.
+  FastAPI, Node, Go, Rust, Rails, Laravel y ASP.NET Core, en la raíz o en
+  subcarpetas.
 - `portmaster init` congela lo detectado a un `stack.yaml` editable.
 
 ### Puertos
@@ -36,6 +39,8 @@ Primera versión publicada. Lo que sigue es el alcance completo, no un diff.
   arrancar, apagar y reiniciar servicios de varios proyectos, con logs
   incrementales, explorador de carpetas, buscador, paginado, filtro por estado
   y sección de procesos intrusos.
+- La tarjeta marca al lado del puerto cuando otro proyecto registrado declara
+  ese mismo puerto, y cuando el puerto ya estaba ocupado antes de arrancar.
 - Sin build y sin webfonts: la CSP es `default-src 'self'`.
 
 ### Diagnóstico
@@ -59,7 +64,8 @@ Primera versión publicada. Lo que sigue es el alcance completo, no un diff.
 ### Conocido
 
 - Con `ready: port`, un proceso ajeno que ya tenga el puerto declarado hace que
-  el servicio figure listo al instante. El arranque por consola lo avisa; la
-  tarjeta de la interfaz web todavía no. Ver `docs/pendientes.md`.
+  el servicio figure listo al instante. El arranque lo avisa, por consola y en
+  la tarjeta, y no lo impide: `docker compose up -d` sobre un contenedor que ya
+  está arriba es el mismo caso y ahí es correcto. Ver `docs/pendientes.md`.
 
 [1.0.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.0

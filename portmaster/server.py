@@ -249,6 +249,15 @@ class Session:
             return set()
         return {p.service.name for p in self.engine.procs if p.http} | self.late_http
 
+    def service_taken(self) -> set[str]:
+        """Servicios cuyo puerto ya estaba ocupado antes de arrancar.
+
+        El `listo` de esos puede ser de un proceso ajeno. Ver runner._spawn_proc.
+        """
+        if self.engine is None:
+            return set()
+        return {p.service.name for p in self.engine.procs if p.port_taken}
+
     def service_states(self) -> dict[str, str]:
         if self.state in ("stopped", "error"):
             return {}
@@ -808,6 +817,7 @@ def _project_view(path: Path) -> dict:
     running = session.service_states() if session else {}
     discovered = session.service_ports() if session else {}
     openable = session.service_http() if session else set()
+    tomados = session.service_taken() if session else set()
 
     scanned = ports.scan_many([s.port for s in stack.services.values() if s.port])
     # Cacheado: resolver el stack de cada proyecto registrado cuesta de 1 a 92ms
@@ -850,6 +860,9 @@ def _project_view(path: Path) -> dict:
                 # Conviven mientras no corran a la vez, y saberlo antes evita
                 # el "puerto ocupado" que no dice por quien.
                 "shared_with": _shared_with(compartidos, service.port, path),
+                # El puerto ya estaba ocupado cuando arrancamos: el verde puede
+                # ser de otro proceso. Solo mientras corra la sesion que lo vio.
+                "port_taken": state != "stopped" and service.name in tomados,
             }
         )
 
