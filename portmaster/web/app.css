@@ -488,6 +488,13 @@ body {
   text-align: right;
 }
 
+/* Un puerto que otro proyecto registrado tambien declara. No es rojo: todavia
+   no rompio nada, y conviven mientras no corran a la vez. */
+.service__shared {
+  color: var(--color-warn);
+  cursor: help;
+}
+
 /* Unica accion en acento del index: abrir lo que esta corriendo es lo que mas se
    hace desde aca, y es lo unico que se lleva un color. */
 .btn--open {

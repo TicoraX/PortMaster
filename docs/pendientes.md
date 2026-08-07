@@ -73,13 +73,6 @@ respuesta, mounts incluidos. Cubierto por `test_los_estaticos_no_se_cachean`.
 
 Ideas, no compromisos. Cada una con el motivo por el que todavía no está.
 
-**El badge de puertos compartidos en la interfaz.** `doctor` ya avisa
-(`registry.declared_ports`). La tarjeta no, porque el mapa necesita los puertos
-de *todos* los proyectos y `/api/state` resuelve solo los de la página, que
-pagina de a 4. Meter una resolución global en un endpoint que se sondea cada
-2.5s es la advertencia de la revisión de agosto sobre saturar el threadpool y
-quedarse sin poder apagar procesos. Sale con caché por mtime del `stack.yaml`.
-
 **`portmaster switch <proyecto>`.** Apagar todo lo demás y levantar este. Para
 quien rota entre tres proyectos con puertos que se pisan es el gesto diario, y
 hoy son tres comandos en tres carpetas. Las piezas están: `runner.down` de las

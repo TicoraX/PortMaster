@@ -191,6 +191,18 @@ function renderService(service, projectId) {
   const portCell = node.querySelector(".service__port");
   portCell.textContent = service.port ? String(service.port) : "—";
 
+  // Otro proyecto registrado declara este mismo puerto. No es un error todavia,
+  // por eso es una marca al lado del numero y no un estado: conviven mientras
+  // no corran a la vez.
+  const shared = service.shared_with || [];
+  if (shared.length) {
+    const mark = document.createElement("span");
+    mark.className = "service__shared";
+    mark.textContent = "△";
+    mark.title = `El puerto ${service.port} tambien lo declara ${shared.join(", ")}`;
+    portCell.append(" ", mark);
+  }
+
   // El boton de abrir sale solo cuando el puerto contesto HTTP. Un postgres
   // listo tiene puerto y abrirlo en el navegador no lleva a ningun lado.
   if (service.openable && service.port) {

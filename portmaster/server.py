@@ -810,6 +810,10 @@ def _project_view(path: Path) -> dict:
     openable = session.service_http() if session else set()
 
     scanned = ports.scan_many([s.port for s in stack.services.values() if s.port])
+    # Cacheado: resolver el stack de cada proyecto registrado cuesta de 1 a 92ms
+    # segun tenga stack.yaml o haya que detectarlo, y esto corre por proyecto y
+    # por request cada 2.5s. Ver registry.declared_ports.
+    compartidos = registry.declared_ports(max_age=registry.PORTS_TTL)
     services = []
     for service in stack.services.values():
         status = scanned.get(service.port) if service.port else None
@@ -842,6 +846,10 @@ def _project_view(path: Path) -> dict:
                 "needs": list(service.needs),
                 "state": state,
                 "occupant": _occupant(status, state != "stopped"),
+                # Otros proyectos registrados que declaran este mismo puerto.
+                # Conviven mientras no corran a la vez, y saberlo antes evita
+                # el "puerto ocupado" que no dice por quien.
+                "shared_with": _shared_with(compartidos, service.port, path),
             }
         )
 
@@ -858,6 +866,13 @@ def _project_view(path: Path) -> dict:
         "services": services,
         "docker_down": docker_down,
     }
+
+
+def _shared_with(mapa: dict[int, list[Path]], port: int | None, mio: Path) -> list[str]:
+    """Nombres de los otros proyectos que declaran `port`. Vacio si no hay."""
+    if not port:
+        return []
+    return [otro.name for otro in mapa.get(port, []) if otro != mio]
 
 
 def _published(status: ports.PortStatus | None) -> bool:

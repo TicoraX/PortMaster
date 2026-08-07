@@ -218,6 +218,36 @@ def proxy_de_docker(free_ports):
         impostor.unlink(missing_ok=True)
 
 
+def test_el_estado_delata_el_puerto_compartido(client, tmp_path, free_ports):
+    """Dos proyectos que declaran el mismo puerto, sin que ninguno corra."""
+    (port,) = free_ports(1)
+    for nombre in ("blog", "fitness"):
+        root = tmp_path / nombre
+        root.mkdir()
+        (root / "stack.yaml").write_text(
+            f"services:\n  web:\n    command: python web\n    port: {port}\n", encoding="utf-8"
+        )
+        registry.add(root)
+
+    proyectos = client.get("/api/state").json()["projects"]
+    compartidos = {p["name"]: p["services"][0]["shared_with"] for p in proyectos}
+    assert compartidos == {"blog": ["fitness"], "fitness": ["blog"]}
+
+
+def test_un_puerto_propio_no_figura_compartido(client, tmp_path, free_ports):
+    uno, otro = free_ports(2)
+    for nombre, port in (("blog", uno), ("fitness", otro)):
+        root = tmp_path / nombre
+        root.mkdir()
+        (root / "stack.yaml").write_text(
+            f"services:\n  web:\n    command: python web\n    port: {port}\n", encoding="utf-8"
+        )
+        registry.add(root)
+
+    proyectos = client.get("/api/state").json()["projects"]
+    assert all(p["services"][0]["shared_with"] == [] for p in proyectos)
+
+
 def _proyecto_compose(tmp_path, port):
     root = tmp_path / "condocker"
     root.mkdir()

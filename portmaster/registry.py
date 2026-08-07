@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import stat
+import time
 from pathlib import Path
 
 from . import config, detect
@@ -86,7 +87,12 @@ def import_data(data: list[str]) -> list[str]:
     return imported
 
 
-def declared_ports() -> dict[int, list[Path]]:
+# Cuanto vale reusar el mapa antes de recalcularlo, para quien lo pida cacheado.
+PORTS_TTL = 30.0
+_ports_cache: tuple[float, dict[int, list[Path]]] | None = None
+
+
+def declared_ports(max_age: float = 0.0) -> dict[int, list[Path]]:
     """Puerto declarado -> proyectos registrados que lo piden.
 
     Es el unico dato que PortMaster tiene y las herramientas de un proyecto solo
@@ -94,15 +100,29 @@ def declared_ports() -> dict[int, list[Path]]:
     lado. Sin esto, que dos proyectos peleen por el 3000 se descubre cuando el
     segundo no arranca.
 
-    ponytail: resuelve el stack de cada proyecto registrado, o sea una deteccion
-    por proyecto. Va bien para un comando que corre una vez; si alguna vez lo
-    quiere la vista de estado, que sondea cada 2.5s, hay que cachearlo por mtime
-    del stack.yaml.
+    Resolver el stack de cada proyecto medido en esta maquina: 1.3ms con
+    stack.yaml, 10 a 92ms detectado. Con tres proyectos son 114ms, y escala
+    lineal. Para un comando que corre una vez no es nada, y por eso el default
+    es recalcular siempre: un doctor que miente no sirve. La vista de estado,
+    que sondea cada 2.5s en el threadpool que comparte con /down y /kill, pide
+    `max_age=PORTS_TTL`.
+
+    ponytail: el cache vence por tiempo y no por mtime. Editar un stack.yaml
+    tarda hasta PORTS_TTL en verse en la interfaz, que para un aviso esta bien.
+    Si alguna vez molesta, la salida es sumarle el mtime del archivo de config,
+    aunque para un proyecto detectado eso tampoco alcanza: la deteccion lee
+    archivos de subcarpetas que el mtime de la raiz no delata.
     """
+    global _ports_cache
+    now = time.monotonic()
+    if max_age > 0 and _ports_cache is not None and now - _ports_cache[0] < max_age:
+        return _ports_cache[1]
+
     found: dict[int, list[Path]] = {}
     for path in paths():
         for port in sorted(_ports_of(path)):
             found.setdefault(port, []).append(path)
+    _ports_cache = (now, found)
     return found
 
 
@@ -120,6 +140,10 @@ def _ports_of(path: Path) -> set[int]:
 
 
 def _save(items: list[Path]) -> None:
+    global _ports_cache
+    # Agregar o quitar un proyecto cambia el mapa ya mismo: esperar el TTL
+    # dejaria la interfaz media hora sin ver el proyecto recien registrado.
+    _ports_cache = None
     HOME.mkdir(parents=True, exist_ok=True)
     ordered = sorted({str(p) for p in items})
     tmp = PROJECTS.with_suffix(".tmp")
