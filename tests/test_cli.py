@@ -265,6 +265,94 @@ def test_up_no_free_ni_lo_intenta(tmp_path, monkeypatch, free_ports):
         ocupado.close()
 
 
+def test_switch_baja_al_que_le_pisa_el_puerto_y_levanta_el_pedido(tmp_path, free_ports):
+    """El caso que motiva el comando: dos proyectos declaran el mismo puerto."""
+    (port,) = free_ports(1)
+    marca = tmp_path / "bajado.txt"
+
+    blog = tmp_path / "blog"
+    blog.mkdir()
+    (blog / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        services:
+          web:
+            command: echo blog
+            detached: true
+            port: {port}
+            stop: {sys.executable} -c "open(r'{marca}', 'a').write('blog\\n')"
+        """),
+        encoding="utf-8",
+    )
+    registry.add(blog)
+
+    fitness = tmp_path / "fitness"
+    fitness.mkdir()
+    (fitness / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        services:
+          web:
+            command: echo fitness
+            detached: true
+            port: {port}
+            # El puerto se declara para que haya conflicto; abrirlo de verdad
+            # necesitaria un proceso que sobreviva al comando, que es otro test.
+            ready: none
+        """),
+        encoding="utf-8",
+    )
+    registry.add(fitness)
+
+    resultado = runner.invoke(cli.app, ["switch", "fitness", "--yes"])
+    assert resultado.exit_code == 0, resultado.output
+    assert marca.read_text(encoding="utf-8").split() == ["blog"], "no bajo al rival"
+    assert "fitness" in _sin_saltos(resultado.output)
+
+
+def test_switch_no_toca_a_quien_no_le_disputa_nada(tmp_path, free_ports):
+    uno, otro = free_ports(2)
+    marca = tmp_path / "bajado.txt"
+
+    blog = tmp_path / "blog"
+    blog.mkdir()
+    (blog / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        services:
+          web:
+            command: echo blog
+            detached: true
+            port: {otro}
+            stop: {sys.executable} -c "open(r'{marca}', 'a').write('blog\\n')"
+        """),
+        encoding="utf-8",
+    )
+    registry.add(blog)
+
+    fitness = tmp_path / "fitness"
+    fitness.mkdir()
+    (fitness / "stack.yaml").write_text(
+        f"services:\n  web:\n    command: echo fitness\n"
+        f"    detached: true\n    port: {uno}\n    ready: none\n",
+        encoding="utf-8",
+    )
+    registry.add(fitness)
+
+    assert runner.invoke(cli.app, ["switch", "fitness", "--yes"]).exit_code == 0
+    assert not marca.exists(), "bajo un proyecto que no le disputaba ningun puerto"
+
+
+def test_switch_con_un_nombre_que_no_existe(tmp_path):
+    root = tmp_path / "blog"
+    root.mkdir()
+    (root / "stack.yaml").write_text("services:\n  web:\n    command: echo x\n", encoding="utf-8")
+    registry.add(root)
+
+    resultado = runner.invoke(cli.app, ["switch", "noexiste"])
+    assert resultado.exit_code == 1
+    salida = _sin_saltos(resultado.output)
+    assert "no es un proyecto registrado" in salida
+    assert "blog" in salida, "no dice cuales si conoce"
+
+
 def test_export_e_import_de_proyectos_cli(tmp_path, monkeypatch):
     root = tmp_path / "proyecto_exportable"
     root.mkdir()

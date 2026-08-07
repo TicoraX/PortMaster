@@ -73,12 +73,6 @@ respuesta, mounts incluidos. Cubierto por `test_los_estaticos_no_se_cachean`.
 
 Ideas, no compromisos. Cada una con el motivo por el que todavía no está.
 
-**`portmaster switch <proyecto>`.** Apagar todo lo demás y levantar este. Para
-quien rota entre tres proyectos con puertos que se pisan es el gesto diario, y
-hoy son tres comandos en tres carpetas. Las piezas están: `runner.down` de las
-sesiones vivas y `up` de la nueva. Lo nuevo es la coordinación, que vive en el
-registro.
-
 **Más ecosistemas en `detect`.** Hoy cubre compose, Node, FastAPI y Django. Go,
 Rust, .NET, Rails y Laravel quedan afuera, y la promesa del README es que un
 comando levanta lo que sea. Cada detector nuevo son ~30 líneas con su test, y

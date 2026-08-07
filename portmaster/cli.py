@@ -159,8 +159,15 @@ def up_cmd(
     timeout: float = typer.Option(60.0, help="Segundos de espera por servicio."),
 ) -> None:
     """Levanta el stack: libera puertos, arranca en orden y sigue los logs."""
+    _levantar(Path.cwd(), profile, yes, force, free, timeout)
+
+
+def _levantar(
+    root: Path, profile: str | None, yes: bool, force: bool, free: bool, timeout: float
+) -> None:
+    """El cuerpo de `up`, por raiz explicita. `switch` levanta otro directorio."""
     try:
-        stack = detect.stack_for(Path.cwd())
+        stack = detect.stack_for(root)
         services = stack.resolve(profile)
     except config.ConfigError as exc:
         err.print(str(exc))
@@ -219,6 +226,24 @@ def doctor_cmd() -> None:
         raise typer.Exit(1)
 
 
+def _correr_stops(apagables: list[config.Service]) -> int:
+    """Corre los `stop:` en el orden que se le da. Devuelve cuantos fallaron."""
+    fallaron = 0
+    for service in apagables:
+        console.print(f"[dim]{service.name} | $ {service.stop}[/]")
+        done = runner.run_stop(service)
+        if done is None:
+            err.print(f"{service.name}: el apagado no termino en {runner.STOP_TIMEOUT}s")
+            fallaron += 1
+            continue
+        for line in (done.stdout or "").splitlines():
+            console.print(f"[dim]{service.name} |[/] {line.rstrip()}")
+        if done.returncode != 0:
+            err.print(f"{service.name}: el apagado fallo con codigo {done.returncode}")
+            fallaron += 1
+    return fallaron
+
+
 @app.command("down")
 def down_cmd(
     profile: str = typer.Option(None, "--profile", "-p", help="Perfil de stack.yaml."),
@@ -243,23 +268,96 @@ def down_cmd(
         )
         return
 
-    fallaron = 0
-    for service in apagables:
-        console.print(f"[dim]{service.name} | $ {service.stop}[/]")
-        done = runner.run_stop(service)
-        if done is None:
-            err.print(f"{service.name}: el apagado no termino en {runner.STOP_TIMEOUT}s")
-            fallaron += 1
-            continue
-        for line in (done.stdout or "").splitlines():
-            console.print(f"[dim]{service.name} |[/] {line.rstrip()}")
-        if done.returncode != 0:
-            err.print(f"{service.name}: el apagado fallo con codigo {done.returncode}")
-            fallaron += 1
-
-    if fallaron:
+    if _correr_stops(apagables):
         raise typer.Exit(1)
     console.print("[green]Apagado.[/]")
+
+
+@app.command("switch")
+def switch_cmd(
+    proyecto: str = typer.Argument(..., help="Nombre o ruta de un proyecto registrado."),
+    profile: str = typer.Option(None, "--profile", "-p", help="Perfil de stack.yaml."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="No preguntar nada, arrancar."),
+    force: bool = typer.Option(False, "--force", help="kill() si ignora terminate()."),
+    timeout: float = typer.Option(60.0, help="Segundos de espera por servicio."),
+) -> None:
+    """Baja los proyectos que le pisan los puertos a este, y lo levanta.
+
+    Rotar entre proyectos con puertos que se pisan son hoy tres comandos en tres
+    carpetas. El registro sabe quien declara que puerto, asi que puede hacerlo
+    solo.
+    """
+    root = _resolver_proyecto(proyecto)
+    try:
+        stack = detect.stack_for(root)
+        services = stack.resolve(profile)
+    except config.ConfigError as exc:
+        err.print(f"{root}: {exc}")
+        raise typer.Exit(1)
+
+    for rival in _rivales(root, services):
+        _bajar(rival)
+
+    _levantar(root, profile, yes, force, True, timeout)
+
+
+def _resolver_proyecto(nombre: str) -> Path:
+    """Un proyecto registrado, por nombre de carpeta o por ruta."""
+    conocidos = registry.paths()
+    if not conocidos:
+        err.print("No hay proyectos registrados. Registra uno con: portmaster add .")
+        raise typer.Exit(1)
+
+    candidato = Path(nombre).expanduser()
+    if candidato.is_dir() and candidato.resolve() in conocidos:
+        return candidato.resolve()
+
+    iguales = [p for p in conocidos if p.name.lower() == nombre.lower()]
+    if len(iguales) == 1:
+        return iguales[0]
+    if iguales:
+        err.print(f"'{nombre}' es ambiguo: {', '.join(str(p) for p in iguales)}")
+        raise typer.Exit(1)
+
+    err.print(
+        f"'{nombre}' no es un proyecto registrado. "
+        f"Conocidos: {', '.join(sorted(p.name for p in conocidos))}"
+    )
+    raise typer.Exit(1)
+
+
+def _rivales(root: Path, services: list[config.Service]) -> list[Path]:
+    """Proyectos registrados que declaran alguno de los puertos de `services`.
+
+    Solo los que chocan, y no todo lo registrado: parar una base de datos que
+    nadie disputa no ayuda a arrancar, y es lo que mas cuesta volver a levantar.
+    Cuando todo choca, esto ya es todo lo demas.
+    """
+    wanted = {s.port for s in services if s.port}
+    if not wanted:
+        return []
+    mapa = registry.declared_ports()
+    return sorted({p for port in wanted for p in mapa.get(port, []) if p != root})
+
+
+def _bajar(root: Path) -> None:
+    """Corre los `stop:` de otro proyecto. Un fallo avisa y no corta el switch.
+
+    Lo que no tiene `stop:` no se toca aca: son hijos de otra terminal, y si
+    igual siguen ocupando el puerto los agarra `_free_ports` al levantar, que ya
+    pregunta antes de matar a nadie.
+    """
+    try:
+        stack = detect.stack_for(root)
+        apagables = [s for s in reversed(stack.resolve()) if s.stop]
+    except config.ConfigError as exc:
+        err.print(f"[dim]{root.name}: no se pudo leer para bajarlo ({exc})[/]")
+        return
+    if not apagables:
+        return
+    console.print(f"[bold]Bajando {stack.name}[/] [dim]{root}[/]")
+    if _correr_stops(apagables):
+        err.print(f"{stack.name}: quedo algo sin bajar, el puerto puede seguir ocupado.")
 
 
 @app.command("open")

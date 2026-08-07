@@ -125,6 +125,22 @@ portmaster down --profile backend
 de arranque. Si ningún servicio declara `stop`, lo dice y no hace nada: esos
 son hijos de la terminal y ya se fueron con `Ctrl-C`.
 
+### Cambiar de proyecto
+
+```bash
+portmaster switch fitness
+portmaster switch A:\Proyectos\Fitness    # o la ruta, si hay dos con el mismo nombre
+```
+
+Baja los proyectos registrados que declaran alguno de los puertos que este
+necesita, y después lo levanta. Solo los que chocan: parar una base de datos que
+nadie disputa no ayuda a arrancar y es lo que más cuesta volver a levantar.
+
+Baja lo que declara `stop`, o sea contenedores. Un `npm run dev` de otra
+terminal no es hijo de nadie que PortMaster controle, así que si sigue ocupando
+el puerto lo agarra el paso de liberación de `up`, que pregunta antes de cerrar
+nada.
+
 ### Diagnóstico
 
 ```bash
