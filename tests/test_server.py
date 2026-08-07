@@ -845,8 +845,6 @@ def test_export_e_import_api(client, tmp_path):
     assert res_imp.json()["count"] == 1
 
 
-
-
 def test_la_pagina_no_regala_el_token(client):
     """GET / es publico, pero contestaba con el token de verdad en un Set-Cookie
     aunque no lo trajeras: cualquier proceso local conseguia la llave con un
@@ -958,6 +956,54 @@ def test_reiniciar_una_sesion_recuperada_lo_dice_en_vez_de_reventar(
         assert "reinicio del servidor" in respuesta.json()["detail"]
     finally:
         vivo.close()
+
+
+@pytest.fixture
+def intruso(tmp_path, free_ports):
+    """Un proyecto registrado con su puerto tomado por un proceso ajeno."""
+    (port,) = free_ports(1)
+    root = tmp_path / "conintruso"
+    root.mkdir()
+    (root / "stack.yaml").write_text(
+        f"services:\n  web:\n    command: python web\n    port: {port}\n", encoding="utf-8"
+    )
+    registry.add(root)
+
+    proc = subprocess.Popen([sys.executable, "-c", SERVER.format(port=port)])
+    assert esperar(lambda: not ports.is_free(port)), "el intruso nunca tomo el puerto"
+    yield port
+    if proc.poll() is None:
+        proc.kill()
+        proc.wait()
+
+
+def test_kill_all_cierra_los_puertos_pedidos(client, intruso):
+    assert any(o["port"] == intruso for o in client.get("/api/ports/orphans").json()["orphans"])
+
+    res = client.post("/api/ports/kill-all", json={"ports": [intruso]})
+    assert res.status_code == 200
+    assert [k["port"] for k in res.json()["killed"]] == [intruso]
+    assert esperar(lambda: ports.is_free(intruso)), "el puerto siguio ocupado"
+
+
+def test_kill_all_sin_lista_no_mata_nada(client, intruso):
+    """El filtro es obligatorio a proposito.
+
+    Con un campo opcional, un body mal formado se leia como "sin filtro" y el
+    endpoint pasaba de cerrar lo que el usuario nombro a cerrar todo lo que
+    encontrara. Un endpoint que mata procesos falla cerrado.
+    """
+    assert client.post("/api/ports/kill-all", json={}).status_code == 422
+    assert client.post("/api/ports/kill-all", json={"ports": None}).status_code == 422
+    assert not ports.is_free(intruso), "el intruso murio con un body invalido"
+
+
+def test_kill_all_solo_toca_lo_que_le_pidieron(client, intruso, free_ports):
+    """Un puerto ajeno a la lista no se cierra aunque sea intruso."""
+    res = client.post("/api/ports/kill-all", json={"ports": [free_ports(1)[0]]})
+    assert res.status_code == 200
+    assert res.json()["killed"] == []
+    assert not ports.is_free(intruso)
 
 
 # interfaz -----------------------------------------------------------------

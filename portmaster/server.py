@@ -51,6 +51,10 @@ QUOTA_READ = 900
 QUOTA_WRITE = 60
 QUOTA_KILL = 30
 
+# Techo de puertos por cierre en lote. La lista real la limita la cantidad de
+# servicios registrados; esto solo evita que un body enorme llegue a recorrerse.
+MAX_TARGETS = 200
+
 
 class RateLimit:
     """Ventana deslizante en memoria.
@@ -411,6 +415,20 @@ class UpRequest(BaseModel):
     profile: str | None = Field(default=None, max_length=100)
 
 
+class KillAllRequest(BaseModel):
+    """Los puertos que el cliente vio en pantalla, como filtro.
+
+    Obligatorio a proposito. Con un campo opcional, un body mal formado (la
+    clave escrita distinto, un null) se leia como "sin filtro" y el endpoint
+    pasaba de cerrar lo que el usuario nombro a cerrar todo lo que encontrara.
+    Un endpoint que mata procesos falla cerrado: sin lista valida, 422 y nada
+    muere. Los puertos son solo un filtro; el pid y el create_time los saca el
+    servidor de su propio escaneo.
+    """
+
+    ports: list[int] = Field(max_length=MAX_TARGETS)
+
+
 # app ----------------------------------------------------------------------
 
 
@@ -708,55 +726,70 @@ def create_app(token: str | None = None) -> FastAPI:
                     caidos.append({**entrada, "service": name})
         return {"running": corriendo, "fallen": caidos}
 
+    def _active_service_ports() -> set[int]:
+        """Puertos que ocupa alguna sesion nuestra, de cualquier proyecto.
+
+        Antes el descarte era por servicio y por proyecto. Con el conjunto de
+        puertos, un puerto que corre en el proyecto A deja de figurar como
+        intruso en el proyecto B que lo declara: quien lo tiene es nuestro, y
+        el aviso de puerto compartido ya cubre ese caso en la tarjeta.
+        """
+        with sessions_lock:
+            active_sessions = list(sessions.values())
+        running_ports = set()
+        for s in active_sessions:
+            for name, state in s.service_states().items():
+                if state != "stopped":
+                    svc = s.stack.services.get(name)
+                    if svc and svc.port:
+                        running_ports.add(svc.port)
+        return running_ports
+
     @app.get("/api/ports/orphans", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
     def orphans() -> dict:
-        """Puertos de proyectos registrados ocupados por procesos que no lanzamos.
+        """Puertos de proyectos registrados ocupados por procesos que no lanzamos."""
+        return {"orphans": registry.find_orphans(_active_service_ports())}
 
-        Un proceso es intruso si su puerto aparece en el stack de algun proyecto
-        registrado, el servicio no esta corriendo en nuestra sesion, y hay un
-        proceso externo escuchando en ese puerto.
+    @app.post(
+        "/api/ports/kill-all",
+        dependencies=[quota("kill", QUOTA_KILL), Depends(require_token)],
+    )
+    def kill_all_ports(body: KillAllRequest) -> dict:
+        """Cierra los procesos intrusos que ocupan los puertos que pide el cliente.
+
+        Del cliente viene una lista de puertos, y nada mas. El servidor vuelve a
+        calcular quienes son intrusos ahora, y de ahi saca el pid y el
+        create_time: un PID que llegara por la red se saltearia el escaneo, la
+        exclusion del proxy de Docker y el recorte a los proyectos registrados.
+
+        Contesta 200 aunque falle alguno. Cerrar seis procesos donde dos dan
+        AccessDenied no es exito ni error, y un solo codigo HTTP no lo puede
+        decir: el detalle va por item.
         """
-        result = []
-        for path in registry.paths():
-            pid = registry.project_id(path)
+        pedidos = set(body.ports)
+        candidatos = [
+            c for c in registry.find_orphans(_active_service_ports()) if c["port"] in pedidos
+        ]
+
+        killed, failed = [], []
+        for candidato in candidatos:
+            port, pid = candidato["port"], candidato["pid"]
             try:
-                stack = detect.stack_for(path)
-            except config.ConfigError:
+                ports.kill(pid, candidato["create_time"], port=port)
+            except ports.KillRefused as exc:
+                failed.append({"port": port, "reason": str(exc)})
+                log.warning("kill en lote rechazado en %d: %s", port, exc)
                 continue
+            except psutil.NoSuchProcess:
+                pass  # se murio entre el escaneo y el kill: el puerto quedo libre igual
+            except psutil.AccessDenied:
+                failed.append({"port": port, "reason": "sin permisos para cerrar ese proceso"})
+                log.warning("kill en lote sin permisos en %d (pid %d)", port, pid)
+                continue
+            killed.append({"port": port, "pid": pid, "name": candidato["name"]})
+            log.info("intruso cerrado en lote: puerto %d, pid %d", port, pid)
 
-            with sessions_lock:
-                session = sessions.get(pid)
-            running = session.service_states() if session else {}
-            scanned = ports.scan_many([s.port for s in stack.services.values() if s.port])
-
-            for svc in stack.services.values():
-                if not svc.port:
-                    continue
-                state = running.get(svc.name, "stopped")
-                status = scanned.get(svc.port)
-                if status is None or status.free:
-                    continue
-                # Si el servicio esta corriendo, el proceso es nuestro.
-                if state != "stopped":
-                    continue
-                if status.pid is None:
-                    continue
-                # El proxy de Docker no es un intruso: detras hay un contenedor
-                # de este mismo proyecto, publicado. Ofrecer "Cerrar" ahi es
-                # ofrecer apagar el motor entero.
-                if ports.proxy_owner(status):
-                    continue
-                result.append({
-                    "port": svc.port,
-                    "project": stack.name or path.name,
-                    "pid": status.pid,
-                    "name": status.name or "desconocido",
-                    "cmd": (status.cmdline or "")[:120] or None,
-                    "create_time": status.create_time,
-                })
-
-        result.sort(key=lambda x: x["port"])
-        return {"orphans": result}
+        return {"ok": True, "killed": killed, "failed": failed}
 
     return app
 

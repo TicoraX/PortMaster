@@ -182,8 +182,13 @@ aviso puerto 3000            ocupado por node.exe (pid 24180), lo pide web
                              -> portmaster free 3000
 ```
 
+Si hay un `.env.example`, compara sus claves contra el `.env` y avisa cuáles
+faltan o quedaron sin valor. Nombres de claves nada más: los valores no salen
+ni por la terminal ni por la API.
+
 Sale con 1 solo si algo impide arrancar. Un puerto ocupado es aviso, porque
-`portmaster up` ofrece liberarlo. Fuera de un proyecto revisa nada más el
+`portmaster up` ofrece liberarlo, y una clave que falta también, porque puede
+ser opcional o venir del entorno. Fuera de un proyecto revisa nada más el
 entorno, que es lo que uno quiere recién instalado.
 
 ### Abrir el stack en el navegador
@@ -283,6 +288,22 @@ que no, sugiere el siguiente puerto disponible.
 
 Opciones: `--yes` salta la confirmación (para scripts), `--force` aplica
 `kill()` cuando el proceso ignora la señal de terminación.
+
+Después de un crash o un cambio de rama suele quedar más de uno colgado:
+
+```bash
+portmaster free --all
+```
+
+Recorre los puertos declarados por todos los proyectos registrados, lista lo
+que encuentre ocupado y pide una sola confirmación. Sale con código 1 si no
+pudo cerrar alguno.
+
+El CLI no sabe qué arrancaste vos: si tenés un stack levantado en otra
+terminal, sus servicios aparecen en esa lista y también se cierran. Por eso la
+muestra entera antes de tocar nada, y por eso la confirmación viene con "no"
+por defecto. La interfaz web sí lo sabe, y ahí el botón "Liberar todos"
+descarta lo que arrancó ella.
 
 ## Qué no hace el kill switch
 

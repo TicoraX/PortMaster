@@ -27,6 +27,9 @@ Primera versión publicada. Lo que sigue es el alcance completo, no un diff.
 
 - `portmaster ports` y `portmaster free` escanean, identifican al proceso dueño
   y lo cierran con verificación de `create_time` contra el reciclado de PIDs.
+- `portmaster free --all` recorre los puertos de todos los proyectos
+  registrados y cierra lo que los ocupe, con una sola confirmación que lista
+  antes qué va a cerrar.
 - El cierre se niega sobre el proceso propio, sobre los PIDs de sistema, y
   sobre el proxy compartido de Docker o WSL, porque cerrar ese proxy apaga el
   motor entero con todos sus contenedores.
@@ -41,12 +44,16 @@ Primera versión publicada. Lo que sigue es el alcance completo, no un diff.
   y sección de procesos intrusos.
 - La tarjeta marca al lado del puerto cuando otro proyecto registrado declara
   ese mismo puerto, y cuando el puerto ya estaba ocupado antes de arrancar.
+- "Liberar todos" cierra de una todos los procesos intrusos, en dos pasos sobre
+  el mismo botón: el segundo nombra puertos y procesos antes de hacerlo.
 - Sin build y sin webfonts: la CSP es `default-src 'self'`.
 
 ### Diagnóstico
 
 - `portmaster doctor` junta los chequeos en una salida, cada rojo con la línea
   que lo arregla. Funciona en una carpeta que no es un proyecto conocido.
+- Compara las claves de `.env.example` contra el `.env` y avisa las que faltan
+  o quedaron vacías. Nombres, nunca valores.
 
 ### Seguridad
 

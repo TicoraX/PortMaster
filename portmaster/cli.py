@@ -104,16 +104,55 @@ def _release(port: int, yes: bool, force: bool) -> bool:
 
 @app.command("free")
 def free_cmd(
-    port: int = PortArg,
+    port: int | None = typer.Argument(None, help="Puerto a liberar (ej: 8080)."),
+    all_ports: bool = typer.Option(
+        False, "--all", "-a", help="Liberar todos los puertos intrusos de los proyectos registrados."
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="No preguntar antes de matar."),
     force: bool = typer.Option(False, "--force", help="kill() si ignora terminate()."),
 ) -> None:
-    """Libera un puerto ocupado, o sugiere el siguiente disponible."""
+    """Libera un puerto ocupado o todos los puertos intrusos de proyectos registrados."""
+    if not all_ports and port is None:
+        err.print("Especifica un puerto (ej: portmaster free 8080) o el flag --all")
+        raise typer.Exit(1)
+
+    if all_ports:
+        return _free_all(yes, force)
+
     if ports.is_free(port):
         console.print(f"Puerto {port} [green]libre[/].")
         return
     if not _release(port, yes, force):
         console.print(f"Siguiente puerto libre: [bold]{ports.next_free(port)}[/]")
+
+
+def _free_all(yes: bool, force: bool) -> None:
+    """Cierra lo que ocupa los puertos declarados por los proyectos registrados.
+
+    A diferencia de la interfaz, el CLI no tiene sesiones: no sabe cuales de
+    esos procesos los arranco PortMaster en otra terminal. Por eso lista todo
+    antes de tocar nada, y el texto no promete que sean ajenos.
+    """
+    encontrados = registry.find_orphans()
+    if not encontrados:
+        console.print("Ningun puerto de tus proyectos registrados esta ocupado.")
+        return
+
+    table = Table(box=None, pad_edge=False, show_header=False)
+    for item in encontrados:
+        table.add_row(f"  [bold]:{item['port']}[/]", item["name"], f"[dim]{item['project']}[/]")
+    console.print(f"Ocupando puertos de tus proyectos ({len(encontrados)}):")
+    console.print(table)
+    console.print("[dim]Si alguno lo arrancaste vos desde otra terminal, tambien se cierra.[/]")
+    if not yes and not typer.confirm("Cerrarlos?", default=False):
+        console.print("Cancelado.")
+        return
+
+    liberados = sum(1 for item in encontrados if _release(item["port"], True, force))
+    color = "green" if liberados == len(encontrados) else "yellow"
+    console.print(f"[{color}]{liberados} de {len(encontrados)} cerrados.[/]")
+    if liberados < len(encontrados):
+        raise typer.Exit(1)
 
 
 def _confirm_detected(services: list[config.Service], yes: bool) -> bool:

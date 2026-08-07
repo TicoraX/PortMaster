@@ -162,21 +162,78 @@ def _compartidos(root: Path, services: list[config.Service]) -> list[Check]:
     return checks
 
 
+def _parse_env_keys(path: Path) -> dict[str, str]:
+    """Claves y valores de un .env. Lo que no entienda queda afuera.
+
+    ponytail: parte en el primer `=`, saltea vacias y comentarios, y nada mas.
+    Sin comillas, escapes, `export` ni valores multilinea. El techo: un archivo
+    con un valor de varias lineas lee la segunda como una clave rara y la da
+    por faltante. El dia que aparezca uno, hay librerias para esto.
+    """
+    result = {}
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return result
+    for line in content.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            k, v = line.split("=", 1)
+            result[k.strip()] = v.strip()
+    return result
+
+
 def _dotenv(root: Path) -> list[Check]:
     examples = [p for p in (root / ".env.example", root / ".env.template") if p.is_file()]
     if not examples:
         return []
-    if (root / ".env").is_file():
-        return [Check("variables de entorno", "ok", ".env presente")]
-    ejemplo = examples[0].name
-    return [
-        Check(
-            "variables de entorno",
-            "warn",
-            f"{ejemplo} existe pero falta .env local",
-            f"cp {ejemplo} .env",
+    example_path = examples[0]
+    ejemplo = example_path.name
+    env_path = root / ".env"
+
+    if not env_path.is_file():
+        return [
+            Check(
+                "variables de entorno",
+                "warn",
+                f"{ejemplo} existe pero falta .env local",
+                f"cp {ejemplo} .env",
+            )
+        ]
+
+    # Nombres de claves, nunca valores: esto sale por HTTP en /api/doctor.
+    declaradas = _parse_env_keys(example_path)
+    propias = _parse_env_keys(env_path)
+    faltan = [k for k in declaradas if k not in propias]
+    vacias = [k for k in declaradas if k in propias and not propias[k]]
+
+    # Las dos en `warn` y no en `fail`. En este comando `fail` esta reservado
+    # para lo que no puede arrancar y se sabe con certeza: un binario que no
+    # esta en el PATH, docker apagado, un stack.yaml invalido. Una clave que
+    # falta en el .env es una inferencia: puede ser opcional, o venir del
+    # entorno o del compose. Un rojo equivocado gasta el unico rojo que hay.
+    checks = []
+    if faltan:
+        checks.append(
+            Check(
+                "variables de entorno",
+                "warn",
+                f"{ejemplo} declara claves que el .env no tiene: {', '.join(faltan)}",
+                "agregalas al .env, o sacalas del ejemplo si ya no hacen falta",
+            )
         )
-    ]
+    if vacias:
+        checks.append(
+            Check(
+                "variables de entorno",
+                "warn",
+                f"sin valor en el .env: {', '.join(vacias)}",
+                "completalas, o dejalas asi si el vacio es a proposito",
+            )
+        )
+    return checks or [Check("variables de entorno", "ok", ".env completo")]
 
 
 def _executables(services: list[config.Service]) -> list[Check]:

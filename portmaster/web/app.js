@@ -26,6 +26,7 @@ const ui = {
   orphans: document.getElementById("orphans"),
   orphansList: document.getElementById("orphans-list"),
   orphansHeading: document.getElementById("orphans-heading"),
+  orphansKillAll: document.getElementById("orphans-kill-all"),
   health: document.getElementById("health"),
   notify: document.getElementById("notify"),
   pathSuggestions: document.getElementById("path-suggestions"),
@@ -38,6 +39,7 @@ const TITLE = document.title;
 
 const cards = new Map(); // id -> {root, logSeq, logsOpen}
 let flashTimer = null;
+let latestOrphansList = [];
 
 let query = "";
 let statusFilter = "";
@@ -356,6 +358,46 @@ function disarmFreeze(button) {
   button.textContent = "Congelar a stack.yaml";
 }
 
+function disarmKillAll() {
+  delete ui.orphansKillAll.dataset.armed;
+  ui.orphansKillAll.textContent = "Liberar todos";
+}
+
+// Dos pasos sobre el mismo boton, igual que Congelar: cerrar varios procesos de
+// un click es lo mas destructivo de la interfaz, asi que el segundo paso nombra
+// cuales antes de hacerlo.
+ui.orphansKillAll.addEventListener("click", (event) => {
+  const button = event.currentTarget;
+  const victimas = latestOrphansList;
+  if (victimas.length === 0) return;
+
+  if (button.dataset.armed !== "true") {
+    button.dataset.armed = "true";
+    const detalle = victimas.map((o) => `:${o.port} (${o.name})`).join(", ");
+    button.textContent = `Cerrar ${victimas.length}: ${detalle}?`;
+    setTimeout(() => disarmKillAll(), 6000);
+    return;
+  }
+
+  disarmKillAll();
+  act(button, async () => {
+    // Los puertos que se mostraron, y solo esos. El servidor vuelve a calcular
+    // quien los ocupa: nunca le mandamos un PID desde aca.
+    const res = await api("/api/ports/kill-all", {
+      method: "POST",
+      body: JSON.stringify({ ports: victimas.map((o) => o.port) }),
+    });
+    delete ui.orphansList.dataset.ids;
+    if (res.failed.length) {
+      const errores = res.failed.map((f) => `:${f.port} (${f.reason})`).join(", ");
+      flash(`Cerrados ${res.killed.length} de ${victimas.length}. Fallaron: ${errores}`, "warn");
+    } else {
+      flash(`Cerrados ${res.killed.length} procesos`, "good");
+    }
+    await refreshOrphans();
+  });
+});
+
 function updateCard(entry, project) {
   const { root } = entry;
   root.querySelector(".project__name").textContent = project.name;
@@ -525,6 +567,10 @@ async function refreshOrphans() {
 
     ui.orphans.hidden = list.length === 0;
 
+    // Con uno solo no aporta nada: la fila ya trae su propio boton Cerrar.
+    ui.orphansKillAll.hidden = list.length < 2;
+    latestOrphansList = list;
+
     const nextIds = list.map((o) => o.port).join(",") || "__empty__";
     if (ui.orphansList.dataset.ids === nextIds) return;
     ui.orphansList.dataset.ids = nextIds;
@@ -579,6 +625,7 @@ async function refreshOrphans() {
     // Fallo silencioso: la seccion de intrusos no es critica.
   }
 }
+
 
 /* salud ------------------------------------------------------------------- */
 

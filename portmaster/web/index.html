@@ -77,8 +77,13 @@
       </p>
 
       <section class="orphans" id="orphans" hidden>
-        <h2 class="orphans__heading" id="orphans-heading">Procesos intrusos</h2>
-        <p class="orphans__desc">Puertos de tus proyectos ocupados por procesos que no arrancó PortMaster. Podés cerrarlos desde acá.</p>
+        <div class="orphans__header">
+          <div>
+            <h2 class="orphans__heading" id="orphans-heading">Procesos intrusos</h2>
+            <p class="orphans__desc">Puertos de tus proyectos ocupados por procesos que no arrancó PortMaster. Podés cerrarlos desde acá.</p>
+          </div>
+          <button class="btn btn--kill-all" type="button" id="orphans-kill-all" hidden>Liberar todos</button>
+        </div>
         <ul class="orphans__list" id="orphans-list"></ul>
       </section>
 

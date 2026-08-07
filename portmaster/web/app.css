@@ -968,11 +968,37 @@ body {
   50%       { opacity: 0.35; }
 }
 
+.orphans__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md) 0;
+}
+
 .orphans__desc {
   font-size: var(--text-xs);
   color: var(--color-ink-3);
-  padding: var(--space-sm) var(--space-md) 0;
   margin: 0;
+}
+
+/* Los tokens y no un oklch a mano: --color-bad y sus derivados ya se redefinen
+   para el tema oscuro, y un color crudo se quedaria con el claro en los dos. */
+.btn--kill-all {
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  padding: 0.35rem 0.75rem;
+  background: var(--color-bad-soft);
+  border: var(--rule) solid var(--color-bad-rule);
+  color: var(--color-bad);
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.btn--kill-all:hover {
+  border-color: var(--color-bad);
 }
 
 .orphans__list {

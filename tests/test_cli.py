@@ -2,9 +2,11 @@
 
 import json
 import socket
+import subprocess
 import sys
 import textwrap
 import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -133,6 +135,51 @@ def test_doctor_advierte_falta_de_dotenv(tmp_path, monkeypatch):
     assert "cp .env.example .env" in resultado.output
     assert resultado.exit_code == 0
 
+
+def _proyecto_con_env(tmp_path, ejemplo: str, propio: str) -> None:
+    (tmp_path / "stack.yaml").write_text(
+        "services:\n  web:\n    command: python web\n", encoding="utf-8"
+    )
+    (tmp_path / ".env.example").write_text(ejemplo, encoding="utf-8")
+    (tmp_path / ".env").write_text(propio, encoding="utf-8")
+
+
+def test_doctor_detecta_claves_faltantes_en_dotenv(tmp_path, monkeypatch):
+    _proyecto_con_env(tmp_path, "FOO=bar\nBAR=baz\n", "FOO=bar\n")
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["doctor"])
+    assert "el .env no tiene: BAR" in _sin_saltos(resultado.output)
+    # Aviso y no falla: la clave puede ser opcional, o venir del entorno.
+    assert resultado.exit_code == 0
+
+
+def test_doctor_detecta_claves_vacias_en_dotenv(tmp_path, monkeypatch):
+    _proyecto_con_env(tmp_path, "FOO=bar\nBAR=baz\n", "FOO=bar\nBAR=\n")
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["doctor"])
+    assert "sin valor en el .env: BAR" in _sin_saltos(resultado.output)
+    assert resultado.exit_code == 0
+
+
+def test_doctor_no_muestra_valores_del_dotenv(tmp_path, monkeypatch):
+    """El nombre de la clave si, el valor nunca: esto sale por HTTP en /api/doctor."""
+    _proyecto_con_env(tmp_path, "TOKEN=ejemplo\nOTRA=x\n", "TOKEN=secreto-de-verdad\n")
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["doctor"])
+    assert "secreto-de-verdad" not in resultado.output
+    assert "el .env no tiene: OTRA" in _sin_saltos(resultado.output)
+
+
+def test_doctor_con_el_dotenv_completo_no_avisa(tmp_path, monkeypatch):
+    _proyecto_con_env(tmp_path, "# comentario\nFOO=bar\n\n", "FOO=otro-valor\n")
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["doctor"])
+    assert ".env completo" in _sin_saltos(resultado.output)
+    assert resultado.exit_code == 0
 
 
 def _proyecto_con_puerto(tmp_path, nombre, port):
@@ -376,7 +423,6 @@ def test_export_e_import_de_proyectos_cli(tmp_path, monkeypatch):
     assert any(p == root for p in registry.paths())
 
 
-
 def test_open_sin_nada_arriba_no_abre_nada(tmp_path, monkeypatch, free_ports, abierto):
     (mudo,) = free_ports(1)
     (tmp_path / "stack.yaml").write_text(
@@ -388,3 +434,53 @@ def test_open_sin_nada_arriba_no_abre_nada(tmp_path, monkeypatch, free_ports, ab
     resultado = runner.invoke(cli.app, ["open"])
     assert resultado.exit_code == 1
     assert abierto == []
+
+
+def test_free_all_libera_el_puerto(tmp_path, free_ports):
+    from portmaster import ports
+
+    (port,) = free_ports(1)
+    root = tmp_path / "cli_free_all"
+    root.mkdir()
+    (root / "stack.yaml").write_text(
+        f"services:\n  web:\n    command: python web\n    port: {port}\n", encoding="utf-8"
+    )
+    registry.add(root)
+
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            f"import socket, time; s = socket.socket(); s.bind(('127.0.0.1', {port})); "
+            "s.listen(); time.sleep(30)",
+        ]
+    )
+    try:
+        deadline = time.time() + 10
+        while time.time() < deadline and ports.is_free(port):
+            time.sleep(0.1)
+        assert not ports.is_free(port), "el intruso nunca tomo el puerto"
+
+        res = runner.invoke(cli.app, ["free", "--all", "--yes"])
+        assert res.exit_code == 0, res.output
+        # Lo que importa no es el mensaje: es que el puerto haya quedado libre.
+        assert ports.is_free(port), res.output
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
+def test_free_all_sin_nada_ocupado_no_falla(tmp_path, free_ports):
+    (port,) = free_ports(1)
+    root = tmp_path / "cli_free_all_limpio"
+    root.mkdir()
+    (root / "stack.yaml").write_text(
+        f"services:\n  web:\n    command: python web\n    port: {port}\n", encoding="utf-8"
+    )
+    registry.add(root)
+
+    res = runner.invoke(cli.app, ["free", "--all"])
+    assert res.exit_code == 0
+    assert "Ningun puerto" in _sin_saltos(res.output)
+

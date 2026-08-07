@@ -14,7 +14,7 @@ import stat
 import time
 from pathlib import Path
 
-from . import config, detect
+from . import config, detect, ports
 
 HOME = Path(os.environ.get("PORTMASTER_HOME") or Path.home() / ".portmaster")
 PROJECTS = HOME / "projects.json"
@@ -183,3 +183,46 @@ def token() -> str:
     except OSError:
         pass  # sistemas de archivos sin permisos POSIX
     return fresh
+
+
+def find_orphans(running_ports: frozenset[int] | set[int] = frozenset()) -> list[dict]:
+    """Puertos de proyectos registrados ocupados por procesos que no lanzamos.
+
+    Un proceso es intruso si su puerto aparece en el stack de algun proyecto
+    registrado, no esta en running_ports (lo que corre en nuestras sesiones), y
+    hay un proceso externo escuchando ahi que no es un proxy de Docker.
+
+    El default vacio es lo correcto para el CLI, que no tiene sesiones y por eso
+    no puede distinguir un intruso de un stack que vos mismo levantaste en otra
+    terminal. Quien llame con esa suposicion tiene que mostrar la lista antes de
+    cerrar nada.
+    """
+    result = []
+    for path in paths():
+        try:
+            stack = detect.stack_for(path)
+        except (config.ConfigError, OSError):
+            continue
+
+        scanned = ports.scan_many([s.port for s in stack.services.values() if s.port])
+
+        for svc in stack.services.values():
+            if not svc.port or svc.port in running_ports:
+                continue
+            status = scanned.get(svc.port)
+            if status is None or status.free or status.pid is None:
+                continue
+            if ports.proxy_owner(status):
+                continue
+            result.append({
+                "port": svc.port,
+                "project": stack.name or path.name,
+                "pid": status.pid,
+                "name": status.name or "desconocido",
+                "cmd": (status.cmdline or "")[:120] or None,
+                "create_time": status.create_time,
+            })
+
+    result.sort(key=lambda x: x["port"])
+    return result
+
