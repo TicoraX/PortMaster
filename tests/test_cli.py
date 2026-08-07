@@ -135,6 +135,38 @@ def test_doctor_advierte_falta_de_dotenv(tmp_path, monkeypatch):
 
 
 
+def _proyecto_con_puerto(tmp_path, nombre, port):
+    root = tmp_path / nombre
+    root.mkdir()
+    (root / "stack.yaml").write_text(
+        f"services:\n  web:\n    command: python web\n    port: {port}\n", encoding="utf-8"
+    )
+    return registry.add(root)
+
+
+def test_doctor_avisa_si_otro_proyecto_declara_el_mismo_puerto(tmp_path, monkeypatch, free_ports):
+    """El dato que solo PortMaster tiene: ningun compose sabe del de al lado."""
+    (port,) = free_ports(1)
+    _proyecto_con_puerto(tmp_path, "blog", port)
+    fitness = _proyecto_con_puerto(tmp_path, "fitness", port)
+    monkeypatch.chdir(fitness)
+
+    salida = _sin_saltos(runner.invoke(cli.app, ["doctor"]).output)
+    assert f"puerto {port} compartido" in salida
+    assert "blog" in salida
+    # No se delata a si mismo.
+    assert salida.count("fitness") <= 1
+
+
+def test_doctor_no_inventa_colisiones(tmp_path, monkeypatch, free_ports):
+    uno, otro = free_ports(2)
+    _proyecto_con_puerto(tmp_path, "blog", otro)
+    fitness = _proyecto_con_puerto(tmp_path, "fitness", uno)
+    monkeypatch.chdir(fitness)
+
+    assert "compartido" not in runner.invoke(cli.app, ["doctor"]).output
+
+
 def test_down_corre_los_stop_en_orden_inverso(tmp_path, monkeypatch):
     """Un stack de compose puro sobrevive a la terminal: `down` es la unica forma
     de bajarlo, y el orden importa igual que al arrancar."""

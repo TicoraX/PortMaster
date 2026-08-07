@@ -86,6 +86,39 @@ def import_data(data: list[str]) -> list[str]:
     return imported
 
 
+def declared_ports() -> dict[int, list[Path]]:
+    """Puerto declarado -> proyectos registrados que lo piden.
+
+    Es el unico dato que PortMaster tiene y las herramientas de un proyecto solo
+    no pueden tener: cada compose se conoce a si mismo y ninguno sabe del de al
+    lado. Sin esto, que dos proyectos peleen por el 3000 se descubre cuando el
+    segundo no arranca.
+
+    ponytail: resuelve el stack de cada proyecto registrado, o sea una deteccion
+    por proyecto. Va bien para un comando que corre una vez; si alguna vez lo
+    quiere la vista de estado, que sondea cada 2.5s, hay que cachearlo por mtime
+    del stack.yaml.
+    """
+    found: dict[int, list[Path]] = {}
+    for path in paths():
+        for port in sorted(_ports_of(path)):
+            found.setdefault(port, []).append(path)
+    return found
+
+
+def _ports_of(path: Path) -> set[int]:
+    """Puertos declarados por un proyecto. Vacio si no se puede leer.
+
+    Un proyecto roto o borrado no es motivo para que el resto no se revise:
+    tiene su propio chequeo en `doctor`.
+    """
+    try:
+        stack = detect.stack_for(path)
+        return {s.port for s in stack.resolve() if s.port}
+    except (config.ConfigError, OSError):
+        return set()
+
+
 def _save(items: list[Path]) -> None:
     HOME.mkdir(parents=True, exist_ok=True)
     ordered = sorted({str(p) for p in items})

@@ -125,6 +125,40 @@ def project(root: Path) -> list[Check]:
     if any(_program(s.command) == "docker" for s in services):
         checks.append(_docker())
     checks += _ports(services)
+    checks += _compartidos(root, services)
+    return checks
+
+
+def _compartidos(root: Path, services: list[config.Service]) -> list[Check]:
+    """Otros proyectos registrados que declaran los mismos puertos.
+
+    Aviso y no falla: dos proyectos con el mismo puerto conviven mientras no
+    corran a la vez. Lo que hoy no existe es enterarse antes, en vez de cuando
+    el segundo no arranca y el error habla de un puerto ocupado sin decir por
+    quien.
+    """
+    wanted = {s.port for s in services if s.port}
+    if not wanted:
+        return []
+    try:
+        mio = root.resolve()
+    except OSError:
+        mio = root
+
+    duenos = registry.declared_ports()
+    checks = []
+    for port in sorted(wanted):
+        otros = [p for p in duenos.get(port, []) if p != mio]
+        if not otros:
+            continue
+        checks.append(
+            Check(
+                f"puerto {port} compartido",
+                "warn",
+                f"tambien lo declara {', '.join(str(p) for p in otros)}",
+                "arrancalos de a uno, o cambia el port: en uno de los stack.yaml",
+            )
+        )
     return checks
 
 
