@@ -610,3 +610,60 @@ def test_el_frontend_espera_al_backend_de_go(tmp_path):
 
     stack = detect.detect(tmp_path)
     assert stack.services["frontend"].needs == ("api",)
+
+
+# rails y laravel ----------------------------------------------------------
+
+
+def test_rails(tmp_path):
+    write(tmp_path, "Gemfile", 'source "https://rubygems.org"\ngem "rails"\n')
+    write(tmp_path, "config/application.rb", "module App\nend\n")
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["api"].command == "bundle exec rails server"
+    assert stack.services["api"].ready == "listen"
+
+
+def test_una_gema_no_es_una_app_de_rails(tmp_path):
+    """Gemfile lo tiene cualquier proyecto Ruby. config/application.rb no."""
+    write(tmp_path, "Gemfile", 'source "https://rubygems.org"\ngem "rails"\n')
+    write(tmp_path, "lib/mi_gema.rb", "module MiGema\nend\n")
+    assert detect.detect(tmp_path) is None
+
+
+def test_laravel(tmp_path):
+    write(tmp_path, "artisan", "#!/usr/bin/env php\n")
+    write(tmp_path, "composer.json", json.dumps({"require": {"laravel/framework": "^11"}}))
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["api"].command == "php artisan serve"
+    assert stack.services["api"].ready == "listen"
+
+
+def test_composer_sin_artisan_no_es_laravel(tmp_path):
+    write(tmp_path, "composer.json", json.dumps({"require": {"monolog/monolog": "^3"}}))
+    assert detect.detect(tmp_path) is None
+
+
+def test_laravel_con_su_frontend(tmp_path):
+    """El stack tipico de Laravel: artisan y vite en la misma raiz."""
+    write(tmp_path, "artisan", "#!/usr/bin/env php\n")
+    write(tmp_path, "composer.json", json.dumps({"require": {"laravel/framework": "^11"}}))
+    write(
+        tmp_path,
+        "package.json",
+        json.dumps({"scripts": {"dev": "vite"}, "devDependencies": {"vite": "^5"}}),
+    )
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["api"].command == "php artisan serve"
+    assert stack.services["web"].needs == ("api",)
+
+
+def test_rails_en_subcarpeta_de_backend(tmp_path):
+    write(tmp_path, "backend/Gemfile", 'source "https://rubygems.org"\n')
+    write(tmp_path, "backend/config/application.rb", "module App\nend\n")
+
+    servicio = detect.detect(tmp_path).services["backend"]
+    assert servicio.command == "bundle exec rails server"
+    assert servicio.cwd == tmp_path.resolve() / "backend"

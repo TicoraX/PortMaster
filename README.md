@@ -87,8 +87,8 @@ los hijos duplicaría todo.
 
 El backend sigue la misma regla, en `backend/`, `api/`, `server/` y los hijos de
 los mismos grupos. Reconoce Django (`manage.py`), FastAPI (`uvicorn` con un
-módulo ASGI), Go (`go.mod` con un paquete `main`) y Rust (`Cargo.toml` con
-`src/main.rs`).
+módulo ASGI), Go (`go.mod` con un paquete `main`), Rust (`Cargo.toml` con
+`src/main.rs`), Rails (`config/application.rb`) y Laravel (`artisan`).
 
 En Rust hace falta un framework declarado en el `Cargo.toml`: axum, actix-web,
 rocket y compañía. No hay servidor HTTP en la stdlib, así que sin uno el binario
@@ -97,6 +97,11 @@ stdlib y un servidor escrito con ella no deja rastro en `go.mod`: se busca
 además la llamada a `ListenAndServe` en el fuente. Un binario que no sirve nada
 no se detecta, porque arrancarlo dejaría al stack esperando un puerto que nunca
 abre.
+
+Rails y Laravel no tienen ese problema: `config/application.rb` y `artisan` solo
+existen en aplicaciones que sirven, y un `Gemfile` o un `composer.json` sueltos
+no alcanzan. Rails arranca con `bundle exec rails server` y no con el binstub
+`bin/rails`, que es un script con shebang y en Windows no lo ejecuta nadie.
 
 En las subcarpetas hace falta además una dependencia que declare un servidor de
 desarrollo (vite, next, nest, astro, nodemon y compañía). Un workspace tiene

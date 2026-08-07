@@ -4,7 +4,7 @@ Mira la raiz del proyecto y arma el mismo `Stack` congelado que produce
 `config.load`, para que `runner`, `server` y `cli` no distingan el origen.
 
 Los detectores corren en el orden en que hay que arrancarlos: contenedores,
-backend (Python, Go, Rust), frontend. Cada uno devuelve los servicios que
+backend (Python, Go, Rust, Ruby, PHP), frontend. Cada uno devuelve los que
 reconoce, o una lista vacia. El compose devuelve uno por contenedor, para que
 cada uno tenga su puerto y su estado propios.
 
@@ -117,7 +117,7 @@ def detect(root: Path) -> Stack | None:
 
     opcionales = _compose_profiles(root)
 
-    for detector in (_compose, _python, _go, _rust, _node):
+    for detector in (_compose, _python, _go, _rust, _ruby, _php, _node):
         group = []
         for service in detector(root):
             if service.name in services:
@@ -486,6 +486,37 @@ def _rust_at(path: Path, name: str) -> Service | None:
     if not any(server in declared for server in RUST_SERVERS):
         return None
     return _served(name, "cargo run", path)
+
+
+def _ruby(root: Path) -> list[Service]:
+    """Un Rails en la raiz, o en una subcarpeta de backend."""
+    return _backend_at(root, _ruby_at)
+
+
+def _ruby_at(path: Path, name: str) -> Service | None:
+    # config/application.rb solo existe en una aplicacion Rails: una gema o un
+    # engine tienen Gemfile y no lo tienen. Y una aplicacion Rails sirve por un
+    # puerto siempre, asi que no hace falta la pregunta que si necesitan Go y Node.
+    if not (path / "config" / "application.rb").is_file():
+        return None
+    if not (path / "Gemfile").is_file():
+        return None
+    # `bundle exec` y no el binstub `bin/rails`: es un script con shebang y en
+    # Windows no lo ejecuta nadie. Bundler ya es obligatorio si hay Gemfile.
+    return _served(name, "bundle exec rails server", path)
+
+
+def _php(root: Path) -> list[Service]:
+    """Un Laravel en la raiz, o en una subcarpeta de backend."""
+    return _backend_at(root, _php_at)
+
+
+def _php_at(path: Path, name: str) -> Service | None:
+    # `artisan` en la raiz es Laravel y nada mas. Se pide ademas el
+    # composer.json, que es lo que hace que las dependencias esten instaladas.
+    if not (path / "artisan").is_file() or not (path / "composer.json").is_file():
+        return None
+    return _served(name, "php artisan serve", path)
 
 
 def _backend_at(root: Path, detector) -> list[Service]:
