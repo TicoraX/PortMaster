@@ -53,6 +53,8 @@ class Proc:
     matched_log: bool = False
     port: int | None = None  # descubierto, para los servicios con ready: listen
     http: bool = False  # el puerto contesta HTTP, o sea que se puede abrir
+    # El puerto ya aceptaba conexiones antes de arrancar. Ver _spawn_proc.
+    port_taken: bool = False
     # Ultimas lineas de salida, para que el error diga la causa y no solo el
     # codigo: "fallo con codigo 1" sin el motivo obliga a abrir los logs.
     tail: deque[str] = field(default_factory=lambda: deque(maxlen=5))
@@ -231,7 +233,17 @@ class Runner:
     # arranque -------------------------------------------------------------
 
     def _spawn_proc(self, service: Service, color: str) -> Proc:
-        proc = Proc(service, self._spawn(service), color)
+        # Una sola muestra, antes de arrancar. Con `ready: port` el servicio se
+        # declara listo apenas alguien acepte en el puerto, y si ya habia alguien
+        # ahi el verde puede estar señalando a un proceso ajeno. Saber quien es
+        # el dueño costaria un recorrido de todos los procesos por sondeo, y en
+        # macOS la tabla de conexiones pide root; saber si el puerto ya estaba
+        # tomado cuesta un connect y contesta lo mismo para el que mira.
+        #
+        # No es un error: `docker compose up -d` sobre un contenedor que ya esta
+        # arriba cae aca y es el caso legitimo. Por eso avisa y no cancela.
+        taken = service.ready == "port" and ports.accepts(service.port)
+        proc = Proc(service, self._spawn(service), color, port_taken=taken)
         self._say(proc, f"$ {service.command}")
         threading.Thread(target=self._pump, args=(proc,), daemon=True).start()
         return proc
@@ -284,6 +296,8 @@ class Runner:
                 detail = f" ({port})" if port else ""
                 if proc.http:
                     detail += f" · http://localhost:{port}"
+                if proc.port_taken:
+                    detail += " · el puerto ya estaba ocupado antes de arrancar"
                 self._say(proc, "listo" + detail)
                 return
             if not service.detached and proc.popen.poll() is not None:

@@ -59,6 +59,7 @@ Primera versión publicada. Lo que sigue es el alcance completo, no un diff.
 ### Conocido
 
 - Con `ready: port`, un proceso ajeno que ya tenga el puerto declarado hace que
-  el servicio figure listo al instante. Ver `docs/pendientes.md`.
+  el servicio figure listo al instante. El arranque por consola lo avisa; la
+  tarjeta de la interfaz web todavía no. Ver `docs/pendientes.md`.
 
 [1.0.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.0

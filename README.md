@@ -379,6 +379,13 @@ archivo congelado prendería lo que el compose deja apagado a propósito.
 `listen` es para servicios que eligen su propio puerto. Es incompatible con
 `port`: si lo conocés, el healthcheck es `port`.
 
+`port` no distingue quién contesta. Si alguien ya escuchaba ahí antes de
+arrancar, el servicio se declara listo en el acto aunque el `listo` sea de otro
+proceso, y por eso el arranque lo dice: `listo (3000) · el puerto ya estaba
+ocupado antes de arrancar`. Con `up` normal no pasa, porque libera los puertos
+primero; aparece con `--no-free`, y en el caso legítimo de un
+`docker compose up -d` sobre un contenedor que ya estaba arriba.
+
 `stop` es un comando de apagado propio, opcional. Sin él, apagar mata el árbol
 de procesos del servicio, que es lo correcto para un `npm run dev` y no alcanza
 para un contenedor: `docker compose up -d` termina enseguida y lo que queda

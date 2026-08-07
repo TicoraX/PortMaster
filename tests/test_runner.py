@@ -181,6 +181,54 @@ def test_un_socket_pelado_no_se_ofrece_para_abrir(tmp_path, free_ports):
         engine.down()
 
 
+def test_avisa_si_el_puerto_ya_estaba_ocupado(tmp_path, free_ports):
+    """Con `ready: port` y alguien ya escuchando, el listo puede ser de otro."""
+    (port,) = free_ports(1)
+    intruso = socket.socket()
+    intruso.bind(("127.0.0.1", port))
+    intruso.listen()
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          api:
+            command: {sys.executable} -c "import time; time.sleep(120)"
+            port: {port}
+        """,
+    )
+    salida = io.StringIO()
+    engine = runner.Runner(stack, console=Console(file=salida, width=200), timeout=20.0)
+    try:
+        engine.up()
+        assert engine.procs[0].ready, "se declara listo por el intruso, ese es el punto"
+        assert engine.procs[0].port_taken
+        assert "ya estaba ocupado" in salida.getvalue()
+    finally:
+        engine.down()
+        intruso.close()
+
+
+def test_un_puerto_libre_al_arrancar_no_avisa_nada(tmp_path, free_ports):
+    (port,) = free_ports(1)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          api:
+            command: {sys.executable} -c "{SERVER.format(port=port)}"
+            port: {port}
+        """,
+    )
+    salida = io.StringIO()
+    engine = runner.Runner(stack, console=Console(file=salida, width=200), timeout=20.0)
+    try:
+        engine.up()
+        assert engine.procs[0].port_taken is False
+        assert "ya estaba ocupado" not in salida.getvalue()
+    finally:
+        engine.down()
+
+
 def test_reiniciar_un_servicio_no_toca_al_resto(tmp_path, free_ports):
     a, b = free_ports(2)
     stack = stack_from(

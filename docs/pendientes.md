@@ -8,14 +8,10 @@ Este documento es la brújula del tramo que sigue.
 
 ## Bugs conocidos
 
-**Un servicio con `ready: port` figura listo apuntando a un proceso ajeno.**
-`runner.py:319`. Si alguien más tiene el puerto declarado cuando arranca el
-servicio, `_is_ready` devuelve `True` en el acto y la tarjeta lo muestra en
-verde señalando a un intruso. El arreglo obvio, exigir que el dueño del puerto
-sea del árbol del proceso, rompe el caso legítimo de `docker compose up -d`
-sobre un contenedor que ya está arriba, que es justo lo que hace que arrancar un
-stack a medio levantar no cancele. Necesita distinguir esos dos casos antes de
-tocarse.
+**El aviso del puerto tomado no llega a la tarjeta web.** El arranque por
+consola lo dice (ver abajo), pero `/api/state` solo manda un estado por
+servicio (`ready`, `starting`, `stopped`) y ahí no entra el matiz. Falta un
+campo en el payload y un badge, como el de puerto compartido.
 
 ## Para decidir
 
@@ -49,6 +45,18 @@ es un bug; son decisiones con fecha de vencimiento conocida.
 | `runner` (módulo) | Logs prefijados, sin dashboard `rich.live` | Cuando haya un caso concreto que lo pida |
 
 ## Cerrado
+
+**El `listo` de `ready: port` que apuntaba a un intruso, ahora avisa.** El
+arreglo agresivo (exigir que el dueño del puerto sea del árbol del proceso)
+seguía descartado: cuesta un recorrido de todos los procesos por sondeo, en
+macOS la tabla de conexiones pide root, y rompe el caso legítimo de
+`docker compose up -d` sobre un contenedor ya arriba.
+
+Lo que sí se puede saber barato es si el puerto ya estaba tomado antes de
+arrancar: un `connect` por servicio, una sola vez, en `_spawn_proc`. No dice
+quién es el dueño, y para el que mira contesta lo mismo. El servicio sigue
+declarándose listo, porque en el caso del contenedor eso es correcto; lo que
+cambia es que el mensaje deja de mentir por omisión.
 
 **El fallo intermitente de la suite, identificado.** Era
 `test_ports.py::test_next_free_salta_el_ocupado`, y por eso nunca se reprodujo:
