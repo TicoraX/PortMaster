@@ -73,13 +73,12 @@ respuesta, mounts incluidos. Cubierto por `test_los_estaticos_no_se_cachean`.
 
 Ideas, no compromisos. Cada una con el motivo por el que todavía no está.
 
-**Más ecosistemas en `detect`.** Entraron Go, Rust, Rails y Laravel. Queda
-.NET, que es el que peor señal tiene: hay que leer el `.csproj` y distinguir un
-`Microsoft.NET.Sdk.Web` de una librería o una consola. Cada detector son ~30
-líneas con su test, y lo que cuesta pensar no es reconocer el lenguaje: es
-distinguir un binario que sirve algo por un puerto de una herramienta de línea
-de comandos, porque detectar la segunda deja al arranque esperando hasta el
-timeout.
+**Más ecosistemas en `detect`.** Entraron Go, Rust, Rails, Laravel y ASP.NET
+Core. Con eso la lista que motivó el tramo está cerrada. Lo que cuesta pensar en
+cada detector nuevo no es reconocer el lenguaje: es distinguir un binario que
+sirve algo por un puerto de una herramienta de línea de comandos, porque
+detectar la segunda deja al arranque esperando hasta el timeout. Si aparece otro
+ecosistema, esa es la pregunta a contestar primero.
 
 **`env_file:` en `stack.yaml`.** Hoy las variables se declaran una por una.
 

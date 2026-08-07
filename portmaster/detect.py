@@ -4,7 +4,7 @@ Mira la raiz del proyecto y arma el mismo `Stack` congelado que produce
 `config.load`, para que `runner`, `server` y `cli` no distingan el origen.
 
 Los detectores corren en el orden en que hay que arrancarlos: contenedores,
-backend (Python, Go, Rust, Ruby, PHP), frontend. Cada uno devuelve los que
+backend (Python, Go, Rust, Ruby, PHP, .NET), frontend. Cada uno devuelve los
 reconoce, o una lista vacia. El compose devuelve uno por contenedor, para que
 cada uno tenga su puerto y su estado propios.
 
@@ -117,7 +117,7 @@ def detect(root: Path) -> Stack | None:
 
     opcionales = _compose_profiles(root)
 
-    for detector in (_compose, _python, _go, _rust, _ruby, _php, _node):
+    for detector in (_compose, _python, _go, _rust, _ruby, _php, _dotnet, _node):
         group = []
         for service in detector(root):
             if service.name in services:
@@ -517,6 +517,26 @@ def _php_at(path: Path, name: str) -> Service | None:
     if not (path / "artisan").is_file() or not (path / "composer.json").is_file():
         return None
     return _served(name, "php artisan serve", path)
+
+
+def _dotnet(root: Path) -> list[Service]:
+    """Un ASP.NET Core en la raiz, o en una subcarpeta de backend."""
+    return _backend_at(root, _dotnet_at)
+
+
+def _dotnet_at(path: Path, name: str) -> Service | None:
+    # El atributo Sdk del csproj es lo unico que distingue una app web de una
+    # libreria o una consola, que usan `Microsoft.NET.Sdk` a secas. Ni el nombre
+    # del proyecto ni sus paquetes lo dicen.
+    proyectos = sorted(path.glob("*.csproj"))
+    for proyecto in proyectos:
+        if "microsoft.net.sdk.web" not in _read(proyecto).lower():
+            continue
+        # Con varios csproj en la misma carpeta, `dotnet run` no sabe cual y
+        # falla pidiendo que se lo digan.
+        objetivo = f' --project "{proyecto.name}"' if len(proyectos) > 1 else ""
+        return _served(name, f"dotnet watch run{objetivo}", path)
+    return None
 
 
 def _backend_at(root: Path, detector) -> list[Service]:

@@ -667,3 +667,63 @@ def test_rails_en_subcarpeta_de_backend(tmp_path):
     servicio = detect.detect(tmp_path).services["backend"]
     assert servicio.command == "bundle exec rails server"
     assert servicio.cwd == tmp_path.resolve() / "backend"
+
+
+# .net ---------------------------------------------------------------------
+
+CSPROJ_WEB = """
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+</Project>
+"""
+
+CSPROJ_LIB = """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+</Project>
+"""
+
+CSPROJ_CONSOLA = """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+</Project>
+"""
+
+
+def test_dotnet_web(tmp_path):
+    write(tmp_path, "Api.csproj", CSPROJ_WEB)
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["api"].command == "dotnet watch run"
+    assert stack.services["api"].ready == "listen"
+
+
+def test_una_libreria_de_dotnet_no_se_detecta(tmp_path):
+    write(tmp_path, "Dominio.csproj", CSPROJ_LIB)
+    assert detect.detect(tmp_path) is None
+
+
+def test_una_consola_de_dotnet_no_se_detecta(tmp_path):
+    """OutputType Exe, pero no sirve nada por un puerto: el Sdk lo delata."""
+    write(tmp_path, "Herramienta.csproj", CSPROJ_CONSOLA)
+    assert detect.detect(tmp_path) is None
+
+
+def test_dotnet_con_varios_csproj_apunta_al_web(tmp_path):
+    """`dotnet run` con dos csproj en la carpeta falla pidiendo que le digan cual."""
+    write(tmp_path, "Dominio.csproj", CSPROJ_LIB)
+    write(tmp_path, "Api.csproj", CSPROJ_WEB)
+
+    comando = detect.detect(tmp_path).services["api"].command
+    assert comando == 'dotnet watch run --project "Api.csproj"'
+
+
+def test_dotnet_en_subcarpeta_de_backend(tmp_path):
+    write(tmp_path, "server/Server.csproj", CSPROJ_WEB)
+
+    servicio = detect.detect(tmp_path).services["server"]
+    assert servicio.command == "dotnet watch run"
+    assert servicio.cwd == tmp_path.resolve() / "server"

@@ -88,7 +88,8 @@ los hijos duplicaría todo.
 El backend sigue la misma regla, en `backend/`, `api/`, `server/` y los hijos de
 los mismos grupos. Reconoce Django (`manage.py`), FastAPI (`uvicorn` con un
 módulo ASGI), Go (`go.mod` con un paquete `main`), Rust (`Cargo.toml` con
-`src/main.rs`), Rails (`config/application.rb`) y Laravel (`artisan`).
+`src/main.rs`), Rails (`config/application.rb`), Laravel (`artisan`) y ASP.NET
+Core (un `.csproj` con `Sdk="Microsoft.NET.Sdk.Web"`).
 
 En Rust hace falta un framework declarado en el `Cargo.toml`: axum, actix-web,
 rocket y compañía. No hay servidor HTTP en la stdlib, así que sin uno el binario
@@ -102,6 +103,10 @@ Rails y Laravel no tienen ese problema: `config/application.rb` y `artisan` solo
 existen en aplicaciones que sirven, y un `Gemfile` o un `composer.json` sueltos
 no alcanzan. Rails arranca con `bundle exec rails server` y no con el binstub
 `bin/rails`, que es un script con shebang y en Windows no lo ejecuta nadie.
+
+En .NET la señal está en el atributo `Sdk` del `.csproj` y en ningún otro lado:
+una librería y una app de consola usan `Microsoft.NET.Sdk` a secas, y ni el
+nombre del proyecto ni sus paquetes distinguen una cosa de la otra.
 
 En las subcarpetas hace falta además una dependencia que declare un servidor de
 desarrollo (vite, next, nest, astro, nodemon y compañía). Un workspace tiene
