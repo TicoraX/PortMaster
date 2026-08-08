@@ -147,9 +147,17 @@ def accepts(port: int, timeout: float = ACCEPT_TIMEOUT) -> bool:
     Prueba IPv4 y despues IPv6: ver LOOPBACK.
     """
     _check_port(port)
+    # El presupuesto es total y se reparte, no uno por direccion: con el timeout
+    # entero para cada una, un puerto que no contesta costaba el doble de lo que
+    # promete el parametro, y esto lo llama el sondeo del arranque cada 150ms.
+    #
+    # Repartido y no un deadline que la primera se pueda comer entero: si IPv4
+    # se cuelga, IPv6 tiene que conservar su turno. Justo el servicio que solo
+    # escucha ahi es el que este chequeo vino a encontrar.
+    cada = timeout / len(LOOPBACK)
     for host in LOOPBACK:
         try:
-            with socket.create_connection((host, port), timeout=timeout):
+            with socket.create_connection((host, port), timeout=cada):
                 return True
         except OSError:
             continue

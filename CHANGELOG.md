@@ -70,7 +70,7 @@ Primera versión publicada. Lo que sigue es el alcance completo, no un diff.
   `Cache-Control: no-store` en toda respuesta. Sin `Strict-Transport-Security`:
   el servidor es http sobre loopback y el header rompería cualquier otro
   proyecto local.
-- Rate limiting por ruta: 900 lecturas, 60 escrituras y 30 cierres de proceso
+- Rate limiting por ruta: 1800 lecturas, 60 escrituras y 30 cierres de proceso
   por ventana.
 
 ### Conocido

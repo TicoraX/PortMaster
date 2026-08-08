@@ -273,8 +273,9 @@ no lo está en ninguna plataforma. `--detach` porque sin él el comando espera
 medio minuto a que el motor termine, y el request se lo comería entero.
 
 El botón dice lo que pasó de verdad, incluido `docker no esta en el PATH` o el
-error del propio Docker. Cuando el motor termina de levantar, el botón
-desaparece solo: lo mueve la misma vista de estado que ya sondea `docker info`.
+error del propio Docker. Cuando el motor termina de levantar, el botón no
+desaparece: pasa a decir `Reiniciar Docker`. Lo mueve la misma vista de estado
+que ya sondea `docker info`.
 
 Para registrar un proyecto no hace falta copiar la ruta: `Explorar…` abre un
 navegador de carpetas que empieza en tu home y en las unidades montadas, y marca
