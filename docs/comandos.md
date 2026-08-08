@@ -1,0 +1,75 @@
+# Otros comandos
+
+`up`, `serve`, `ports` y `free` están en el [README](../README.md#comandos).
+Acá están los cuatro que quedan, con qué revisa cada uno y por qué.
+
+## Bajar lo que sobrevive a la terminal
+
+```bash
+portmaster down
+portmaster down --profile backend
+```
+
+`Ctrl-C` sobre un `portmaster up` apaga a sus hijos, pero un
+`docker compose up -d` termina enseguida y deja los contenedores corriendo.
+`down` ejecuta el `stop` de cada servicio que lo declara, en orden inverso al
+de arranque. Si ningún servicio declara `stop`, lo dice y no hace nada: esos
+son hijos de la terminal y ya se fueron con `Ctrl-C`.
+
+## Cambiar de proyecto
+
+```bash
+portmaster switch fitness
+portmaster switch A:\Proyectos\Fitness    # o la ruta, si hay dos con el mismo nombre
+```
+
+Baja los proyectos registrados que declaran alguno de los puertos que este
+necesita, y después lo levanta. Solo los que chocan: parar una base de datos que
+nadie disputa no ayuda a arrancar y es lo que más cuesta volver a levantar.
+
+Baja lo que declara `stop`, o sea contenedores. Un `npm run dev` de otra
+terminal no es hijo de nadie que PortMaster controle, así que si sigue ocupando
+el puerto lo agarra el paso de liberación de `up`, que pregunta antes de cerrar
+nada.
+
+## Diagnóstico
+
+```bash
+portmaster doctor
+```
+
+Revisa, sin arrancar nada, lo que suele impedir un arranque: qué stack se lee o
+se detecta, si cada comando existe en el `PATH`, si el daemon de Docker
+contesta, y qué puertos declarados están ocupados y por quién. Cada chequeo en
+rojo trae la línea para arreglarlo.
+
+```
+ok    token                  C:\Users\vos\.portmaster\token
+ok    stack                  detectado (3 servicios)
+ok    comando docker         C:\Program Files\Docker\...\docker.EXE
+FALLA daemon de docker       no esta en ejecucion
+                             -> abri Docker Desktop
+aviso puerto 3000            ocupado por node.exe (pid 24180), lo pide web
+                             -> portmaster free 3000
+```
+
+Si hay un `.env.example`, compara sus claves contra el `.env` y avisa cuáles
+faltan o quedaron sin valor. Nombres de claves nada más: los valores no salen
+ni por la terminal ni por la API.
+
+Sale con 1 solo si algo impide arrancar. Un puerto ocupado es aviso, porque
+`portmaster up` ofrece liberarlo, y una clave que falta también, porque puede
+ser opcional o venir del entorno. Fuera de un proyecto revisa nada más el
+entorno, que es lo que uno quiere recién instalado.
+
+## Abrir el stack en el navegador
+
+```bash
+portmaster open         # el ultimo servicio del stack que conteste HTTP
+portmaster open 3000    # o el puerto que le pases
+```
+
+Sirve cuando el stack ya está corriendo en otra terminal. Recorre los puertos
+en orden inverso al de arranque, porque lo que uno quiere mirar suele ser el
+frontend, y abre el primero que contesta. Una base de datos no contesta HTTP,
+así que nunca es el elegido.
