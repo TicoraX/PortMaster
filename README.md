@@ -9,10 +9,6 @@ Orquestador de entornos de desarrollo locales. Un archivo en la raíz del
 proyecto, un comando, y el stack entero arriba: puertos libres, Docker,
 backend y frontend, sin cuatro terminales abiertas.
 
-Publicado en PyPI. Levanta un stack completo desde `stack.yaml`: libera los
-puertos, arranca en orden de dependencias (y en paralelo lo que no depende
-entre sí), espera a que cada servicio esté listo y unifica los logs.
-
 ## Instalación
 
 ```bash
@@ -23,9 +19,28 @@ pipx install portmaster
 
 Requiere Python 3.10 o superior. Funciona en Windows, macOS y Linux.
 
-## Uso
+## Comandos
 
-Levantar el stack entero:
+| Comando | Qué hace |
+|---|---|
+| `portmaster up` | Levanta el stack entero: libera puertos, arranca en orden y sigue los logs |
+| `portmaster down` | Baja lo que sobrevive a la terminal, o sea contenedores |
+| `portmaster serve` | Abre la interfaz web en `http://127.0.0.1:7666` |
+| `portmaster doctor` | Revisa qué puede impedir el arranque, sin arrancar nada |
+| `portmaster ports` | Estado de los puertos declarados |
+| `portmaster free 3000` | Cierra el proceso que ocupa un puerto, preguntando antes |
+| `portmaster free --all` | Lo mismo para todos los puertos de todos los proyectos registrados |
+| `portmaster switch fitness` | Baja los proyectos que le pisan los puertos a este, y lo levanta |
+| `portmaster open` | Abre en el navegador el primer servicio que conteste HTTP |
+| `portmaster init` | Congela lo detectado en un `stack.yaml` editable |
+| `portmaster add .` | Registra el proyecto para que aparezca en la interfaz |
+| `portmaster list` | Lista los proyectos registrados (alias: `ls`) |
+| `portmaster remove .` | Des-registra un proyecto (alias: `rm`) |
+| `portmaster version` | Versión instalada (también `--version`) |
+
+Cada uno con `--help`.
+
+## Arrancar un stack
 
 ```bash
 portmaster up
@@ -55,7 +70,7 @@ Antes de arrancar nada revisa los puertos declarados. Si alguno está tomado
 por un proceso huérfano, muestra cuál es y pregunta si cerrarlo. `Ctrl-C`
 apaga los servicios en orden inverso, árbol de procesos incluido.
 
-### Sin archivo de configuración
+## Sin stack.yaml
 
 `stack.yaml` es opcional. Si no hay uno, PortMaster mira la raíz del proyecto:
 
@@ -78,135 +93,49 @@ Arrancar? [Y/n]
 Arranca en ese orden y encadena las dependencias: el frontend espera al
 backend, el backend a los contenedores.
 
-Si la raíz no tiene `package.json`, busca una vuelta más abajo: `frontend/`,
-`web/`, `client/`, `ui/`, `front/`, `site/`, y los hijos de `apps/`,
-`packages/` y `services/`. Cada app encontrada es un servicio con el nombre de
-su carpeta. Si la raíz sí tiene `package.json`, gana ese y no se baja: en un
-monorepo su script `dev` suele ser el orquestador (turbo, nx) y arrancar además
-los hijos duplicaría todo.
-
-El backend sigue la misma regla, en `backend/`, `api/`, `server/` y los hijos de
-los mismos grupos. Reconoce Django (`manage.py`), FastAPI (`uvicorn` con un
-módulo ASGI), Go (`go.mod` con un paquete `main`), Rust (`Cargo.toml` con
-`src/main.rs`), Rails (`config/application.rb`), Laravel (`artisan`) y ASP.NET
-Core (un `.csproj` con `Sdk="Microsoft.NET.Sdk.Web"`).
-
-En Rust hace falta un framework declarado en el `Cargo.toml`: axum, actix-web,
-rocket y compañía. No hay servidor HTTP en la stdlib, así que sin uno el binario
-no sirve nada por un puerto. `hyper` no cuenta, aunque sea la base de casi todo
-el HTTP de Rust: entra como cliente tan seguido como de servidor, y un CLI que
-descarga algo declara exactamente la misma dependencia.
-
-En Go no alcanza con la lista, porque `net/http` es stdlib y un servidor escrito
-con ella no deja rastro en `go.mod`: se busca además la llamada a
-`ListenAndServe` en el fuente. Un binario que no sirve nada no se detecta,
-porque arrancarlo dejaría al stack esperando un puerto que nunca abre.
-
-Rails y Laravel no tienen ese problema: `config/application.rb` y `artisan` solo
-existen en aplicaciones que sirven, y un `Gemfile` o un `composer.json` sueltos
-no alcanzan. Rails arranca con `bundle exec rails server` y no con el binstub
-`bin/rails`, que es un script con shebang y en Windows no lo ejecuta nadie.
-
-En .NET la señal está en el atributo `Sdk` del `.csproj` y en ningún otro lado:
-una librería y una app de consola usan `Microsoft.NET.Sdk` a secas, y ni el
-nombre del proyecto ni sus paquetes distinguen una cosa de la otra.
-
-En las subcarpetas hace falta además una dependencia que declare un servidor de
-desarrollo (vite, next, nest, astro, nodemon y compañía). Un workspace tiene
-tantas librerías como apps, y una librería con `dev: tsc --watch` entraría como
-servicio y se quedaría esperando un puerto que nunca abre.
-
-Nada de esto es recursivo: un scan profundo termina dentro de `node_modules`.
-
-Un compose no entra como un bloque único: cada contenedor es un servicio con su
-puerto publicado, su estado y su link, y el orden sale del `depends_on` del
-propio archivo. `docker compose up -d <nombre>` arranca ese contenedor con sus
-dependencias y es idempotente. Los puertos escritos como `${WEB_PORT:-8080}` se
-resuelven con el entorno, con el `.env` del proyecto y por último con el default
-de la expresión, el mismo orden que usa compose.
-
-El puerto de `npm run dev` y de `uvicorn` no se adivina: se arranca el proceso y
-se le pregunta cuál quedó escuchando. Es más confiable que parsear
-`vite.config.ts`, los flags del script y `.env`, y acierta cuando Vite encuentra
-5173 tomado y se corre a 5174. El costo es que esos puertos no se pueden liberar
-antes de arrancar, porque no se saben hasta después. Los de compose sí, que
-están declarados en el archivo.
-
 `portmaster init` escribe lo detectado como `stack.yaml` para editarlo a mano.
 No sobreescribe uno existente.
 
-### Bajar lo que sobrevive a la terminal
+Dónde busca cada lenguaje y por qué reconoce eso y no otra cosa, en
+[`docs/deteccion.md`](docs/deteccion.md).
 
-```bash
-portmaster down
-portmaster down --profile backend
+## stack.yaml
+
+En la raíz del proyecto. PortMaster lo busca hacia arriba, así que podés correr
+los comandos desde cualquier subdirectorio.
+
+```yaml
+name: mi-proyecto
+
+services:
+  db:
+    command: docker compose up -d postgres
+    port: 5432
+    detached: true       # el comando termina, el servicio sigue vivo
+
+  api:
+    command: npm run dev
+    cwd: backend
+    port: 8080
+    needs: [db]
+    env:
+      DATABASE_URL: postgres://localhost:5432/app
+
+  web:
+    command: npm run dev
+    cwd: frontend
+    port: 3000
+    needs: [api]
+
+profiles:
+  backend: [api]         # arrastra db, que es su dependencia
 ```
 
-`Ctrl-C` sobre un `portmaster up` apaga a sus hijos, pero un
-`docker compose up -d` termina enseguida y deja los contenedores corriendo.
-`down` ejecuta el `stop` de cada servicio que lo declara, en orden inverso al
-de arranque. Si ningún servicio declara `stop`, lo dice y no hace nada: esos
-son hijos de la terminal y ya se fueron con `Ctrl-C`.
+`command` es el único obligatorio. La referencia de todos los campos, los
+healthchecks de `ready` y los perfiles heredados de un compose están en
+[`docs/stack-yaml.md`](docs/stack-yaml.md).
 
-### Cambiar de proyecto
-
-```bash
-portmaster switch fitness
-portmaster switch A:\Proyectos\Fitness    # o la ruta, si hay dos con el mismo nombre
-```
-
-Baja los proyectos registrados que declaran alguno de los puertos que este
-necesita, y después lo levanta. Solo los que chocan: parar una base de datos que
-nadie disputa no ayuda a arrancar y es lo que más cuesta volver a levantar.
-
-Baja lo que declara `stop`, o sea contenedores. Un `npm run dev` de otra
-terminal no es hijo de nadie que PortMaster controle, así que si sigue ocupando
-el puerto lo agarra el paso de liberación de `up`, que pregunta antes de cerrar
-nada.
-
-### Diagnóstico
-
-```bash
-portmaster doctor
-```
-
-Revisa, sin arrancar nada, lo que suele impedir un arranque: qué stack se lee o
-se detecta, si cada comando existe en el `PATH`, si el daemon de Docker
-contesta, y qué puertos declarados están ocupados y por quién. Cada chequeo en
-rojo trae la línea para arreglarlo.
-
-```
-ok    token                  C:\Users\vos\.portmaster\token
-ok    stack                  detectado (3 servicios)
-ok    comando docker         C:\Program Files\Docker\...\docker.EXE
-FALLA daemon de docker       no esta en ejecucion
-                             -> abri Docker Desktop
-aviso puerto 3000            ocupado por node.exe (pid 24180), lo pide web
-                             -> portmaster free 3000
-```
-
-Si hay un `.env.example`, compara sus claves contra el `.env` y avisa cuáles
-faltan o quedaron sin valor. Nombres de claves nada más: los valores no salen
-ni por la terminal ni por la API.
-
-Sale con 1 solo si algo impide arrancar. Un puerto ocupado es aviso, porque
-`portmaster up` ofrece liberarlo, y una clave que falta también, porque puede
-ser opcional o venir del entorno. Fuera de un proyecto revisa nada más el
-entorno, que es lo que uno quiere recién instalado.
-
-### Abrir el stack en el navegador
-
-```bash
-portmaster open         # el ultimo servicio del stack que conteste HTTP
-portmaster open 3000    # o el puerto que le pases
-```
-
-Sirve cuando el stack ya está corriendo en otra terminal. Recorre los puertos
-en orden inverso al de arranque, porque lo que uno quiere mirar suele ser el
-frontend, y abre el primero que contesta. Una base de datos no contesta HTTP,
-así que nunca es el elegido.
-
-### Interfaz web
+## Interfaz web
 
 Cuando tenés varios proyectos, el CLI se queda corto: trabaja sobre el
 directorio actual. La interfaz los muestra todos a la vez.
@@ -216,81 +145,16 @@ portmaster serve        # abre http://127.0.0.1:7666
 ```
 
 Viene con la instalación, no hace falta nada más. Registrar proyectos se puede
-desde la propia interfaz con `Explorar…`, o desde la terminal:
-
-```bash
-portmaster add .        # registrar el proyecto actual
-portmaster list         # listar proyectos registrados (alias: portmaster ls)
-portmaster remove .     # des-registrar un proyecto (alias: portmaster rm)
-```
+desde la propia interfaz con `Explorar…`, o desde la terminal con
+`portmaster add .`.
 
 Estado de cada servicio, arrancar y apagar stacks, liberar puertos tomados por
 procesos ajenos, y logs en vivo por proyecto.
 
-Cuando un servicio se muere solo, el título de la pestaña lleva un contador y
-el encabezado dice cuántos hay caídos. Con `Avisarme` podés además pedir
-notificaciones del navegador, que solo avisan de caídas nuevas y nunca de un
-`Apagar` ni de un `Reiniciar`. El permiso se pide con ese click y nunca al
-cargar la página.
+El detalle de cada control, y el modelo de seguridad del servidor local, en
+[`docs/interfaz.md`](docs/interfaz.md).
 
-Un proyecto detectado trae `Congelar a stack.yaml`, que es `portmaster init`
-sin salir de la interfaz: útil cuando ves en la tarjeta que detectó un puerto
-que no era. Pide confirmación sobre el mismo botón, escribe la ruta del
-registro y nunca una que venga del navegador, y no sobreescribe un archivo
-existente.
-
-Cada servicio arrancado desde la interfaz trae un `Reiniciar` propio, que baja y
-sube ese solo. Cuando el frontend se cuelga, los contenedores que estaban bien
-no tienen por qué pagarlo.
-
-Los servicios que se pueden abrir en el navegador traen un botón `Abrir`, y la
-tarjeta del proyecto trae el suyo, que lleva al último de la lista que conteste,
-para no buscar cuál de los tres es el frontend. Cuál lo lleva no se adivina por
-el nombre: cuando el servicio queda listo, PortMaster le hace una petición al
-puerto. Si contesta HTTP, es abrible. Un `404` cuenta,
-porque la mayoría de las APIs no sirven nada en la raíz; lo que descarta al
-servicio es que no conteste, que es el caso de una base de datos.
-
-Si algún proyecto de la página usa Docker, la fila de herramientas dice
-`Docker corriendo` o `Docker cerrado`, y al lado hay un botón que cambia de
-trabajo según cuál sea: `Abrir Docker` con el motor caído, `Reiniciar Docker`
-con el motor arriba, que es lo que uno quiere cuando los contenedores empiezan a
-portarse raro. Los dos se ven siempre: un control que solo aparece cuando algo
-falla no distingue "está en orden" de "esto dejó de funcionar".
-
-Reiniciar pide confirmación sobre el mismo botón, como `Congelar`. Se lleva
-puestos todos los contenedores que estén corriendo, incluidos los de proyectos
-que no estás mirando. Abrir no pregunta nada, porque ahí no hay nada que perder.
-
-Ojo con qué significa `Docker cerrado`: la pregunta es si el daemon contesta,
-no si la ventana de Docker Desktop está abierta. Cerrar la ventana deja el motor
-corriendo en la bandeja, y ahí tus contenedores arrancan igual.
-
-Por debajo corre `docker desktop start --detach` o `docker desktop restart
---detach`, el plugin oficial del CLI: `docker` ya tiene que estar en el `PATH`
-para que un stack con compose sirva de algo, y el ejecutable de Docker Desktop
-no lo está en ninguna plataforma. `--detach` porque sin él el comando espera
-medio minuto a que el motor termine, y el request se lo comería entero.
-
-El botón dice lo que pasó de verdad, incluido `docker no esta en el PATH` o el
-error del propio Docker. Cuando el motor termina de levantar, el botón no
-desaparece: pasa a decir `Reiniciar Docker`. Lo mueve la misma vista de estado
-que ya sondea `docker info`.
-
-Para registrar un proyecto no hace falta copiar la ruta: `Explorar…` abre un
-navegador de carpetas que empieza en tu home y en las unidades montadas, y marca
-las que tienen `stack.yaml`, un compose, un `package.json` o un `manage.py`. El
-listado lo arma el servidor, porque una página web no puede conocer rutas
-absolutas de tu disco. Devuelve nombres de carpetas y de esos archivos
-marcadores, nunca contenido.
-
-El servidor escucha solo en loopback y exige un token que `serve` genera en
-`~/.portmaster/token` y pasa en la URL de arranque. Ejecuta los comandos de tus
-`stack.yaml`, así que se trata como superficie sensible: rate limit en todas las
-rutas, CSP estricta, y validación del header `Host` contra rebinding de DNS.
-Podés fijar el token vos mismo con `PORTMASTER_TOKEN`.
-
-### Puertos
+## Puertos
 
 Revisar el estado de los puertos sin arrancar nada:
 
@@ -334,11 +198,6 @@ muestra entera antes de tocar nada, y por eso la confirmación viene con "no"
 por defecto. La interfaz web sí lo sabe, y ahí el botón "Liberar todos"
 descarta lo que arrancó ella.
 
-Esa sección de la interfaz se ve siempre que haya un proyecto registrado, y
-cuando no hay ningún intruso lo dice en lugar de desaparecer. Por el mismo
-motivo que el estado de Docker: una sección vacía informa, una sección ausente
-deja dudando si el chequeo corrió.
-
 ## Qué no hace el kill switch
 
 Estas reglas están en el código, no en la documentación:
@@ -355,101 +214,10 @@ Estas reglas están en el código, no en la documentación:
   todos, y cerrarlo apaga el motor entero. En vez de eso te dice qué contenedor
   parar.
 
-## Configuración
+## Otros comandos
 
-`stack.yaml` en la raíz del proyecto. PortMaster lo busca hacia arriba, así
-que podés correr los comandos desde cualquier subdirectorio.
-
-```yaml
-name: mi-proyecto
-
-services:
-  db:
-    command: docker compose up -d postgres
-    port: 5432
-    detached: true       # el comando termina, el servicio sigue vivo
-
-  api:
-    command: npm run dev
-    cwd: backend
-    port: 8080
-    needs: [db]
-    env:
-      DATABASE_URL: postgres://localhost:5432/app
-
-  web:
-    command: npm run dev
-    cwd: frontend
-    port: 3000
-    needs: [api]
-
-profiles:
-  backend: [api]         # arrastra db, que es su dependencia
-```
-
-`command` es el único campo obligatorio. `needs` define el orden de arranque
-y los ciclos fallan al cargar el archivo, no a mitad del arranque. Un perfil
-arrastra sus dependencias transitivas: pedir `api` sin su base de datos nunca
-es lo que alguien quiso decir.
-
-Los servicios que no dependen entre sí arrancan juntos, y cada tanda espera a
-estar lista antes de la siguiente. El stack tarda el healthcheck más lento de
-cada nivel en lugar de la suma de todos, a cambio de que los logs de los
-primeros segundos se entreveren. Van prefijados por servicio y con un color
-propio cada uno, así que se siguen leyendo.
-
-`default` es opcional y lista qué arranca cuando no pedís perfil. Sin él,
-arranca todo, que es lo que casi siempre querés. Existe para el caso de abajo.
-
-### Perfiles de un compose detectado
-
-Un `compose.yaml` con `profiles:` los trae puestos:
-
-```yaml
-services:
-  db: { image: postgres }
-  seed:
-    image: seed
-    profiles: [tools]
-```
-
-Ahí `seed` queda afuera del arranque por defecto y entra con
-`portmaster up --profile tools`, igual que con `docker compose --profile tools`.
-Ojo con la semántica, porque está invertida: en compose `profiles:` **excluye**
-un servicio hasta que lo pidas, mientras que en `stack.yaml` un perfil es la
-lista de lo que se arranca. `detect` traduce de una a la otra, y por eso
-`portmaster init` sobre ese proyecto escribe también un `default`: sin él, el
-archivo congelado prendería lo que el compose deja apagado a propósito.
-
-`ready` decide cuándo un servicio cuenta como listo, y acepta cinco formas:
-
-| Valor | Espera a que |
-|---|---|
-| `port` | el puerto acepte conexiones (default si hay `port`) |
-| `listen` | el proceso abra un puerto cualquiera, y lo reporta |
-| `log:texto` | ese texto aparezca en la salida del servicio |
-| `http://...` | esa URL responda con menos de 400 |
-| `none` | nada (default si no hay `port`) |
-
-`listen` es para servicios que eligen su propio puerto. Es incompatible con
-`port`: si lo conocés, el healthcheck es `port`.
-
-`port` no distingue quién contesta. Si alguien ya escuchaba ahí antes de
-arrancar, el servicio se declara listo en el acto aunque el `listo` sea de otro
-proceso, y por eso el arranque lo dice: `listo (3000) · el puerto ya estaba
-ocupado antes de arrancar`. Con `up` normal no pasa, porque libera los puertos
-primero; aparece con `--no-free`, y en el caso legítimo de un
-`docker compose up -d` sobre un contenedor que ya estaba arriba.
-
-`stop` es un comando de apagado propio, opcional. Sin él, apagar mata el árbol
-de procesos del servicio, que es lo correcto para un `npm run dev` y no alcanza
-para un contenedor: `docker compose up -d` termina enseguida y lo que queda
-vivo no es hijo nuestro. Los servicios detectados de un compose traen
-`stop: docker compose stop <nombre>`. Si el comando falla o tarda más de 90s, se
-loguea y el apagado sigue con el resto.
-
-El ejemplo completo y comentado está en
-[`stack.example.yaml`](stack.example.yaml).
+`down`, `switch`, `doctor` y `open`, con qué revisa cada uno y por qué, en
+[`docs/comandos.md`](docs/comandos.md).
 
 ## Modelo de confianza
 
