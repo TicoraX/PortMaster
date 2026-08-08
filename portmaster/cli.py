@@ -623,6 +623,26 @@ def serve_cmd(
         raise typer.Exit(1)
 
 
+def _version(pedido: bool) -> None:
+    if pedido:
+        console.print(__version__)
+        raise typer.Exit()
+
+
+# El flag ademas del subcomando: `--version` es lo que prueba cualquiera que
+# acaba de instalar la herramienta, y `no_args_is_help` hace que un `portmaster`
+# pelado muestre la ayuda antes de llegar aca. Eager para que conteste sin pedir
+# un comando.
+@app.callback()
+def _root(
+    version: bool = typer.Option(
+        False, "--version", callback=_version, is_eager=True,
+        help="Muestra la version instalada.",
+    ),
+) -> None:
+    pass
+
+
 @app.command("version")
 def version_cmd() -> None:
     """Muestra la version instalada."""

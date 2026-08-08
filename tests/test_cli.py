@@ -1,6 +1,7 @@
 """Comandos del CLI. Servidores reales, igual que el resto del suite."""
 
 import json
+import re
 import socket
 import subprocess
 import sys
@@ -13,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pytest
 from typer.testing import CliRunner
 
+import portmaster
 from portmaster import cli, registry
 
 runner = CliRunner()
@@ -524,3 +526,12 @@ def test_free_all_sin_nada_ocupado_no_falla(tmp_path, free_ports):
     res = runner.invoke(cli.app, ["free", "--all"])
     assert res.exit_code == 0
     assert "Ningun puerto" in _sin_saltos(res.output)
+
+
+def test_version_por_flag_y_por_subcomando():
+    """El flag es lo que prueba cualquiera recien instalado; el subcomando ya existia."""
+    for args in (["--version"], ["version"]):
+        res = runner.invoke(cli.app, args)
+        assert res.exit_code == 0, args
+        # Rich pinta los numeros: sin sacar los codigos, el 1.0.0 llega partido.
+        assert portmaster.__version__ in re.sub(r"\x1b\[[0-9;]*m", "", res.output), args
