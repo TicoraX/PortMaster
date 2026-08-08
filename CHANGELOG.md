@@ -4,6 +4,23 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
+## [1.0.2] - 2026-08-08
+
+### Arreglado
+
+- El sello de `/api/version`, que el pie de página usa para avisar si el
+  navegador está sirviendo una página vieja de su cache, miraba tres archivos
+  escritos a mano y se olvidaba `tokens.css`. Ahí viven los colores y los
+  espaciados, así que un cambio de solo estilos no movía la fecha y el sello
+  afirmaba que la página era más vieja de lo que era. Ahora recorre todo lo que
+  sirve el mount.
+
+### Notas
+
+- La versión 1.0.1 llevó un flag nuevo del CLI, `--version`. Por versionado
+  semántico le correspondía 1.1.0: una funcionalidad compatible es minor, no
+  patch. Queda anotado para que el criterio no se repita mal.
+
 ## [1.0.1] - 2026-08-08
 
 ### Agregado
@@ -90,5 +107,6 @@ Primera versión publicada. Lo que sigue es el alcance completo, no un diff.
   la tarjeta, y no lo impide: `docker compose up -d` sobre un contenedor que ya
   está arriba es el mismo caso y ahí es correcto. Ver `docs/pendientes.md`.
 
+[1.0.2]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.2
 [1.0.1]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.1
 [1.0.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.0

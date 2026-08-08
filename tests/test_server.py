@@ -100,6 +100,41 @@ def test_los_estaticos_no_se_cachean(client):
         assert respuesta.headers["cache-control"] == "no-store"
 
 
+def test_version_sella_todos_los_estaticos(tmp_path, monkeypatch):
+    """Cada archivo que sirve `web/` tiene que mover el sello del pie de pagina.
+
+    Ese sello existe para contestar "estoy viendo la pagina nueva o una vieja de
+    la cache". Con la lista de archivos escrita a mano se olvidaba tokens.css,
+    que es donde viven los colores y los espaciados: un cambio de solo estilos
+    no movia la fecha y el sello afirmaba que la pagina era mas vieja de lo que
+    era, justo en el caso para el que se puso.
+
+    Recorre el directorio en vez de nombrar los archivos, asi el dia que
+    aparezca un quinto estatico el test lo cubre sin que nadie se acuerde.
+    """
+    web = tmp_path / "web"
+    shutil.copytree(server.WEB, web)
+    monkeypatch.setattr(server, "WEB", web)
+
+    estaticos = sorted(f for f in web.iterdir() if f.is_file())
+    assert len(estaticos) >= 4, "se esperaban al menos index.html, app.js, app.css y tokens.css"
+
+    viejo = time.time() - 86400
+    for archivo in estaticos:
+        os.utime(archivo, (viejo, viejo))
+
+    app = server.create_app(TOKEN)
+    with TestClient(app, base_url="http://127.0.0.1") as test_client:
+        test_client.headers.update({"Authorization": f"Bearer {TOKEN}"})
+        for archivo in estaticos:
+            nuevo = time.time()
+            os.utime(archivo, (nuevo, nuevo))
+            sello = test_client.get("/api/version").json()["assets"]
+            esperado = time.strftime("%Y-%m-%d %H:%M", time.localtime(nuevo))
+            assert sello == esperado, f"{archivo.name} no mueve el sello"
+            os.utime(archivo, (viejo, viejo))
+
+
 def test_rate_limit_en_kill(client):
     ruta = "/api/ports/1/kill"
     for _ in range(server.QUOTA_KILL):

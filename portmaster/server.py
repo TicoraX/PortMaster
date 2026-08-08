@@ -689,7 +689,11 @@ def create_app(token: str | None = None) -> FastAPI:
         Existe para contestar "estoy viendo la pagina nueva o una vieja de la
         cache del navegador", que sin esto se responde adivinando.
         """
-        assets = max((WEB / n).stat().st_mtime for n in ("index.html", "app.js", "app.css"))
+        # Todo lo que sirve el mount, y no una lista escrita a mano. La lista se
+        # olvidaba tokens.css, que app.css importa y es donde viven los colores:
+        # un cambio de solo estilos no movia la fecha y el sello quedaba
+        # mintiendo justo en el caso para el que se puso.
+        assets = max(f.stat().st_mtime for f in WEB.iterdir() if f.is_file())
         return {
             "version": __version__,
             "assets": time.strftime("%Y-%m-%d %H:%M", time.localtime(assets)),
