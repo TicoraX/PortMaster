@@ -1,5 +1,6 @@
 # PortMaster
 
+[![pypi](https://img.shields.io/pypi/v/portmaster.svg)](https://pypi.org/project/portmaster/)
 [![tests](https://github.com/TicoraX/PortMaster/actions/workflows/ci.yml/badge.svg)](https://github.com/TicoraX/PortMaster/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
@@ -8,10 +9,9 @@ Orquestador de entornos de desarrollo locales. Un archivo en la raíz del
 proyecto, un comando, y el stack entero arriba: puertos libres, Docker,
 backend y frontend, sin cuatro terminales abiertas.
 
-Estado: en construcción, usable. La versión actual levanta un stack completo
-desde `stack.yaml`: libera los puertos, arranca en orden de dependencias
-(y en paralelo lo que no depende entre sí), espera a que cada servicio esté
-listo y unifica los logs.
+Publicado en PyPI. Levanta un stack completo desde `stack.yaml`: libera los
+puertos, arranca en orden de dependencias (y en paralelo lo que no depende
+entre sí), espera a que cada servicio esté listo y unifica los logs.
 
 ## Instalación
 

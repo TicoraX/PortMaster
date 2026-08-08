@@ -4,6 +4,16 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
+## [1.0.1] - 2026-08-08
+
+### Agregado
+
+- `portmaster --version`, además del subcomando `version` que ya existía. Es lo
+  primero que prueba cualquiera que acaba de instalar la herramienta, y hasta
+  ahora contestaba "No such option".
+- Classifiers completos en el paquete: versiones de Python soportadas, tema y
+  estado de desarrollo. Sin ellos, PyPI solo lo encontraba por nombre exacto.
+
 ## [1.0.0] - 2026-08-06
 
 Primera versión publicada. Lo que sigue es el alcance completo, no un diff.
@@ -80,4 +90,5 @@ Primera versión publicada. Lo que sigue es el alcance completo, no un diff.
   la tarjeta, y no lo impide: `docker compose up -d` sobre un contenedor que ya
   está arriba es el mismo caso y ahí es correcto. Ver `docs/pendientes.md`.
 
+[1.0.1]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.1
 [1.0.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.0
