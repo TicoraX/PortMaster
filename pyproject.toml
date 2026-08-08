@@ -11,11 +11,24 @@ requires-python = ">=3.10"
 authors = [{ name = "TicoraX" }]
 keywords = ["cli", "devtools", "ports", "docker", "orchestration", "dx"]
 classifiers = [
+    # PyPI arma su navegacion por categorias con estos campos: sin ellos el
+    # paquete solo aparece por busqueda exacta del nombre.
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    # La CI prueba el piso (3.10) y el techo (3.13) del rango, y no hay codigo
+    # condicionado por version de interprete. Si alguna vez aparece un
+    # sys.version_info, hay que agregar 3.11 y 3.12 a la matriz.
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Utilities",
 ]
 dependencies = [
     "typer>=0.12",
