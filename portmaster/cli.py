@@ -64,28 +64,50 @@ def ports_cmd(
     console.print(table)
 
 
-def _release(port: int, yes: bool, force: bool) -> bool:
-    """Deja el puerto libre. Devuelve False si sigue ocupado."""
+def _release(
+    port: int,
+    yes: bool,
+    force: bool,
+    expected_pid: int | None = None,
+    expected_create_time: float | None = None,
+) -> bool:
+    """Libera un puerto ocupado. Si se pasan expected_pid y expected_create_time,
+    verifica que el proceso no haya cambiado entre la confirmacion y el cierre.
+    """
     status = ports.scan(port)
     if status.free:
+        console.print(f"Puerto {port} ya estaba libre.")
         return True
 
-    if status.owner_unknown:
+    if status.pid is None:
         err.print(
             f"Puerto {port} ocupado, pero el proceso no es visible con estos "
             "permisos. Proba desde una terminal con privilegios."
         )
         return False
 
-    console.print(f"Puerto {port} ocupado por PID {status.pid} ([bold]{status.name}[/])")
-    if status.cmdline:
-        console.print(f"  [dim]{status.cmdline}[/]")
-
-    if not yes and not typer.confirm(f"Cerrar el PID {status.pid}?"):
+    if expected_pid is not None and status.pid != expected_pid:
+        err.print(
+            f"El puerto {port} cambio de proceso (ahora es PID {status.pid} [{status.name}]). "
+            "Salteado por seguridad."
+        )
         return False
 
+    target_pid = expected_pid if expected_pid is not None else status.pid
+    target_create_time = (
+        expected_create_time if expected_create_time is not None else status.create_time
+    )
+
+    if expected_pid is None:
+        console.print(f"Puerto {port} ocupado por PID {status.pid} ([bold]{status.name}[/])")
+        if status.cmdline:
+            console.print(f"  [dim]{status.cmdline}[/]")
+
+        if not yes and not typer.confirm(f"Cerrar el PID {status.pid}?"):
+            return False
+
     try:
-        ports.kill(status.pid, status.create_time, force=force, port=status.port)
+        ports.kill(target_pid, target_create_time, force=force, port=port)
     except ports.KillRefused as exc:
         err.print(f"Rechazado: {exc}")
         return False
@@ -93,12 +115,12 @@ def _release(port: int, yes: bool, force: bool) -> bool:
         pass
     except psutil.AccessDenied:
         err.print(
-            f"Sin permisos para cerrar el PID {status.pid}. "
+            f"Sin permisos para cerrar el PID {target_pid}. "
             "Proba desde una terminal con privilegios."
         )
         return False
 
-    console.print(f"PID {status.pid} cerrado. Puerto {port} [green]libre[/].")
+    console.print(f"PID {target_pid} cerrado. Puerto {port} [green]libre[/].")
     return True
 
 
@@ -148,7 +170,17 @@ def _free_all(yes: bool, force: bool) -> None:
         console.print("Cancelado.")
         return
 
-    liberados = sum(1 for item in encontrados if _release(item["port"], True, force))
+    liberados = sum(
+        1
+        for item in encontrados
+        if _release(
+            item["port"],
+            yes=True,
+            force=force,
+            expected_pid=item["pid"],
+            expected_create_time=item["create_time"],
+        )
+    )
     color = "green" if liberados == len(encontrados) else "yellow"
     console.print(f"[{color}]{liberados} de {len(encontrados)} cerrados.[/]")
     if liberados < len(encontrados):

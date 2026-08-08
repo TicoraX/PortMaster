@@ -125,7 +125,7 @@ def project(root: Path) -> list[Check]:
     if any(_program(s.command) == "docker" for s in services):
         checks.append(_docker())
     checks += _ports(services)
-    checks += _compartidos(root, services)
+    checks += _compartidos(stack.root, services)
     return checks
 
 

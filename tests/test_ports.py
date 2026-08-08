@@ -124,7 +124,7 @@ def test_kill_rechaza_un_ancestro():
 
 
 def test_kill_rechaza_pid_reciclado(child):
-    with pytest.raises(ports.KillRefused):
+    with pytest.raises(ports.KillRefused, match="ya no es el proceso que se escaneo"):
         ports.kill(child.pid, create_time=1.0)
     assert child.poll() is None
 
@@ -197,13 +197,3 @@ def test_scan_many_usa_cache_de_procesos(listener):
     cache = ports._process_listeners_cache()
     assert isinstance(cache, dict)
     assert cache.get(port) == os.getpid()
-
-
-def test_kill_create_time_incorrecto_rechaza(child):
-    proc = psutil.Process(child.pid)
-    real_time = proc.create_time()
-    fake_time = real_time + 99999.0
-    with pytest.raises(ports.KillRefused, match="ya no es el proceso que se escaneo"):
-        ports.kill(child.pid, create_time=fake_time)
-
-

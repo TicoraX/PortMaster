@@ -93,11 +93,14 @@ Core (un `.csproj` con `Sdk="Microsoft.NET.Sdk.Web"`).
 
 En Rust hace falta un framework declarado en el `Cargo.toml`: axum, actix-web,
 rocket y compañía. No hay servidor HTTP en la stdlib, así que sin uno el binario
-no sirve nada por un puerto. En Go no alcanza con eso, porque `net/http` es
-stdlib y un servidor escrito con ella no deja rastro en `go.mod`: se busca
-además la llamada a `ListenAndServe` en el fuente. Un binario que no sirve nada
-no se detecta, porque arrancarlo dejaría al stack esperando un puerto que nunca
-abre.
+no sirve nada por un puerto. `hyper` no cuenta, aunque sea la base de casi todo
+el HTTP de Rust: entra como cliente tan seguido como de servidor, y un CLI que
+descarga algo declara exactamente la misma dependencia.
+
+En Go no alcanza con la lista, porque `net/http` es stdlib y un servidor escrito
+con ella no deja rastro en `go.mod`: se busca además la llamada a
+`ListenAndServe` en el fuente. Un binario que no sirve nada no se detecta,
+porque arrancarlo dejaría al stack esperando un puerto que nunca abre.
 
 Rails y Laravel no tienen ese problema: `config/application.rb` y `artisan` solo
 existen en aplicaciones que sirven, y un `Gemfile` o un `composer.json` sueltos

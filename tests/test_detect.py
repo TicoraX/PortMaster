@@ -593,9 +593,18 @@ def test_rust_sin_framework_no_se_detecta(tmp_path):
 
 
 def test_rust_libreria_no_se_detecta(tmp_path):
-    """Sin src/main.rs no hay binario que arrancar, aunque dependa de hyper."""
-    write(tmp_path, "Cargo.toml", '[dependencies]\nhyper = "1"\n')
+    """Sin src/main.rs no hay binario que arrancar, aunque dependa de un framework."""
+    write(tmp_path, "Cargo.toml", '[dependencies]\naxum = "0.7"\n')
     write(tmp_path, "src/lib.rs", "pub fn nada() {}\n")
+    assert detect.detect(tmp_path) is None
+
+
+def test_rust_con_hyper_no_se_detecta(tmp_path):
+    """hyper es la base del HTTP de Rust, y entra como cliente tan seguido como
+    de servidor. Un CLI que descarga algo declara la misma dependencia que un
+    servidor, y detectarlo deja al arranque esperando un puerto que nunca abre."""
+    write(tmp_path, "Cargo.toml", '[dependencies]\nhyper = "1"\n')
+    write(tmp_path, "src/main.rs", 'use hyper::Client;\nfn main() { descargar(); }\n')
     assert detect.detect(tmp_path) is None
 
 

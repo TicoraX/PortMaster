@@ -173,6 +173,23 @@ def test_doctor_no_muestra_valores_del_dotenv(tmp_path, monkeypatch):
     assert "el .env no tiene: OTRA" in _sin_saltos(resultado.output)
 
 
+def test_doctor_desde_subcarpeta_no_reporta_colision_consigo_mismo(tmp_path, monkeypatch):
+    root = tmp_path / "mi_proyecto"
+    root.mkdir()
+    (root / "stack.yaml").write_text(
+        "services:\n  web:\n    command: python -m http.server\n    port: 9876\n",
+        encoding="utf-8",
+    )
+    registry.add(root)
+    sub = root / "src"
+    sub.mkdir()
+    monkeypatch.chdir(sub)
+
+    resultado = runner.invoke(cli.app, ["doctor"])
+    assert resultado.exit_code == 0
+    assert "compartido" not in resultado.output
+
+
 def test_doctor_con_el_dotenv_completo_no_avisa(tmp_path, monkeypatch):
     _proyecto_con_env(tmp_path, "# comentario\nFOO=bar\n\n", "FOO=otro-valor\n")
     monkeypatch.chdir(tmp_path)
@@ -471,6 +488,30 @@ def test_free_all_libera_el_puerto(tmp_path, free_ports):
             proc.wait()
 
 
+def test_free_all_saltea_el_puerto_que_cambio_de_dueno(free_ports):
+    """Entre que se imprime la lista y el usuario confirma pasa tiempo indefinido.
+
+    Si en ese rato el puerto cambio de proceso, cerrar al que este ahora seria
+    matar a alguien que el usuario nunca vio en pantalla. `_release` compara
+    contra la identidad capturada y se saltea el puerto en vez de liberarlo.
+    """
+    from portmaster import ports
+
+    (port,) = free_ports(1)
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", port))
+    sock.listen()
+    try:
+        dueno = ports.scan(port)
+        assert dueno.pid is not None
+
+        # El PID que el usuario vio ya no es el que tiene el puerto.
+        assert cli._release(port, yes=True, force=False, expected_pid=dueno.pid + 100000) is False
+        assert not ports.is_free(port), "cerro un proceso que no era el que se mostro"
+    finally:
+        sock.close()
+
+
 def test_free_all_sin_nada_ocupado_no_falla(tmp_path, free_ports):
     (port,) = free_ports(1)
     root = tmp_path / "cli_free_all_limpio"
@@ -483,4 +524,3 @@ def test_free_all_sin_nada_ocupado_no_falla(tmp_path, free_ports):
     res = runner.invoke(cli.app, ["free", "--all"])
     assert res.exit_code == 0
     assert "Ningun puerto" in _sin_saltos(res.output)
-

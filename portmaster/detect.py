@@ -74,7 +74,12 @@ DEV_SERVERS = (
 
 # Frameworks web de Rust. No hay servidor HTTP en la stdlib, asi que si el
 # Cargo.toml no nombra a ninguno, el binario no sirve nada por un puerto.
-RUST_SERVERS = ("axum", "actix-web", "rocket", "warp", "tide", "poem", "salvo", "hyper")
+#
+# `hyper` estaba en esta lista y salio: es la base de casi todo el HTTP de Rust
+# y la mitad de las veces entra como cliente. Un CLI que descarga algo lo
+# declara igual que un servidor, y detectarlo dejaba al arranque esperando un
+# puerto que nunca abre. Los que quedan son frameworks de servidor y nada mas.
+RUST_SERVERS = ("axum", "actix-web", "rocket", "warp", "tide", "poem", "salvo")
 
 # Frameworks web de Go. A diferencia de Rust, esta lista no alcanza: net/http es
 # stdlib y un servidor escrito con ella no deja rastro en go.mod. Por eso ademas

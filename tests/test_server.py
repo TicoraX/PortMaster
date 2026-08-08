@@ -1,3 +1,4 @@
+import contextlib
 import os
 import shutil
 import socket
@@ -403,9 +404,6 @@ def test_arranque_doble_choca(client, proyecto):
 def test_la_tarjeta_marca_el_puerto_que_ya_estaba_ocupado(client, tmp_path, free_ports):
     """El arranque por la web no libera puertos, asi que este caso es alcanzable."""
     (port,) = free_ports(1)
-    intruso = socket.socket()
-    intruso.bind(("127.0.0.1", port))
-    intruso.listen()
     root = tmp_path / "conintruso"
     root.mkdir()
     (root / "stack.yaml").write_text(
@@ -420,23 +418,30 @@ def test_la_tarjeta_marca_el_puerto_que_ya_estaba_ocupado(client, tmp_path, free
     registry.add(root)
     pid = client.get("/api/state").json()["projects"][0]["id"]
 
-    try:
+    # `closing` y no un try/finally con el socket abierto afuera: el `finally`
+    # tocaba `pid`, que se asigna adentro, y un fallo temprano lo tapaba con un
+    # NameError. El apagado del stack lo hace la fixture `aislado`.
+    with contextlib.closing(socket.socket()) as intruso:
+        intruso.bind(("127.0.0.1", port))
+        intruso.listen()
+
         assert client.post(f"/api/projects/{pid}/up", json={}).status_code == 200
         esperar_listo(client)
         servicio = client.get("/api/state").json()["projects"][0]["services"][0]
         assert servicio["port_taken"] is True
-    finally:
         client.post(f"/api/projects/{pid}/down")
-        intruso.close()
 
 
 def test_un_puerto_libre_no_marca_la_tarjeta(client, proyecto):
     path, _ = proyecto
     pid = registry.project_id(path)
-    assert client.post(f"/api/projects/{pid}/up", json={}).status_code == 200
-    esperar_listo(client)
-    servicio = client.get("/api/state").json()["projects"][0]["services"][0]
-    assert servicio["port_taken"] is False
+    try:
+        assert client.post(f"/api/projects/{pid}/up", json={}).status_code == 200
+        esperar_listo(client)
+        servicio = client.get("/api/state").json()["projects"][0]["services"][0]
+        assert servicio["port_taken"] is False
+    finally:
+        client.post(f"/api/projects/{pid}/down")
 
 
 def test_apagar_contesta_sin_esperar_al_apagado(client, tmp_path):
@@ -1004,6 +1009,12 @@ def test_kill_all_solo_toca_lo_que_le_pidieron(client, intruso, free_ports):
     assert res.status_code == 200
     assert res.json()["killed"] == []
     assert not ports.is_free(intruso)
+
+
+def test_kill_all_exceder_max_targets_devuelve_422(client):
+    """Una lista mayor a MAX_TARGETS (200) debe fallar con 422 Unprocessable Entity."""
+    puertos = list(range(1000, 1201))  # 201 puertos
+    assert client.post("/api/ports/kill-all", json={"ports": puertos}).status_code == 422
 
 
 # interfaz -----------------------------------------------------------------

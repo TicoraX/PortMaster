@@ -1,6 +1,6 @@
 # Pendientes
 
-Estado al 7 de agosto de 2026, 235 tests. Lo que quedó abierto, ordenado por lo
+Estado al 7 de agosto de 2026, 238 tests. Lo que quedó abierto, ordenado por lo
 que cuesta dejarlo así, no por lo que cuesta arreglarlo.
 
 No queda ningún bug conocido sin atender.

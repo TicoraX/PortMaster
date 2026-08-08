@@ -201,7 +201,10 @@ function renderService(service, projectId) {
     const mark = document.createElement("span");
     mark.className = "service__shared";
     mark.textContent = "△";
-    mark.title = `El puerto ${service.port} tambien lo declara ${shared.join(", ")}`;
+    const aviso = `El puerto ${service.port} tambien lo declara ${shared.join(", ")}`;
+    mark.title = aviso;
+    mark.setAttribute("aria-label", aviso);
+    mark.setAttribute("role", "img");
     portCell.append(" ", mark);
   }
 
@@ -211,9 +214,12 @@ function renderService(service, projectId) {
     const mark = document.createElement("span");
     mark.className = "service__taken";
     mark.textContent = "?";
-    mark.title =
+    const aviso =
       `El puerto ${service.port} ya estaba ocupado antes de arrancar: ` +
       "el listo puede ser de otro proceso";
+    mark.title = aviso;
+    mark.setAttribute("aria-label", aviso);
+    mark.setAttribute("role", "img");
     portCell.append(" ", mark);
   }
 
@@ -358,7 +364,15 @@ function disarmFreeze(button) {
   button.textContent = "Congelar a stack.yaml";
 }
 
+let killAllTimer = null;
+let killAllSnapshot = null;
+
 function disarmKillAll() {
+  if (killAllTimer !== null) {
+    clearTimeout(killAllTimer);
+    killAllTimer = null;
+  }
+  killAllSnapshot = null;
   delete ui.orphansKillAll.dataset.armed;
   ui.orphansKillAll.textContent = "Liberar todos";
 }
@@ -368,21 +382,27 @@ function disarmKillAll() {
 // cuales antes de hacerlo.
 ui.orphansKillAll.addEventListener("click", (event) => {
   const button = event.currentTarget;
-  const victimas = latestOrphansList;
-  if (victimas.length === 0) return;
 
   if (button.dataset.armed !== "true") {
+    killAllSnapshot = [...latestOrphansList];
+    if (killAllSnapshot.length === 0) return;
+
     button.dataset.armed = "true";
-    const detalle = victimas.map((o) => `:${o.port} (${o.name})`).join(", ");
-    button.textContent = `Cerrar ${victimas.length}: ${detalle}?`;
-    setTimeout(() => disarmKillAll(), 6000);
+    const detalle = killAllSnapshot.map((o) => `:${o.port} (${o.name})`).join(", ");
+    button.textContent = `Cerrar ${killAllSnapshot.length}: ${detalle}?`;
+
+    if (killAllTimer !== null) clearTimeout(killAllTimer);
+    killAllTimer = setTimeout(() => disarmKillAll(), 6000);
     return;
   }
 
+  const victimas = killAllSnapshot || [];
   disarmKillAll();
+  if (victimas.length === 0) return;
+
   act(button, async () => {
-    // Los puertos que se mostraron, y solo esos. El servidor vuelve a calcular
-    // quien los ocupa: nunca le mandamos un PID desde aca.
+    // Los puertos que se mostraron en el armado, y solo esos. El servidor vuelve a
+    // calcular quien los ocupa: nunca le mandamos un PID desde aca.
     const res = await api("/api/ports/kill-all", {
       method: "POST",
       body: JSON.stringify({ ports: victimas.map((o) => o.port) }),

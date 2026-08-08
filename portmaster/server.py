@@ -786,6 +786,10 @@ def create_app(token: str | None = None) -> FastAPI:
                 failed.append({"port": port, "reason": "sin permisos para cerrar ese proceso"})
                 log.warning("kill en lote sin permisos en %d (pid %d)", port, pid)
                 continue
+            except Exception as exc:  # un item roto no puede tirar el lote entero
+                failed.append({"port": port, "reason": "no se pudo cerrar"})
+                log.warning("kill en lote fallo en %d (pid %d): %s", port, pid, exc)
+                continue
             killed.append({"port": port, "pid": pid, "name": candidato["name"]})
             log.info("intruso cerrado en lote: puerto %d, pid %d", port, pid)
 
