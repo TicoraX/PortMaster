@@ -20,6 +20,7 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 import psutil
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -28,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from rich.console import Console
 
-from . import __version__, config, detect, doctor, ports, registry, runner
+from . import __version__, config, detect, docker, doctor, ports, registry, runner
 
 # `browse_module` porque el endpoint de /api/browse ya se llama browse.
 from . import browse as browse_module
@@ -47,7 +48,7 @@ HTTP_RETRIES = (2, 5, 10, 20)
 # unas 450 peticiones por ventana: un limite global de 100 la romperia en el uso
 # normal. Las rutas que ejecutan o matan procesos si van cortas.
 WINDOW = 900
-QUOTA_READ = 900
+QUOTA_READ = 1800
 QUOTA_WRITE = 60
 QUOTA_KILL = 30
 
@@ -795,6 +796,25 @@ def create_app(token: str | None = None) -> FastAPI:
 
         return {"ok": True, "killed": killed, "failed": failed}
 
+    @app.post(
+        "/api/docker/{action}",
+        dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)],
+    )
+    def docker_action(action: Literal["start", "restart"]) -> dict:
+        """Arranca o reinicia Docker Desktop. Si esta arriba lo dice `doctor`.
+
+        El `Literal` es la validacion: cualquier otra cosa en la ruta la rechaza
+        FastAPI con un 422 antes de llegar aca, y el comando sale igual de
+        `docker.ACTIONS` y nunca de lo que vino por la red.
+
+        200 tambien cuando no se pudo: que Docker no este instalado no es un
+        error del request. El motivo va en el cuerpo, que es donde la interfaz
+        lo puede mostrar.
+        """
+        ok, detail = docker.run(action)
+        log.info("docker %s pedido: ok=%s (%s)", action, ok, detail)
+        return {"ok": ok, "detail": detail}
+
     return app
 
 
@@ -914,6 +934,10 @@ def _project_view(path: Path) -> dict:
         "detected": stack.detected,
         "profiles": sorted(stack.profiles),
         "services": services,
+        # Los dos: `docker_down` en False quiere decir "el daemon contesta" y
+        # tambien "este proyecto no usa Docker", y la interfaz necesita
+        # distinguirlos para poder decir "corriendo" en vez de callarse.
+        "needs_docker": has_docker,
         "docker_down": docker_down,
     }
 

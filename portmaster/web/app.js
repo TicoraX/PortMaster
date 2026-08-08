@@ -30,6 +30,8 @@ const ui = {
   health: document.getElementById("health"),
   notify: document.getElementById("notify"),
   pathSuggestions: document.getElementById("path-suggestions"),
+  dockerState: document.getElementById("docker-state"),
+  btnDocker: document.getElementById("btn-docker"),
   btnPortsModal: document.getElementById("btn-ports-modal"),
   portsModal: document.getElementById("ports-modal"),
   portsModalList: document.getElementById("ports-modal-list"),
@@ -40,6 +42,9 @@ const TITLE = document.title;
 const cards = new Map(); // id -> {root, logSeq, logsOpen}
 let flashTimer = null;
 let latestOrphansList = [];
+// Lo pone `render`, lo usa `refreshOrphans`: los dos sondeos son distintos y el
+// de intrusos no recibe el total de proyectos registrados.
+let hayProyectos = false;
 
 let query = "";
 let statusFilter = "";
@@ -364,6 +369,34 @@ function disarmFreeze(button) {
   button.textContent = "Congelar a stack.yaml";
 }
 
+function disarmDocker(button) {
+  delete button.dataset.armed;
+  button.textContent = "Reiniciar Docker";
+}
+
+ui.btnDocker.addEventListener("click", (event) => {
+  const button = event.currentTarget;
+  const action = button.dataset.action;
+
+  // Abrir no pide confirmacion: no hay nada que perder. Reiniciar si, y en dos
+  // pasos como Congelar, porque se lleva puestos todos los contenedores que
+  // esten corriendo, incluidos los de proyectos que no estas mirando.
+  if (action === "restart" && button.dataset.armed !== "true") {
+    button.dataset.armed = "true";
+    button.textContent = "Reiniciar y bajar los contenedores?";
+    setTimeout(() => disarmDocker(button), 6000);
+    return;
+  }
+  if (action === "restart") disarmDocker(button);
+
+  act(button, async () => {
+    const res = await api(`/api/docker/${action}`, { method: "POST" });
+    // El motor tarda medio minuto. El boton cambia de texto solo, cuando la
+    // vista de estado deja de reportar docker_down.
+    flash(res.detail, res.ok ? "good" : "bad");
+  });
+});
+
 let killAllTimer = null;
 let killAllSnapshot = null;
 
@@ -558,7 +591,31 @@ function render(projects, data) {
     ...projects.map((project) => cards.get(project.id).root),
   );
   ui.projects.setAttribute("aria-busy", "false");
+  hayProyectos = data.registered > 0;
+  updateDocker(projects);
   updateFavicon(projects, data);
+}
+
+/* Estado y accion siempre que alguno de los proyectos de la pagina use Docker,
+ * aunque este todo bien: un control que solo aparece cuando algo falla no
+ * distingue "esta todo en orden" de "esto no funciona". Con el motor arriba el
+ * boton no se esconde, cambia de trabajo: reiniciar Docker es lo que uno quiere
+ * cuando los contenedores empiezan a portarse raro. */
+function updateDocker(projects) {
+  const usan = projects.filter((p) => p.needs_docker);
+  const caido = usan.some((p) => p.docker_down);
+
+  ui.dockerState.hidden = usan.length === 0;
+  ui.dockerState.textContent = caido ? "Docker cerrado" : "Docker corriendo";
+  ui.dockerState.dataset.tone = caido ? "bad" : "ready";
+
+  ui.btnDocker.hidden = usan.length === 0;
+  ui.btnDocker.dataset.action = caido ? "start" : "restart";
+  // El sondeo pasa cada 2.5s y el armado dura 6: sin esto le pisaria la
+  // pregunta al usuario mientras la esta leyendo.
+  if (ui.btnDocker.dataset.armed !== "true") {
+    ui.btnDocker.textContent = caido ? "Abrir Docker" : "Reiniciar Docker";
+  }
 }
 
 function updateFavicon(projects, data) {
@@ -585,7 +642,11 @@ async function refreshOrphans() {
     const data = await api("/api/ports/orphans");
     const list = data.orphans || [];
 
-    ui.orphans.hidden = list.length === 0;
+    // Visible aunque no haya ninguno, mientras haya algun proyecto registrado:
+    // una seccion que desaparece no distingue "no hay intrusos" de "esto dejo
+    // de funcionar". Con cero proyectos si se esconde, porque ahi la pagina
+    // entera es el cartel de registrar el primero.
+    ui.orphans.hidden = !hayProyectos;
 
     // Con uno solo no aporta nada: la fila ya trae su propio boton Cerrar.
     ui.orphansKillAll.hidden = list.length < 2;
@@ -596,7 +657,11 @@ async function refreshOrphans() {
     ui.orphansList.dataset.ids = nextIds;
 
     if (list.length === 0) {
-      ui.orphansList.replaceChildren();
+      ui.orphansHeading.textContent = "Procesos intrusos";
+      const limpio = document.createElement("li");
+      limpio.className = "orphan orphan--empty";
+      limpio.textContent = "Ninguno. Los puertos de tus proyectos están libres.";
+      ui.orphansList.replaceChildren(limpio);
       return;
     }
 

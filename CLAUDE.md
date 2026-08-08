@@ -13,6 +13,7 @@ interfaz web local para gestionar varios proyectos.
 | `detect.py` | Servicios inferidos del proyecto cuando no hay `stack.yaml` |
 | `runner.py` | Arranque en orden topologico, healthchecks, apagado del arbol |
 | `registry.py` | Proyectos conocidos por la interfaz, y el token de la API |
+| `docker.py` | Arranque y reinicio de Docker Desktop. Diagnosticar si esta arriba es de `doctor.py` |
 | `server.py` | API local en FastAPI |
 | `web/` | Interfaz: HTML, CSS y JS sin build |
 | `cli.py` | Comandos Typer |
@@ -41,7 +42,7 @@ token. El secreto queda fuera del repo, que es lo que la regla protege.
 
 La referencia es 100/15min general. La interfaz sondea `/api/state` cada 2.5s,
 que da unas 360 peticiones por ventana: con 100 se rompe el uso normal. Las
-cuotas quedaron en `QUOTA_READ = 900`, `QUOTA_WRITE = 60`, `QUOTA_KILL = 30`.
+cuotas quedaron en `QUOTA_READ = 1800`, `QUOTA_WRITE = 60`, `QUOTA_KILL = 30`.
 Las rutas que ejecutan comandos o matan procesos son las que van cortas, que es
 donde la regla importa.
 

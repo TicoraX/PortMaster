@@ -508,7 +508,11 @@ def speaks_http(port: int) -> bool:
     timeouts = (HTTP_PROBE_FIRST_TIMEOUT, HTTP_PROBE_TIMEOUT - HTTP_PROBE_FIRST_TIMEOUT)
     for i, timeout in enumerate(timeouts):
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}", timeout=timeout):
+            # `localhost` y no 127.0.0.1: un dev server de Node escucha solo en
+            # ::1, y preguntando por IPv4 se lo daba por mudo y se quedaba sin
+            # boton Abrir. Por nombre, urllib prueba las dos, igual que hace el
+            # navegador con el enlace que vamos a ofrecer. Ver ports.LOOPBACK.
+            with urllib.request.urlopen(f"http://localhost:{port}", timeout=timeout):
                 return True
         except urllib.error.HTTPError:
             return True

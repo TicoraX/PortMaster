@@ -251,6 +251,32 @@ puerto. Si contesta HTTP, es abrible. Un `404` cuenta,
 porque la mayoría de las APIs no sirven nada en la raíz; lo que descarta al
 servicio es que no conteste, que es el caso de una base de datos.
 
+Si algún proyecto de la página usa Docker, la fila de herramientas dice
+`Docker corriendo` o `Docker cerrado`, y al lado hay un botón que cambia de
+trabajo según cuál sea: `Abrir Docker` con el motor caído, `Reiniciar Docker`
+con el motor arriba, que es lo que uno quiere cuando los contenedores empiezan a
+portarse raro. Los dos se ven siempre: un control que solo aparece cuando algo
+falla no distingue "está en orden" de "esto dejó de funcionar".
+
+Reiniciar pide confirmación sobre el mismo botón, como `Congelar`. Se lleva
+puestos todos los contenedores que estén corriendo, incluidos los de proyectos
+que no estás mirando. Abrir no pregunta nada, porque ahí no hay nada que perder.
+
+Ojo con qué significa `Docker cerrado`: la pregunta es si el daemon contesta,
+no si la ventana de Docker Desktop está abierta. Cerrar la ventana deja el motor
+corriendo en la bandeja, y ahí tus contenedores arrancan igual.
+
+Por debajo corre `docker desktop start --detach` o `docker desktop restart
+--detach`, el plugin oficial del CLI: `docker` ya tiene que estar en el `PATH`
+para que un stack con compose sirva de algo, y el ejecutable de Docker Desktop
+no lo está en ninguna plataforma. `--detach` porque sin él el comando espera
+medio minuto a que el motor termine, y el request se lo comería entero.
+
+El botón dice lo que pasó de verdad, incluido `docker no esta en el PATH` o el
+error del propio Docker. Cuando el motor termina de levantar, el botón no
+desaparece: pasa a decir `Reiniciar Docker`. Lo mueve la misma vista de estado
+que ya sondea `docker info`.
+
 Para registrar un proyecto no hace falta copiar la ruta: `Explorar…` abre un
 navegador de carpetas que empieza en tu home y en las unidades montadas, y marca
 las que tienen `stack.yaml`, un compose, un `package.json` o un `manage.py`. El
@@ -307,6 +333,11 @@ terminal, sus servicios aparecen en esa lista y también se cierran. Por eso la
 muestra entera antes de tocar nada, y por eso la confirmación viene con "no"
 por defecto. La interfaz web sí lo sabe, y ahí el botón "Liberar todos"
 descarta lo que arrancó ella.
+
+Esa sección de la interfaz se ve siempre que haya un proyecto registrado, y
+cuando no hay ningún intruso lo dice en lugar de desaparecer. Por el mismo
+motivo que el estado de Docker: una sección vacía informa, una sección ausente
+deja dudando si el chequeo corrió.
 
 ## Qué no hace el kill switch
 

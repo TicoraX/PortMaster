@@ -108,6 +108,10 @@
         <div class="enroll__tools">
           <a class="btn btn--quiet" id="btn-export" href="/api/projects/export" download="portmaster-projects.json">Exportar proyectos</a>
           <button class="btn btn--quiet" type="button" id="btn-import">Importar JSON</button>
+          <!-- Los dos se ven siempre que algun proyecto use Docker. El boton
+               abre o reinicia segun el estado; el texto lo pone updateDocker. -->
+          <span class="tools__docker" id="docker-state" hidden></span>
+          <button class="btn btn--quiet" type="button" id="btn-docker" hidden></button>
           <input type="file" id="file-import" accept=".json" hidden />
         </div>
       </form>

@@ -117,6 +117,15 @@ def is_free(port: int) -> bool:
 # firewall tragando paquetes, que en loopback no pasa.
 ACCEPT_TIMEOUT = 0.5
 
+# Las dos familias, y no solo IPv4. Node moderno resuelve `localhost` a `::1`,
+# asi que un `vite` o un `next` en Windows escucha solo en IPv6: preguntar por
+# 127.0.0.1 daba que no hay nadie, el servicio no quedaba listo nunca, y el
+# error terminaba acusando de intruso al proceso que acabamos de arrancar. El
+# navegador tampoco pregunta por una sola: resuelve `localhost` y prueba las que
+# le devuelvan. Explicitas y no por nombre, para no depender del DNS ni del
+# archivo hosts en el camino caliente del arranque.
+LOOPBACK = ("127.0.0.1", "::1")
+
 
 def accepts(port: int, timeout: float = ACCEPT_TIMEOUT) -> bool:
     """Si algo acepta conexiones en el puerto, aca y ahora.
@@ -134,13 +143,25 @@ def accepts(port: int, timeout: float = ACCEPT_TIMEOUT) -> bool:
 
     Para "el servicio ya esta arriba" se pregunta esto. Para "puedo usar este
     puerto" se sigue preguntando `is_free`, donde un bindeado si es un no.
+
+    Prueba IPv4 y despues IPv6: ver LOOPBACK.
     """
     _check_port(port)
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
-            return True
-    except OSError:
-        return False
+    # El presupuesto es total y se reparte, no uno por direccion: con el timeout
+    # entero para cada una, un puerto que no contesta costaba el doble de lo que
+    # promete el parametro, y esto lo llama el sondeo del arranque cada 150ms.
+    #
+    # Repartido y no un deadline que la primera se pueda comer entero: si IPv4
+    # se cuelga, IPv6 tiene que conservar su turno. Justo el servicio que solo
+    # escucha ahi es el que este chequeo vino a encontrar.
+    cada = timeout / len(LOOPBACK)
+    for host in LOOPBACK:
+        try:
+            with socket.create_connection((host, port), timeout=cada):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def _quiet(getter):

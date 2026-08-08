@@ -68,6 +68,31 @@ def test_accepts_distingue_bindeado_de_escuchando():
         sock.close()
 
 
+def test_accepts_ve_un_servicio_que_solo_escucha_en_ipv6():
+    """El caso de vite en Windows, que costo un arranque entero de 60 segundos.
+
+    Node moderno resuelve `localhost` a `::1`, asi que el dev server escucha
+    solo en IPv6. Preguntando por 127.0.0.1, `ready: port` no lo veia nunca, y
+    el error del timeout acusaba de intruso al node.exe que acababamos de
+    arrancar nosotros, porque el escaneo si mira las dos familias.
+    """
+    if not socket.has_ipv6:
+        pytest.skip("sin IPv6 en esta maquina")
+    sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    try:
+        sock.bind(("::1", 0))
+    except OSError:
+        sock.close()
+        pytest.skip("no se pudo bindear ::1")
+    port = sock.getsockname()[1]
+    try:
+        sock.listen()
+        assert ports.accepts(port) is True, "solo pregunto por IPv4"
+        assert ports.is_free(port) is False
+    finally:
+        sock.close()
+
+
 def test_accepts_en_un_puerto_cerrado(free_ports):
     (port,) = free_ports(1)
     assert ports.accepts(port) is False
