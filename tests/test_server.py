@@ -100,6 +100,51 @@ def test_los_estaticos_no_se_cachean(client):
         assert respuesta.headers["cache-control"] == "no-store"
 
 
+def test_version_sella_todos_los_estaticos(tmp_path, monkeypatch):
+    """Cada archivo que sirve `web/` tiene que mover el sello del pie de pagina.
+
+    Ese sello existe para contestar "estoy viendo la pagina nueva o una vieja de
+    la cache". Con la lista de archivos escrita a mano se olvidaba tokens.css,
+    que es donde viven los colores y los espaciados: un cambio de solo estilos
+    no movia la fecha y el sello afirmaba que la pagina era mas vieja de lo que
+    era, justo en el caso para el que se puso.
+
+    Recorre el arbol en vez de nombrar los archivos, asi el dia que aparezca un
+    quinto estatico el test lo cubre sin que nadie se acuerde.
+    """
+    web = tmp_path / "web"
+    shutil.copytree(server.WEB, web)
+    # `web/` es plano hoy, y el mount sirve el arbol entero: un estatico anidado
+    # se descarga igual y con `iterdir` no contaba para el sello. El archivo lo
+    # pone el test y no el paquete, para que la trampa quede cubierta antes de
+    # que alguien cree el primer `web/img/`.
+    anidado = web / "anidado" / "extra.css"
+    anidado.parent.mkdir()
+    anidado.write_text("/* un estatico en un subdirectorio */", encoding="utf-8")
+    monkeypatch.setattr(server, "WEB", web)
+
+    estaticos = sorted(f for f in web.rglob("*") if f.is_file())
+    assert anidado in estaticos
+    assert len(estaticos) >= 5, "index.html, app.js, app.css, tokens.css y el anidado"
+
+    viejo = time.time() - 86400
+    for archivo in estaticos:
+        os.utime(archivo, (viejo, viejo))
+
+    app = server.create_app(TOKEN)
+    with TestClient(app, base_url="http://127.0.0.1") as test_client:
+        test_client.headers.update({"Authorization": f"Bearer {TOKEN}"})
+        # La premisa del sello: si el mount no sirviera esto, mirarlo no haria falta.
+        assert test_client.get("/static/anidado/extra.css").status_code == 200
+        for archivo in estaticos:
+            nuevo = time.time()
+            os.utime(archivo, (nuevo, nuevo))
+            sello = test_client.get("/api/version").json()["assets"]
+            esperado = time.strftime("%Y-%m-%d %H:%M", time.localtime(nuevo))
+            assert sello == esperado, f"{archivo.name} no mueve el sello"
+            os.utime(archivo, (viejo, viejo))
+
+
 def test_rate_limit_en_kill(client):
     ruta = "/api/ports/1/kill"
     for _ in range(server.QUOTA_KILL):
