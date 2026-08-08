@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from portmaster import config, ports, registry, server
+from portmaster import config, docker, ports, registry, server
 
 TOKEN = "token-de-prueba-suficientemente-largo"
 SERVER = (
@@ -1015,6 +1015,57 @@ def test_kill_all_exceder_max_targets_devuelve_422(client):
     """Una lista mayor a MAX_TARGETS (200) debe fallar con 422 Unprocessable Entity."""
     puertos = list(range(1000, 1201))  # 201 puertos
     assert client.post("/api/ports/kill-all", json={"ports": puertos}).status_code == 422
+
+
+# docker ------------------------------------------------------------------
+
+# Parchean `docker.ACTIONS` por procesos reales, y no por mocks: lo que hay que
+# probar es que se mira el resultado, y para eso hace falta un proceso que
+# devuelva un codigo de verdad. Sin el parche, cada corrida de la suite
+# arrancaria Docker Desktop en la maquina de quien la corre y en los cinco
+# runners del CI.
+
+
+def _acciones(comando: tuple[str, ...]) -> dict[str, tuple[str, ...]]:
+    return {"start": comando, "restart": comando}
+
+
+def test_docker_dice_que_no_cuando_el_comando_no_existe(monkeypatch):
+    monkeypatch.setattr(docker, "ACTIONS", _acciones(("no-existe-este-binario-12345",)))
+    ok, detail = docker.run("start")
+    assert ok is False
+    assert "PATH" in detail
+
+
+def test_docker_dice_que_no_cuando_el_comando_falla(monkeypatch):
+    """El caso de Linux sin el plugin: docker existe y el subcomando no."""
+    guion = "import sys; print('desktop is not a docker command', file=sys.stderr); sys.exit(1)"
+    monkeypatch.setattr(docker, "ACTIONS", _acciones((sys.executable, "-c", guion)))
+    ok, detail = docker.run("start")
+    assert ok is False
+    assert detail == "desktop is not a docker command", "el motivo tiene que llegar al usuario"
+
+
+@pytest.mark.parametrize("accion", ["start", "restart"])
+def test_docker_dice_que_si_cuando_el_comando_sale_bien(client, monkeypatch, accion):
+    monkeypatch.setattr(docker, "ACTIONS", _acciones((sys.executable, "-c", "pass")))
+    respuesta = client.post(f"/api/docker/{accion}")
+    assert respuesta.status_code == 200
+    assert respuesta.json()["ok"] is True
+
+
+def test_docker_rechaza_una_accion_inventada(client, monkeypatch):
+    """La ruta es la unica entrada, y el `Literal` la cierra antes de ejecutar nada."""
+    monkeypatch.setattr(docker, "ACTIONS", _acciones((sys.executable, "-c", "pass")))
+    for inventada in ("stop", "borrar-todo", "start;rm"):
+        respuesta = client.post(f"/api/docker/{inventada}")
+        assert respuesta.status_code == 422, inventada
+        assert "start" in respuesta.json()["detail"][0]["msg"], "el error dice que se acepta"
+
+
+def test_docker_exige_token(client):
+    client.headers.pop("Authorization")
+    assert client.post("/api/docker/start").status_code == 401
 
 
 # interfaz -----------------------------------------------------------------

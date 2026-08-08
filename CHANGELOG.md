@@ -46,6 +46,11 @@ Primera versión publicada. Lo que sigue es el alcance completo, no un diff.
   ese mismo puerto, y cuando el puerto ya estaba ocupado antes de arrancar.
 - "Liberar todos" cierra de una todos los procesos intrusos, en dos pasos sobre
   el mismo botón: el segundo nombra puertos y procesos antes de hacerlo.
+- Estado de Docker en la fila de herramientas cuando algún proyecto lo usa, con
+  un botón que abre el motor si está caído y lo reinicia si está arriba.
+  Reiniciar pide confirmación: baja todos los contenedores.
+- La sección de procesos intrusos ya no desaparece cuando no hay ninguno: lo
+  dice.
 - Sin build y sin webfonts: la CSP es `default-src 'self'`.
 
 ### Diagnóstico

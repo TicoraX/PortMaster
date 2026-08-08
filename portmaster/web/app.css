@@ -734,8 +734,30 @@ body {
 
 .enroll__tools {
   display: flex;
+  align-items: center;
   gap: var(--space-sm);
   margin-top: var(--space-sm);
+}
+
+.tools__docker {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+  white-space: nowrap;
+}
+
+.tools__docker[data-tone="bad"] {
+  color: var(--color-bad);
+}
+
+/* `display` propio le gana a la regla del navegador para [hidden]. */
+.tools__docker[hidden] {
+  display: none;
+}
+
+.orphan--empty {
+  color: var(--color-ink-3);
+  font-size: var(--text-sm);
 }
 
 .project__docker-warning {
