@@ -1,7 +1,10 @@
 import json
+import subprocess
+import sys
 import textwrap
+import time
 
-from portmaster import mcp
+from portmaster import mcp, ports
 
 
 def test_mcp_initialize():
@@ -25,25 +28,65 @@ def test_mcp_tools_list():
     assert "portmaster_clean" in tool_names
 
 
-def test_mcp_tool_call_free_port(monkeypatch):
-    class FakeStatus:
-        free = False
-        pid = 12345
-    monkeypatch.setattr(mcp.ports, "scan", lambda port: FakeStatus())
-    monkeypatch.setattr(mcp.ports, "kill", lambda port: True)
+def _pedir_liberar(port):
+    return mcp.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {"name": "portmaster_free_port", "arguments": {"port": port}},
+        }
+    )
 
-    req = {
-        "jsonrpc": "2.0",
-        "id": 10,
-        "method": "tools/call",
-        "params": {
-            "name": "portmaster_free_port",
-            "arguments": {"port": 3000},
-        },
-    }
-    res = mcp.handle_request(req)
-    assert not res.get("isError")
-    assert "liberado" in res["result"]["content"][0]["text"]
+
+def test_mcp_free_port_cierra_al_dueno_del_puerto(free_ports):
+    """Un proceso real, como el resto de la suite.
+
+    El mock que habia aca nombraba el parametro `port` y devolvia True, y la
+    firma de verdad es `kill(pid, create_time, ...)` y no devuelve nada. O sea
+    que el test afirmaba un mensaje que el codigo real no podia producir, y
+    tapaba que se le pasaba el numero de puerto en el lugar del pid: pedir
+    liberar el 3000 mataba al proceso 3000.
+    """
+    (port,) = free_ports(1)
+    code = (
+        "import socket, time; s = socket.socket(); "
+        f"s.bind(('127.0.0.1', {port})); s.listen(); time.sleep(60)"
+    )
+    proc = subprocess.Popen([sys.executable, "-c", code])
+    try:
+        limite = time.time() + 10
+        while time.time() < limite and ports.is_free(port):
+            time.sleep(0.1)
+        dueno = ports.scan(port)
+        assert dueno.pid is not None, "el proceso nunca tomo el puerto"
+
+        res = _pedir_liberar(port)
+
+        assert res["result"].get("isError") is not True, res["result"]
+        assert "liberado" in res["result"]["content"][0]["text"]
+        assert str(dueno.pid) in res["result"]["content"][0]["text"]
+
+        limite = time.time() + 10
+        while time.time() < limite and not ports.is_free(port):
+            time.sleep(0.1)
+        assert ports.is_free(port), "el puerto siguio ocupado"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
+def test_mcp_free_port_con_el_puerto_libre_no_mata_nada(free_ports, monkeypatch):
+    """Nadie escucha: no hay a quien cerrar, y `kill` no se llama."""
+    (port,) = free_ports(1)
+    llamadas = []
+    monkeypatch.setattr(mcp.ports, "kill", lambda *a, **k: llamadas.append((a, k)))
+
+    res = _pedir_liberar(port)
+
+    assert "ya esta libre" in res["result"]["content"][0]["text"]
+    assert llamadas == []
 
 
 def test_mcp_tool_call_share(monkeypatch):

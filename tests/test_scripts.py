@@ -112,3 +112,50 @@ def test_run_script_desconocido(tmp_path):
 
     with pytest.raises(ConfigError, match="script desconocido: 'inexistente'"):
         scripts.run_script(stack, "inexistente")
+
+
+def _stack_con_scripts(tmp_path, bloque):
+    # Sin dedent: el bloque llega multilinea y ya trae su propia sangria, que es
+    # justo lo que dedent no sabe combinar con la del literal.
+    (tmp_path / "stack.yaml").write_text(
+        "services:\n  web:\n    command: echo web\nscripts:\n" + bloque + "\n",
+        encoding="utf-8",
+    )
+    return config.load(tmp_path / "stack.yaml")
+
+
+def test_un_pipeline_encadena_los_scripts_que_nombra(tmp_path, capsys):
+    """`check: [lint, test]` es lo que documenta docs/stack-yaml.md.
+
+    Corria `lint` como si fuera un binario del PATH y moria en el paso 1 con
+    "no se reconoce como comando": cada item se trataba como comando literal y
+    ninguno se resolvia contra los demas scripts.
+    """
+    stack = _stack_con_scripts(
+        tmp_path,
+        "  lint: echo LINT\n  test: echo TEST\n  check: [lint, test]",
+    )
+    assert scripts.resolve(stack, "check") == ["echo LINT", "echo TEST"]
+    assert scripts.run_script(stack, "check") == 0
+    salida = capsys.readouterr().out
+    assert "LINT" in salida and "TEST" in salida
+
+
+def test_un_pipeline_anidado_se_aplana(tmp_path):
+    stack = _stack_con_scripts(
+        tmp_path,
+        "  a: echo A\n  b: echo B\n  ab: [a, b]\n  todo: [ab, a]",
+    )
+    assert scripts.resolve(stack, "todo") == ["echo A", "echo B", "echo A"]
+
+
+def test_un_comando_literal_no_se_confunde_con_una_referencia(tmp_path):
+    """`pytest -v` no es el nombre de ningun script y tiene que quedar tal cual."""
+    stack = _stack_con_scripts(tmp_path, "  test: pytest -v\n  suite: [test]")
+    assert scripts.resolve(stack, "suite") == ["pytest -v"]
+
+
+def test_un_ciclo_entre_scripts_se_detecta(tmp_path):
+    stack = _stack_con_scripts(tmp_path, "  a: [b]\n  b: [a]")
+    with pytest.raises(config.ConfigError, match="ciclo entre scripts"):
+        scripts.resolve(stack, "a")

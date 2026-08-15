@@ -27,6 +27,30 @@ def build_script_env(stack: Stack) -> dict[str, str]:
     return env
 
 
+def resolve(stack: Stack, name: str, _visto: tuple[str, ...] = ()) -> list[str]:
+    """Aplana un script a comandos de shell, expandiendo los que nombran a otro.
+
+    Un item que coincide con el nombre de otro script es una referencia; todo lo
+    demas es un comando literal. Sin esto, el `check: [lint, test]` que documenta
+    `docs/stack-yaml.md` corria `lint` como si fuera un binario y moria con "no
+    se reconoce como comando".
+
+    Un nombre que no es script queda como comando tal cual, que es lo que hace
+    falta para `test: pytest -v`. No se puede distinguir un binario real de una
+    referencia mal escrita sin adivinar, y adivinar en un ejecutor de comandos
+    sale mas caro que el error del shell.
+    """
+    if name in _visto:
+        raise ConfigError(f"ciclo entre scripts: {' -> '.join((*_visto, name))}")
+    fuera: list[str] = []
+    for item in stack.scripts[name]:
+        if item in stack.scripts:
+            fuera.extend(resolve(stack, item, (*_visto, name)))
+        else:
+            fuera.append(item)
+    return fuera
+
+
 def run_script(
     stack: Stack,
     name: str,
@@ -42,7 +66,7 @@ def run_script(
         known = ", ".join(stack.scripts) or "ninguno"
         raise ConfigError(f"script desconocido: {name!r}. Definidos: {known}")
 
-    commands = stack.scripts[name]
+    commands = resolve(stack, name)
     env = build_script_env(stack)
     extra_str = (" " + " ".join(extra_args)) if extra_args else ""
 

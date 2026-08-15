@@ -208,8 +208,18 @@ def _execute_tool(name: str, args: dict[str, Any]) -> str:
         status = ports.scan(port)
         if status.free:
             return f"El puerto {port} ya esta libre."
-        killed = ports.kill(port)
-        return f"Proceso en puerto {port} (pid {status.pid}) {'liberado' if killed else 'fallo al liberar'}."
+        if status.pid is None:
+            return f"El puerto {port} esta ocupado por un proceso que no es visible con estos permisos."
+        # El pid y el create_time que vio el escaneo. Aca iba `kill(port)`, o sea
+        # el numero de puerto en el lugar del pid: liberar el 3000 mataba al
+        # proceso 3000, que no tiene nada que ver. El create_time es la
+        # verificacion contra reciclado de PIDs y no es opcional en este proyecto.
+        #
+        # Sin valor de retorno que mirar: `kill` no devuelve nada y levanta si el
+        # proceso esta protegido, ya no existe o faltan permisos. Esas excepciones
+        # las convierte `tools/call` en isError, que es como el agente se entera.
+        ports.kill(status.pid, status.create_time, port=port)
+        return f"Proceso en puerto {port} (pid {status.pid}) liberado."
 
     if name == "portmaster_share":
         port = int(args["port"])
