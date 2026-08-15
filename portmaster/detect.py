@@ -70,6 +70,10 @@ DEV_SERVERS = (
     "gatsby",
     "nodemon",
     "ts-node-dev",
+    "hono",
+    "fastify",
+    "express",
+    "nitro",
 )
 
 # Frameworks web de Rust. No hay servidor HTTP en la stdlib, asi que si el
@@ -423,8 +427,11 @@ def _python(root: Path) -> list[Service]:
 
 
 def _python_at(path: Path, name: str) -> Service | None:
+    has_uv = (path / "uv.lock").is_file() or "tool.uv" in _read(path / "pyproject.toml")
+    prefix = "uv run " if has_uv else ""
+
     if (path / "manage.py").is_file():
-        return _served(name, "python manage.py runserver", path)
+        return _served(name, f"{prefix}python manage.py runserver", path)
 
     declared = "\n".join(
         _read(path / archivo)
@@ -436,7 +443,7 @@ def _python_at(path: Path, name: str) -> Service | None:
     module = _asgi_module(path)
     if module is None:
         return None
-    return _served(name, f"uvicorn {module}:app --reload", path)
+    return _served(name, f"{prefix}uvicorn {module}:app --reload", path)
 
 
 def _asgi_module(root: Path) -> str | None:

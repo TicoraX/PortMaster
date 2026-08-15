@@ -736,3 +736,34 @@ def test_dotnet_en_subcarpeta_de_backend(tmp_path):
     servicio = detect.detect(tmp_path).services["server"]
     assert servicio.command == "dotnet watch run"
     assert servicio.cwd == tmp_path.resolve() / "server"
+
+
+def test_python_fastapi_con_uv_lock(tmp_path):
+    write(tmp_path, "main.py", "app = FastAPI()\n")
+    write(tmp_path, "pyproject.toml", '[project]\ndependencies = ["fastapi", "uvicorn"]\n')
+    write(tmp_path, "uv.lock", "version = 1\n")
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["api"].command == "uv run uvicorn main:app --reload"
+
+
+def test_python_django_con_uv_lock(tmp_path):
+    write(tmp_path, "manage.py", "# django manage.py\n")
+    write(tmp_path, "uv.lock", "version = 1\n")
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["api"].command == "uv run python manage.py runserver"
+
+
+def test_node_framework_moderno_astro_hono(tmp_path):
+    write(
+        tmp_path,
+        "package.json",
+        json.dumps({
+            "dependencies": {"hono": "^4.0.0"},
+            "scripts": {"dev": "tsx watch src/index.ts"},
+        }),
+    )
+    stack = detect.detect(tmp_path)
+    assert stack.services["web"].command == "npm run dev"
+

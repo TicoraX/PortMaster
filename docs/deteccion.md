@@ -20,9 +20,9 @@ los hijos duplicaría todo.
 
 El backend sigue la misma regla, en `backend/`, `api/`, `server/` y los hijos de
 los mismos grupos. Reconoce Django (`manage.py`), FastAPI (`uvicorn` con un
-módulo ASGI), Go (`go.mod` con un paquete `main`), Rust (`Cargo.toml` con
-`src/main.rs`), Rails (`config/application.rb`), Laravel (`artisan`) y ASP.NET
-Core (un `.csproj` con `Sdk="Microsoft.NET.Sdk.Web"`).
+módulo ASGI, usando `uv run` si hay `uv.lock`), Go (`go.mod` con un paquete `main`),
+Rust (`Cargo.toml` con `src/main.rs`), Rails (`config/application.rb`), Laravel (`artisan`)
+y ASP.NET Core (un `.csproj` con `Sdk="Microsoft.NET.Sdk.Web"`).
 
 ## Por lenguaje
 
