@@ -36,6 +36,9 @@ class Service:
     # Comando de apagado propio, para lo que no muere matando al proceso que lo
     # arranco: un contenedor vive fuera de nuestro arbol.
     stop: str | None = None
+    env_file: tuple[Path, ...] = ()
+    pre_start: str | None = None
+    post_start: str | None = None
 
 
 @dataclass(frozen=True)
@@ -151,6 +154,7 @@ def _service(name: str, spec: object, root: Path) -> Service:
 
     unknown = set(spec) - {
         "command", "cwd", "port", "ready", "needs", "env", "detached", "stop",
+        "env_file", "pre_start", "post_start",
     }
     if unknown:
         raise ConfigError(f"{where}: campos desconocidos: {', '.join(sorted(unknown))}")
@@ -190,6 +194,14 @@ def _service(name: str, spec: object, root: Path) -> Service:
     if stop is not None and (not isinstance(stop, str) or not stop.strip()):
         raise ConfigError(f"{where}.stop debe ser texto no vacio")
 
+    pre_start = spec.get("pre_start")
+    if pre_start is not None and (not isinstance(pre_start, str) or not pre_start.strip()):
+        raise ConfigError(f"{where}.pre_start debe ser texto no vacio")
+
+    post_start = spec.get("post_start")
+    if post_start is not None and (not isinstance(post_start, str) or not post_start.strip()):
+        raise ConfigError(f"{where}.post_start debe ser texto no vacio")
+
     return Service(
         name=name,
         command=command,
@@ -200,6 +212,9 @@ def _service(name: str, spec: object, root: Path) -> Service:
         env=_env(where, spec.get("env")),
         detached=detached,
         stop=stop,
+        env_file=_env_files(where, spec.get("env_file"), root),
+        pre_start=pre_start,
+        post_start=post_start,
     )
 
 
@@ -271,3 +286,64 @@ def _profiles(value: object, services: dict[str, Service]) -> dict[str, tuple[st
                 raise ConfigError(f"profiles.{name} incluye '{member}', que no existe")
         profiles[str(name)] = tuple(members)
     return profiles
+
+
+def _env_files(where: str, value: object, root: Path) -> tuple[Path, ...]:
+    if value is None:
+        return ()
+    raw_list: list[object]
+    if isinstance(value, str):
+        raw_list = [value]
+    elif isinstance(value, list):
+        raw_list = value
+    else:
+        raise ConfigError(f"{where}.env_file debe ser una ruta o lista de rutas")
+
+    paths: list[Path] = []
+    for item in raw_list:
+        if not isinstance(item, str) or not item.strip():
+            raise ConfigError(f"{where}.env_file debe contener rutas relativas de texto no vacias")
+        candidate = Path(item)
+        if candidate.is_absolute():
+            raise ConfigError(f"{where}.env_file debe ser relativa a la raiz del proyecto")
+        resolved = (root / candidate).resolve()
+        if not resolved.is_relative_to(root):
+            raise ConfigError(f"{where}.env_file sale de la raiz del proyecto: {item!r}")
+        paths.append(resolved)
+    return tuple(paths)
+
+
+def parse_env_file(path: Path) -> dict[str, str]:
+    """Lee un archivo .env simple sin dependencias externas."""
+    if not path.is_file():
+        return {}
+    env: dict[str, str] = {}
+    try:
+        content = path.read_text(encoding="utf-8-sig")
+    except OSError:
+        return {}
+
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        if "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        key = key.strip()
+        val = val.strip()
+        if not key:
+            continue
+        if len(val) >= 2 and (
+            (val.startswith('"') and val.endswith('"'))
+            or (val.startswith("'") and val.endswith("'"))
+        ):
+            val = val[1:-1]
+        else:
+            if " #" in val:
+                val = val.split(" #", 1)[0].rstrip()
+        env[key] = val
+    return env
+

@@ -610,3 +610,72 @@ def test_niveles_de_una_cadena_lineal():
 
     d = svc("d")
     assert [[s.name for s in nivel] for nivel in runner._levels([a, d, b])] == [["a", "d"], ["b"]]
+
+
+def test_env_file_inyecta_variables(tmp_path, free_ports):
+    (port,) = free_ports(1)
+    (tmp_path / ".env").write_text("CUSTOM_VAR=portmaster_rocks\n", encoding="utf-8")
+    flag = tmp_path / "env_result.txt"
+
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "import os, pathlib, time, socket; pathlib.Path(r'{flag}').write_text(os.environ.get('CUSTOM_VAR', '')); s = socket.socket(); s.bind(('127.0.0.1', {port})); s.listen(); time.sleep(120)"
+            port: {port}
+            env_file: .env
+        """,
+    )
+    engine = make_runner(stack)
+    try:
+        engine.up()
+        assert flag.exists()
+        assert flag.read_text(encoding="utf-8") == "portmaster_rocks"
+    finally:
+        engine.down()
+
+
+def test_pre_start_y_post_start(tmp_path, free_ports):
+    (port,) = free_ports(1)
+    pre_flag = tmp_path / "pre.txt"
+    post_flag = tmp_path / "post.txt"
+
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "{SERVER.format(port=port)}"
+            port: {port}
+            pre_start: {sys.executable} -c "import pathlib; pathlib.Path(r'{pre_flag}').write_text('pre_done')"
+            post_start: {sys.executable} -c "import pathlib; pathlib.Path(r'{post_flag}').write_text('post_done')"
+        """,
+    )
+    engine = make_runner(stack)
+    try:
+        engine.up()
+        assert pre_flag.exists()
+        assert pre_flag.read_text() == "pre_done"
+        assert post_flag.exists()
+        assert post_flag.read_text() == "post_done"
+    finally:
+        engine.down()
+
+
+def test_pre_start_fallo_aborta_arranque(tmp_path, free_ports):
+    (port,) = free_ports(1)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "{SERVER.format(port=port)}"
+            port: {port}
+            pre_start: {sys.executable} -c "raise SystemExit(42)"
+        """,
+    )
+    engine = make_runner(stack)
+    with pytest.raises(runner.StartupError, match="pre_start fallo con codigo 42"):
+        engine.up()
+

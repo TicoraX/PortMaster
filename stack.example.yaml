@@ -18,6 +18,9 @@ services:
     cwd: backend       # relativo a la raiz, no puede escapar de ella
     port: 8080
     needs: [db]
+    env_file: [.env, .env.local]  # archivo o lista de archivos .env a cargar
+    pre_start: npm run build      # comando síncrono previo al arranque
+    post_start: npm run seed      # comando síncrono posterior a la confirmación de salud
     env:
       DATABASE_URL: postgres://localhost:5432/app
 

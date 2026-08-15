@@ -195,3 +195,65 @@ def test_el_ejemplo_del_repo_es_valido(tmp_path):
 
     stack = config.load(destino)
     assert [s.name for s in stack.resolve("fullstack")] == ["db", "api", "web"]
+
+
+def test_env_file_y_hooks(tmp_path):
+    (tmp_path / ".env").write_text("DB_PASS=secret\nPORT=5432\n", encoding="utf-8")
+    (tmp_path / ".env.local").write_text("DEBUG=true\n", encoding="utf-8")
+
+    body = """
+    services:
+      api:
+        command: npm run dev
+        env_file: [.env, .env.local]
+        pre_start: npm run build
+        post_start: npm run seed
+      worker:
+        command: python worker.py
+        env_file: .env
+    """
+    stack = config.load(write(tmp_path, body))
+    api = stack.services["api"]
+    worker = stack.services["worker"]
+
+    assert api.env_file == ((tmp_path / ".env").resolve(), (tmp_path / ".env.local").resolve())
+    assert api.pre_start == "npm run build"
+    assert api.post_start == "npm run seed"
+
+    assert worker.env_file == ((tmp_path / ".env").resolve(),)
+    assert worker.pre_start is None
+    assert worker.post_start is None
+
+
+def test_parse_env_file(tmp_path):
+    env_file = tmp_path / "test.env"
+    env_file.write_text(
+        textwrap.dedent("""
+        # Comentario
+        API_KEY=12345
+        export DB_HOST="localhost"
+        SECRET_TOKEN='super-secret'
+        WITH_INLINE=valor # comentario inline
+        EMPTY=
+        """),
+        encoding="utf-8",
+    )
+    parsed = config.parse_env_file(env_file)
+    assert parsed["API_KEY"] == "12345"
+    assert parsed["DB_HOST"] == "localhost"
+    assert parsed["SECRET_TOKEN"] == "super-secret"
+    assert parsed["WITH_INLINE"] == "valor"
+    assert parsed["EMPTY"] == ""
+    assert "# Comentario" not in parsed
+
+
+def test_env_file_fuera_de_raiz(tmp_path):
+    body = """
+    services:
+      api:
+        command: echo hola
+        env_file: ../../.env
+    """
+    with pytest.raises(config.ConfigError, match="sale de la raiz"):
+        config.load(write(tmp_path, body))
+

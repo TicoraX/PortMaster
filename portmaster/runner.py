@@ -19,12 +19,34 @@ import urllib.error
 import urllib.request
 from collections import deque
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import psutil
 from rich.console import Console
 
-from . import ports
+from . import config, ports
 from .config import Service, Stack
+
+
+def build_env(service: Service) -> dict[str, str]:
+    """Construye el entorno de ejecucion con precedencia clara:
+    1. os.environ
+    2. ~/.portmaster/env.global (si existe)
+    3. service.env_file (en orden)
+    4. service.env (declarado explicito)
+    """
+    env = dict(os.environ)
+    global_env = Path.home() / ".portmaster" / "env.global"
+    if global_env.is_file():
+        env.update(config.parse_env_file(global_env))
+    for env_path in service.env_file:
+        if env_path.is_file():
+            env.update(config.parse_env_file(env_path))
+    env.update(service.env)
+    env["PYTHONUNBUFFERED"] = "1"
+    env["FORCE_COLOR"] = "1"
+    return env
+
 
 COLORS = ("cyan", "magenta", "green", "yellow", "blue", "bright_red")
 SHUTDOWN_TIMEOUT = 5
@@ -242,6 +264,24 @@ class Runner:
         #
         # No es un error: `docker compose up -d` sobre un contenedor que ya esta
         # arriba cae aca y es el caso legitimo. Por eso avisa y no cancela.
+        if service.pre_start:
+            self._say_raw(service.name, color, f"$ pre_start: {service.pre_start}")
+            res = subprocess.run(
+                service.pre_start,
+                shell=True,
+                cwd=service.cwd,
+                env=build_env(service),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                errors="replace",
+                timeout=DETACHED_TIMEOUT,
+            )
+            for line in (res.stdout or "").splitlines():
+                self._write_raw(service.name, color, line)
+            if res.returncode != 0:
+                raise StartupError(f"{service.name} pre_start fallo con codigo {res.returncode}")
+
         taken = service.ready == "port" and ports.accepts(service.port)
         proc = Proc(service, self._spawn(service), color, port_taken=taken)
         self._say(proc, f"$ {service.command}")
@@ -252,17 +292,11 @@ class Runner:
         # shell=True es deliberado: `npm run dev` y `docker compose up -d` no son
         # ejecutables, y stack.yaml ya es codigo ejecutable por diseño. El README
         # documenta el modelo de confianza.
-        env = {
-            "PYTHONUNBUFFERED": "1",
-            "FORCE_COLOR": "1",
-            **os.environ,
-            **service.env,
-        }
         return subprocess.Popen(
             service.command,
             shell=True,
             cwd=service.cwd,
-            env=env,
+            env=build_env(service),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -298,6 +332,25 @@ class Runner:
                     detail += f" · http://localhost:{port}"
                 if proc.port_taken:
                     detail += " · el puerto ya estaba ocupado antes de arrancar"
+
+                if service.post_start:
+                    self._say(proc, f"$ post_start: {service.post_start}")
+                    res = subprocess.run(
+                        service.post_start,
+                        shell=True,
+                        cwd=service.cwd,
+                        env=build_env(service),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        errors="replace",
+                        timeout=DETACHED_TIMEOUT,
+                    )
+                    for line in (res.stdout or "").splitlines():
+                        self._write(proc, line)
+                    if res.returncode != 0:
+                        raise StartupError(f"{service.name} post_start fallo con codigo {res.returncode}")
+
                 self._say(proc, "listo" + detail)
                 return
             if not service.detached and proc.popen.poll() is not None:
@@ -361,11 +414,17 @@ class Runner:
             printed = True
 
     def _say(self, proc: Proc, message: str) -> None:
-        self._write(proc, f"[dim]{message}[/]")
+        self._say_raw(proc.service.name, proc.color, message)
 
     def _write(self, proc: Proc, text: str) -> None:
-        name = proc.service.name.ljust(self._width)
-        self.console.print(f"[{proc.color}]{name}[/] [dim]|[/] {text}", highlight=False)
+        self._write_raw(proc.service.name, proc.color, text)
+
+    def _say_raw(self, name: str, color: str, message: str) -> None:
+        self._write_raw(name, color, f"[dim]{message}[/]")
+
+    def _write_raw(self, name: str, color: str, text: str) -> None:
+        padded = name.ljust(self._width)
+        self.console.print(f"[{color}]{padded}[/] [dim]|[/] {text}", highlight=False)
 
 
 def _levels(services: list[Service]) -> list[list[Service]]:
@@ -399,7 +458,7 @@ def run_stop(service: Service) -> subprocess.CompletedProcess | None:
             service.stop,
             shell=True,
             cwd=service.cwd,
-            env={**os.environ, **service.env},
+            env=build_env(service),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
