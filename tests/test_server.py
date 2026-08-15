@@ -1113,6 +1113,36 @@ def test_docker_exige_token(client):
     assert client.post("/api/docker/start").status_code == 401
 
 
+def test_docker_clean_endpoint(client, monkeypatch):
+    monkeypatch.setattr(docker, "prune", lambda volumes=False: (True, "Total space reclaimed: 10MB"))
+    res = client.post("/api/docker/clean")
+    assert res.status_code == 200
+    assert res.json()["ok"] is True
+    assert "10MB" in res.json()["detail"]
+
+
+def test_share_endpoint(client, monkeypatch):
+    monkeypatch.setattr(
+        server.tunnel,
+        "start_tunnel",
+        lambda port, provider=None: server.tunnel.Tunnel(
+            provider="cloudflared",
+            port=port,
+            url="https://test-tunnel.trycloudflare.com",
+            proc=subprocess.Popen("echo ok", shell=True),
+        ),
+    )
+    res = client.post("/api/share?port=3000")
+    assert res.status_code == 200
+    assert res.json()["ok"] is True
+    assert res.json()["url"] == "https://test-tunnel.trycloudflare.com"
+
+    res_del = client.delete("/api/share/3000")
+    assert res_del.status_code == 200
+    assert res_del.json()["ok"] is True
+
+
+
 # interfaz -----------------------------------------------------------------
 
 

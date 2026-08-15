@@ -32,6 +32,7 @@ const ui = {
   pathSuggestions: document.getElementById("path-suggestions"),
   dockerState: document.getElementById("docker-state"),
   btnDocker: document.getElementById("btn-docker"),
+  btnDockerClean: document.getElementById("btn-docker-clean"),
   btnPortsModal: document.getElementById("btn-ports-modal"),
   portsModal: document.getElementById("ports-modal"),
   portsModalList: document.getElementById("ports-modal-list"),
@@ -397,6 +398,26 @@ ui.btnDocker.addEventListener("click", (event) => {
   });
 });
 
+ui.btnDockerClean.addEventListener("click", (event) => {
+  const button = event.currentTarget;
+  if (button.dataset.armed !== "true") {
+    button.dataset.armed = "true";
+    button.textContent = "Purgar recursos huerfanos?";
+    setTimeout(() => {
+      delete button.dataset.armed;
+      button.textContent = "Limpiar Docker";
+    }, 6000);
+    return;
+  }
+  delete button.dataset.armed;
+  button.textContent = "Limpiar Docker";
+
+  act(button, async () => {
+    const res = await api("/api/docker/clean", { method: "POST" });
+    flash(res.detail, res.ok ? "good" : "bad");
+  });
+});
+
 let killAllTimer = null;
 let killAllSnapshot = null;
 
@@ -611,6 +632,7 @@ function updateDocker(projects) {
 
   ui.btnDocker.hidden = usan.length === 0;
   ui.btnDocker.dataset.action = caido ? "start" : "restart";
+  ui.btnDockerClean.hidden = usan.length === 0 || caido;
   // El sondeo pasa cada 2.5s y el armado dura 6: sin esto le pisaria la
   // pregunta al usuario mientras la esta leyendo.
   if (ui.btnDocker.dataset.armed !== "true") {

@@ -29,7 +29,17 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from rich.console import Console
 
-from . import __version__, config, detect, docker, doctor, ports, registry, runner
+from . import (
+    __version__,
+    config,
+    detect,
+    docker,
+    doctor,
+    ports,
+    registry,
+    runner,
+    tunnel,
+)
 
 # `browse_module` porque el endpoint de /api/browse ya se llama browse.
 from . import browse as browse_module
@@ -805,6 +815,16 @@ def create_app(token: str | None = None) -> FastAPI:
         return {"ok": True, "killed": killed, "failed": failed}
 
     @app.post(
+        "/api/docker/clean",
+        dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)],
+    )
+    def docker_clean(volumes: bool = False) -> dict:
+        """Limpia recursos huerfanos de Docker."""
+        ok, detail = docker.prune(volumes=volumes)
+        log.info("docker clean pedido: ok=%s (%s)", ok, detail)
+        return {"ok": ok, "detail": detail}
+
+    @app.post(
         "/api/docker/{action}",
         dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)],
     )
@@ -823,7 +843,35 @@ def create_app(token: str | None = None) -> FastAPI:
         log.info("docker %s pedido: ok=%s (%s)", action, ok, detail)
         return {"ok": ok, "detail": detail}
 
+    @app.post(
+        "/api/share",
+        dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)],
+    )
+    def share_port(port: int, provider: str | None = None) -> dict:
+        """Inicia un tunel efimero para compartir un puerto."""
+        try:
+            tun = tunnel.start_tunnel(port, provider=provider)
+            _active_tunnels[port] = tun
+            return {"ok": True, "url": tun.url, "provider": tun.provider, "port": port}
+        except tunnel.TunnelError as exc:
+            return {"ok": False, "detail": str(exc)}
+
+    @app.delete(
+        "/api/share/{port}",
+        dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)],
+    )
+    def stop_share_port(port: int) -> dict:
+        """Detiene un tunel activo."""
+        tun = _active_tunnels.pop(port, None)
+        if tun:
+            tun.stop()
+            return {"ok": True, "detail": f"Tunel para puerto {port} cerrado."}
+        return {"ok": False, "detail": f"No hay tunel activo para el puerto {port}."}
+
     return app
+
+
+_active_tunnels: dict[int, tunnel.Tunnel] = {}
 
 
 # vistas -------------------------------------------------------------------
