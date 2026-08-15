@@ -5,6 +5,10 @@
 
 name: mi-proyecto
 
+# includes:              # importa servicios de otros proyectos o sub-carpetas
+#   - ../shared-backend
+#   - ./services/auth
+
 services:
   db:
     command: docker compose up -d postgres

@@ -257,3 +257,55 @@ def test_env_file_fuera_de_raiz(tmp_path):
     with pytest.raises(config.ConfigError, match="sale de la raiz"):
         config.load(write(tmp_path, body))
 
+
+def test_includes_combinar_servicios(tmp_path):
+    sub = tmp_path / "subproject"
+    sub.mkdir()
+    sub_body = """
+    services:
+      db:
+        command: echo db
+        port: 5432
+    """
+    write(sub, sub_body)
+
+    main_body = """
+    includes:
+      - subproject
+    services:
+      api:
+        command: echo api
+        port: 8080
+        needs: [db]
+    """
+    stack = config.load(write(tmp_path, main_body))
+    assert "db" in stack.services
+    assert "api" in stack.services
+    assert stack.services["api"].needs == ("db",)
+    resolved = stack.resolve()
+    assert [s.name for s in resolved] == ["db", "api"]
+
+
+def test_includes_ciclo_detectado(tmp_path):
+    p1 = tmp_path / "proj1"
+    p2 = tmp_path / "proj2"
+    p1.mkdir()
+    p2.mkdir()
+
+    write(p1, "includes: [../proj2]\nservices:\n  s1:\n    command: echo s1")
+    write(p2, "includes: [../proj1]\nservices:\n  s2:\n    command: echo s2")
+
+    with pytest.raises(config.ConfigError, match="ciclo de inclusion"):
+        config.load(p1 / "stack.yaml")
+
+
+def test_includes_conflicto_nombre_servicio(tmp_path):
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    write(sub, "services:\n  api:\n    command: echo api2")
+    main = write(tmp_path, "includes: [sub]\nservices:\n  api:\n    command: echo api1")
+
+    with pytest.raises(config.ConfigError, match="conflicto de servicio"):
+        config.load(main)
+
+

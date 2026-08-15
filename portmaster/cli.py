@@ -498,14 +498,29 @@ def list_cmd() -> None:
         console.print("[dim]No hay proyectos registrados. Registra uno con: portmaster add <ruta>[/]")
         return
 
+    declared = registry.declared_ports()
+    collisions = registry.find_collisions()
+
     table = Table(box=None, pad_edge=False)
     table.add_column("ID")
     table.add_column("NOMBRE")
+    table.add_column("PUERTOS")
     table.add_column("RUTA")
     for path in items:
         pid = registry.project_id(path)
-        table.add_row(pid, path.name, str(path))
+        proj_ports = sorted(p for p, projs in declared.items() if path in projs)
+        port_labels = []
+        for p in proj_ports:
+            if p in collisions:
+                port_labels.append(f"[yellow]{p}[/]")
+            else:
+                port_labels.append(str(p))
+        ports_str = ", ".join(port_labels) if port_labels else "-"
+        table.add_row(pid, path.name, ports_str, str(path))
     console.print(table)
+    if collisions:
+        console.print("[dim yellow]Puertos en amarillo se disputan entre dos o mas proyectos.[/]")
+
 
 
 @app.command("remove")

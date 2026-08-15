@@ -108,9 +108,15 @@ def find(start: Path | None = None) -> Path:
     raise ConfigError(f"no se encontro {CONFIG_NAMES[0]} desde {current}")
 
 
-def load(path: Path | None = None) -> Stack:
+def load(path: Path | None = None, _visited: set[Path] | None = None) -> Stack:
     path = (path or find()).resolve()
     root = path.parent
+
+    if _visited is None:
+        _visited = set()
+    if path in _visited:
+        raise ConfigError(f"ciclo de inclusion detectado en: {path}")
+    _visited.add(path)
 
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -120,14 +126,49 @@ def load(path: Path | None = None) -> Stack:
     if not isinstance(raw, dict):
         raise ConfigError(f"{path}: la raiz debe ser un mapa")
 
-    services_raw = raw.get("services")
-    if not isinstance(services_raw, dict) or not services_raw:
-        raise ConfigError(f"{path}: falta la seccion 'services' o esta vacia")
+    services_raw = raw.get("services") or {}
+    if not isinstance(services_raw, dict):
+        raise ConfigError(f"{path}: 'services' debe ser un mapa")
 
     services = {
         name: _service(name, spec, root)
         for name, spec in services_raw.items()
     }
+
+    includes_raw = raw.get("includes")
+    if includes_raw is not None:
+        if isinstance(includes_raw, str):
+            includes_list = [includes_raw]
+        elif isinstance(includes_raw, list) and all(isinstance(i, str) for i in includes_raw):
+            includes_list = includes_raw
+        else:
+            raise ConfigError(f"{path}: 'includes' debe ser una ruta o lista de rutas")
+
+        for inc_item in includes_list:
+            inc_path = (root / inc_item).resolve()
+            if inc_path.is_dir():
+                target_file = None
+                for cname in CONFIG_NAMES:
+                    if (inc_path / cname).is_file():
+                        target_file = inc_path / cname
+                        break
+                if target_file is None:
+                    raise ConfigError(f"no se encontro stack.yaml en la ruta incluida: {inc_path}")
+                inc_stack = load(target_file, _visited=set(_visited))
+            elif inc_path.is_file():
+                inc_stack = load(inc_path, _visited=set(_visited))
+            else:
+                raise ConfigError(f"ruta de inclusion no encontrada: {inc_path}")
+
+            for s_name, s_svc in inc_stack.services.items():
+                if s_name in services:
+                    raise ConfigError(
+                        f"conflicto de servicio: '{s_name}' ya esta declarado y no puede ser importado desde '{inc_path}'"
+                    )
+                services[s_name] = s_svc
+
+    if not services:
+        raise ConfigError(f"{path}: falta la seccion 'services' o esta vacia")
 
     for service in services.values():
         for dep in service.needs:

@@ -103,4 +103,19 @@ scripts:
 
 Se ejecutan con `portmaster run <nombre>` (ej. `portmaster run test`). Cada comando corre en la raíz del proyecto y recibe el contexto de variables de entorno inyectadas.
 
+## includes
+
+Permite componer stacks importando servicios de otros repositorios o subcarpetas:
+
+```yaml
+includes:
+  - ../servicio-auth
+  - ./servicios/pagos
+```
+
+Cada ruta relativa se resuelve respecto al `stack.yaml` padre. Los servicios importados
+se ejecutan en su propio directorio de trabajo (`cwd`) y pueden declararse como dependencias
+en `needs:` de cualquier otro servicio del stack. Se detectan y previenen ciclos de inclusión.
+
+
 

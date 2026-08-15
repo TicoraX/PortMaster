@@ -226,3 +226,10 @@ def find_orphans(running_ports: frozenset[int] | set[int] = frozenset()) -> list
     result.sort(key=lambda x: x["port"])
     return result
 
+
+def find_collisions(max_age: float = 0.0) -> dict[int, list[Path]]:
+    """Devuelve los puertos disputados por dos o mas proyectos registrados."""
+    ports_map = declared_ports(max_age=max_age)
+    return {port: projs for port, projs in ports_map.items() if len(projs) > 1}
+
+
