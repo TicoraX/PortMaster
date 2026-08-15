@@ -19,8 +19,62 @@ def test_mcp_tools_list():
     assert "portmaster_status" in tool_names
     assert "portmaster_doctor" in tool_names
     assert "portmaster_ports" in tool_names
+    assert "portmaster_free_port" in tool_names
+    assert "portmaster_share" in tool_names
     assert "portmaster_run" in tool_names
     assert "portmaster_clean" in tool_names
+
+
+def test_mcp_tool_call_free_port(monkeypatch):
+    class FakeStatus:
+        free = False
+        pid = 12345
+    monkeypatch.setattr(mcp.ports, "scan", lambda port: FakeStatus())
+    monkeypatch.setattr(mcp.ports, "kill", lambda port: True)
+
+    req = {
+        "jsonrpc": "2.0",
+        "id": 10,
+        "method": "tools/call",
+        "params": {
+            "name": "portmaster_free_port",
+            "arguments": {"port": 3000},
+        },
+    }
+    res = mcp.handle_request(req)
+    assert not res.get("isError")
+    assert "liberado" in res["result"]["content"][0]["text"]
+
+
+def test_mcp_tool_call_share(monkeypatch):
+    monkeypatch.setattr(
+        mcp.tunnel,
+        "start_tunnel",
+        lambda port, provider=None: mcp.tunnel.Tunnel(
+            provider="cloudflared",
+            port=port,
+            url="https://ai-tunnel.trycloudflare.com",
+            proc=None,
+        ),
+    )
+    req = {
+        "jsonrpc": "2.0",
+        "id": 11,
+        "method": "tools/call",
+        "params": {
+            "name": "portmaster_share",
+            "arguments": {"port": 3000},
+        },
+    }
+    res = mcp.handle_request(req)
+    assert not res.get("isError")
+    assert "https://ai-tunnel.trycloudflare.com" in res["result"]["content"][0]["text"]
+
+
+def test_mcp_unknown_method():
+    req = {"jsonrpc": "2.0", "id": 5, "method": "unsupported", "params": {}}
+    res = mcp.handle_request(req)
+    assert res["error"]["code"] == -32601
 
 
 def test_mcp_tool_call_status(tmp_path):
@@ -81,8 +135,3 @@ def test_mcp_tool_call_run(tmp_path):
     assert flag.exists()
     assert flag.read_text() == "mcp_ok"
 
-
-def test_mcp_unknown_method():
-    req = {"jsonrpc": "2.0", "id": 5, "method": "unsupported", "params": {}}
-    res = mcp.handle_request(req)
-    assert res["error"]["code"] == -32601

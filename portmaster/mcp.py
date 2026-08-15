@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import __version__, detect, docker, doctor, ports, registry, scripts
+from . import __version__, detect, docker, doctor, ports, registry, scripts, tunnel
 
 
 def handle_request(req: dict[str, Any]) -> dict[str, Any] | None:
@@ -67,6 +67,32 @@ def handle_request(req: dict[str, Any]) -> dict[str, Any] | None:
                                     "description": "Lista de puertos a inspeccionar",
                                 }
                             },
+                        },
+                    },
+                    {
+                        "name": "portmaster_free_port",
+                        "description": "Cierra el proceso que ocupa un puerto específico.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "port": {"type": "integer", "description": "Número de puerto a liberar"}
+                            },
+                            "required": ["port"],
+                        },
+                    },
+                    {
+                        "name": "portmaster_share",
+                        "description": "Inicia un túnel público seguro hacia un puerto local.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "port": {"type": "integer", "description": "Número de puerto a compartir"},
+                                "provider": {
+                                    "type": "string",
+                                    "description": "Proveedor opcional: cloudflared, ngrok, lt, tailscale",
+                                },
+                            },
+                            "required": ["port"],
                         },
                     },
                     {
@@ -176,6 +202,20 @@ def _execute_tool(name: str, args: dict[str, Any]) -> str:
             for s in statuses
         ]
         return json.dumps(data, indent=2)
+
+    if name == "portmaster_free_port":
+        port = int(args["port"])
+        status = ports.scan(port)
+        if status.free:
+            return f"El puerto {port} ya esta libre."
+        killed = ports.kill(port)
+        return f"Proceso en puerto {port} (pid {status.pid}) {'liberado' if killed else 'fallo al liberar'}."
+
+    if name == "portmaster_share":
+        port = int(args["port"])
+        provider = args.get("provider")
+        tun = tunnel.start_tunnel(port, provider=provider)
+        return f"Tunel activo via {tun.provider}: {tun.url}"
 
     if name == "portmaster_run":
         script_name = args["script"]

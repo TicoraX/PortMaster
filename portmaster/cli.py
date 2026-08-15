@@ -792,8 +792,26 @@ def clean_cmd(
 
 
 @app.command("mcp")
-def mcp_cmd() -> None:
+def mcp_cmd(
+    show_config: bool = typer.Option(
+        False,
+        "--config",
+        "-c",
+        help="Muestra el bloque de configuracion JSON para Claude Desktop, Cursor o Antigravity.",
+    ),
+) -> None:
     """Inicia el servidor Model Context Protocol (MCP) sobre stdio para agentes de IA."""
+    if show_config:
+        cfg = {
+            "mcpServers": {
+                "portmaster": {
+                    "command": "portmaster",
+                    "args": ["mcp"],
+                }
+            }
+        }
+        console.print(json.dumps(cfg, indent=2))
+        return
     mcp.serve_stdio()
 
 
