@@ -35,6 +35,12 @@ profiles:
   backend: [db, api]
   db-only: [db]
 
+scripts:
+  test: pytest tests/ -v
+  lint: ruff check .
+  check: [lint, test]           # pipeline secuencial de tareas
+  migrate: npm run db:migrate
+
 # Reglas:
 #
 # - Solo `command` es obligatorio.

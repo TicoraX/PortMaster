@@ -10,7 +10,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import __version__, config, detect, doctor, ports, registry, runner
+from . import __version__, config, detect, doctor, ports, registry, runner, scripts
 
 app = typer.Typer(
     help="Orquestador de entornos de desarrollo locales.",
@@ -641,6 +641,43 @@ def _root(
     ),
 ) -> None:
     pass
+
+
+@app.command(
+    "run",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def run_cmd(
+    ctx: typer.Context,
+    script: str = typer.Argument(None, help="Nombre del script a ejecutar"),
+) -> None:
+    """Ejecuta un script o pipeline de tareas definido en stack.yaml."""
+    try:
+        stack = detect.stack_for(Path.cwd())
+    except config.ConfigError as exc:
+        err.print(f"{exc}")
+        raise typer.Exit(1)
+
+    if not script:
+        if not stack.scripts:
+            console.print("[dim]No hay scripts declarados en stack.yaml.[/]")
+            raise typer.Exit(0)
+        table = Table(box=None, pad_edge=False)
+        table.add_column("SCRIPT", style="bold cyan")
+        table.add_column("COMANDOS")
+        for name, cmds in stack.scripts.items():
+            table.add_row(name, " && ".join(cmds))
+        console.print(table)
+        raise typer.Exit(0)
+
+    try:
+        code = scripts.run_script(stack, script, extra_args=ctx.args, console=console)
+    except config.ConfigError as exc:
+        err.print(f"{exc}")
+        raise typer.Exit(1)
+
+    if code != 0:
+        raise typer.Exit(code)
 
 
 @app.command("version")

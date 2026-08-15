@@ -73,3 +73,17 @@ Sirve cuando el stack ya está corriendo en otra terminal. Recorre los puertos
 en orden inverso al de arranque, porque lo que uno quiere mirar suele ser el
 frontend, y abre el primero que contesta. Una base de datos no contesta HTTP,
 así que nunca es el elegido.
+
+## Ejecutar scripts y pipelines de tareas
+
+```bash
+portmaster run              # lista las tareas declaradas en stack.yaml
+portmaster run test         # ejecuta una tarea específica
+portmaster run test -k foo  # pasa argumentos adicionales al comando
+portmaster run check        # ejecuta un pipeline secuencial de scripts
+```
+
+Permite definir scripts del proyecto en `stack.yaml` (ej. tests, linters, migraciones, seeders)
+y ejecutarlos con el contexto completo de variables de entorno inyectadas (`.env`, `env.global`, etc.).
+Si un paso del pipeline falla, la ejecución se detiene inmediatamente con el código de error correspondiente.
+

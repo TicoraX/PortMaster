@@ -36,6 +36,7 @@ Requiere Python 3.10 o superior. Funciona en Windows, macOS y Linux.
 | `portmaster add .` | Registra el proyecto para que aparezca en la interfaz |
 | `portmaster list` | Lista los proyectos registrados (alias: `ls`) |
 | `portmaster remove .` | Des-registra un proyecto (alias: `rm`) |
+| `portmaster run [tarea]` | Ejecuta scripts o pipelines de tareas del proyecto |
 | `portmaster version` | Versión instalada (también `--version`) |
 
 Cada uno con `--help`.

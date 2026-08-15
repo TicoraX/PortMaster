@@ -10,7 +10,7 @@ proyecto.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -48,6 +48,7 @@ class Stack:
     path: Path
     services: dict[str, Service]
     profiles: dict[str, tuple[str, ...]]
+    scripts: dict[str, tuple[str, ...]] = field(default_factory=dict)
     detected: bool = False
     # Que arranca sin pedir perfil. None significa "todo", que es lo que un
     # stack.yaml siempre quiso decir. Existe por los `profiles:` de compose, que
@@ -134,6 +135,7 @@ def load(path: Path | None = None) -> Stack:
                 raise ConfigError(f"'{service.name}.needs' apunta a '{dep}', que no existe")
 
     profiles = _profiles(raw.get("profiles"), services)
+    scripts = _scripts(raw.get("scripts"))
 
     stack = Stack(
         name=str(raw.get("name") or root.name),
@@ -141,6 +143,7 @@ def load(path: Path | None = None) -> Stack:
         path=path,
         services=services,
         profiles=profiles,
+        scripts=scripts,
         default=_default(raw.get("default"), services),
     )
     stack.resolve()  # falla al cargar si hay ciclos, no en tiempo de arranque
@@ -346,4 +349,28 @@ def parse_env_file(path: Path) -> dict[str, str]:
                 val = val.split(" #", 1)[0].rstrip()
         env[key] = val
     return env
+
+
+def _scripts(value: object) -> dict[str, tuple[str, ...]]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ConfigError("'scripts' debe ser un mapa de nombre a comando o lista de comandos")
+
+    scripts = {}
+    for name, cmd in value.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ConfigError("el nombre del script debe ser texto no vacio")
+        if isinstance(cmd, str):
+            if not cmd.strip():
+                raise ConfigError(f"scripts.{name} no puede estar vacio")
+            scripts[str(name)] = (cmd.strip(),)
+        elif isinstance(cmd, list):
+            if not cmd or not all(isinstance(c, str) and c.strip() for c in cmd):
+                raise ConfigError(f"scripts.{name} debe ser una lista de comandos de texto no vacios")
+            scripts[str(name)] = tuple(str(c).strip() for c in cmd)
+        else:
+            raise ConfigError(f"scripts.{name} debe ser un texto o lista de comandos")
+    return scripts
+
 

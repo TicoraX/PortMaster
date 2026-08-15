@@ -89,3 +89,18 @@ Hooks síncronos de ciclo de vida:
 *   `post_start`: Comando que se ejecuta una vez que el servicio confirma que está
     listo (`ready`). Si falla, se reporta el error y se detiene el stack.
 
+## scripts
+
+La sección `scripts` permite declarar tareas de desarrollo o pipelines secuenciales:
+
+```yaml
+scripts:
+  test: pytest tests/ -v
+  lint: ruff check .
+  check: [lint, test]           # ejecuta lint y luego test
+  migrate: alembic upgrade head
+```
+
+Se ejecutan con `portmaster run <nombre>` (ej. `portmaster run test`). Cada comando corre en la raíz del proyecto y recibe el contexto de variables de entorno inyectadas.
+
+

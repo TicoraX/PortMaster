@@ -535,3 +535,31 @@ def test_version_por_flag_y_por_subcomando():
         assert res.exit_code == 0, args
         # Rich pinta los numeros: sin sacar los codigos, el 1.0.0 llega partido.
         assert portmaster.__version__ in re.sub(r"\x1b\[[0-9;]*m", "", res.output), args
+
+
+def test_cli_run_listar_y_ejecutar(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    flag = tmp_path / "cli_flag.txt"
+    body = f"""
+    name: cli-run-test
+    services:
+      srv:
+        command: echo srv
+    scripts:
+      touch_flag: {sys.executable} -c "import pathlib; pathlib.Path(r'{flag}').write_text('flag_ok')"
+      test: pytest tests/
+    """
+    (tmp_path / "stack.yaml").write_text(textwrap.dedent(body), encoding="utf-8")
+
+    # Sin argumentos: lista los scripts
+    res_list = runner.invoke(cli.app, ["run"])
+    assert res_list.exit_code == 0
+    assert "touch_flag" in res_list.output
+    assert "test" in res_list.output
+
+    # Ejecutar script existente
+    res_run = runner.invoke(cli.app, ["run", "touch_flag"])
+    assert res_run.exit_code == 0
+    assert flag.exists()
+    assert flag.read_text() == "flag_ok"
+
