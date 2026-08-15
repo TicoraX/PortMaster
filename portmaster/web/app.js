@@ -240,6 +240,27 @@ function renderService(service, projectId) {
     link.title = `Abrir http://localhost:${service.port}`;
     link.textContent = "Abrir ↗";
     node.querySelector(".service__act").append(link);
+
+    const shareBtn = document.createElement("button");
+    shareBtn.type = "button";
+    shareBtn.className = "btn btn--quiet";
+    shareBtn.textContent = "Túnel";
+    shareBtn.title = "Compartir este puerto con un túnel público seguro";
+    shareBtn.addEventListener("click", () => {
+      act(shareBtn, async () => {
+        const res = await api(`/api/share?port=${service.port}`, { method: "POST" });
+        if (res.ok && res.url) {
+          flash(`Túnel activo: ${res.url} (copiado al portapapeles)`, "good");
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(res.url);
+          }
+          window.open(res.url, "_blank");
+        } else {
+          flash(res.detail || "Error al iniciar túnel", "bad");
+        }
+      });
+    });
+    node.querySelector(".service__act").append(shareBtn);
   }
 
   node.querySelector(".service__label").textContent = service.name;
