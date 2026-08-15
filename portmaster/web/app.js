@@ -250,10 +250,20 @@ function renderService(service, projectId) {
       act(shareBtn, async () => {
         const res = await api(`/api/share?port=${service.port}`, { method: "POST" });
         if (res.ok && res.url) {
-          flash(`Túnel activo: ${res.url} (copiado al portapapeles)`, "good");
+          // El aviso de "copiado" iba antes de copiar, y sin esperar: si el
+          // navegador negaba el permiso, decia que estaba en el portapapeles y
+          // no estaba. La URL va en el mensaje igual, que es lo unico que no
+          // puede fallar.
+          let copiado = false;
           if (navigator.clipboard) {
-            navigator.clipboard.writeText(res.url);
+            try {
+              await navigator.clipboard.writeText(res.url);
+              copiado = true;
+            } catch {
+              copiado = false;
+            }
           }
+          flash(`Túnel activo: ${res.url}${copiado ? " (copiado al portapapeles)" : ""}`, "good");
           window.open(res.url, "_blank");
         } else {
           flash(res.detail || "Error al iniciar túnel", "bad");

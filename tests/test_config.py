@@ -309,3 +309,15 @@ def test_includes_conflicto_nombre_servicio(tmp_path):
         config.load(main)
 
 
+
+
+def test_un_env_con_bytes_invalidos_no_tumba_el_arranque(tmp_path):
+    """UnicodeDecodeError no es un OSError, y solo se atrapaba OSError.
+
+    Un .env guardado en latin-1, que es lo que deja cualquier editor viejo en
+    Windows, hacia reventar el arranque entero del stack en vez de quedarse sin
+    esas variables.
+    """
+    archivo = tmp_path / ".env"
+    archivo.write_bytes(b"CLAVE=valor\nACENTO=caf\xe9\n")
+    assert config.parse_env_file(archivo) == {}

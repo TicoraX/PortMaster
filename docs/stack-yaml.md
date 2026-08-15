@@ -78,7 +78,12 @@ loguea y el apagado sigue con el resto.
 1. `os.environ` del sistema anfitrión.
 2. `~/.portmaster/env.global` (bóveda global de variables compartidas, si existe).
 3. Archivos listados en `env_file` (en orden de aparición).
-4. `env:` declarado explícitamente en el servicio (máxima prioridad).
+4. `env:` declarado explícitamente en el servicio.
+
+Con una excepción: después de aplicar todo lo anterior, `build_env` fija
+`PYTHONUNBUFFERED=1` y `FORCE_COLOR=1`. Para esas dos claves `env:` no gana,
+porque de ellas depende que los logs del servicio lleguen a la terminal y a
+la interfaz en vivo en lugar de quedarse en un buffer.
 
 ## pre_start y post_start
 

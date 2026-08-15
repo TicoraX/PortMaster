@@ -20,11 +20,17 @@ los hijos duplicaría todo.
 
 El backend sigue la misma regla, en `backend/`, `api/`, `server/` y los hijos de
 los mismos grupos. Reconoce Django (`manage.py`), FastAPI (`uvicorn` con un
-módulo ASGI, usando `uv run` si hay `uv.lock`), Go (`go.mod` con un paquete `main`),
+módulo ASGI), Go (`go.mod` con un paquete `main`),
 Rust (`Cargo.toml` con `src/main.rs`), Rails (`config/application.rb`), Laravel (`artisan`)
 y ASP.NET Core (un `.csproj` con `Sdk="Microsoft.NET.Sdk.Web"`).
 
 ## Por lenguaje
+
+En Python el comando lleva `uv run` adelante cuando el proyecto tiene `uv.lock`
+o una sección `[tool.uv]` en el `pyproject.toml`. Vale para los dos casos que se
+detectan, Django y ASGI, porque es el mismo prefijo: con `uv` el intérprete del
+proyecto vive en su entorno y un `python manage.py` a secas correría con el del
+sistema, que no tiene las dependencias.
 
 En Rust hace falta un framework declarado en el `Cargo.toml`: axum, actix-web,
 rocket y compañía. No hay servidor HTTP en la stdlib, así que sin uno el binario

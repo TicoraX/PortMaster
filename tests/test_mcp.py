@@ -110,7 +110,7 @@ def test_mcp_tool_call_share(monkeypatch):
         },
     }
     res = mcp.handle_request(req)
-    assert not res.get("isError")
+    assert res["result"].get("isError") is not True, res["result"]
     assert "https://ai-tunnel.trycloudflare.com" in res["result"]["content"][0]["text"]
 
 
@@ -143,7 +143,7 @@ def test_mcp_tool_call_status(tmp_path):
     }
     res = mcp.handle_request(req)
     assert res["id"] == 3
-    assert not res.get("isError")
+    assert res["result"].get("isError") is not True, res["result"]
     content = json.loads(res["result"]["content"][0]["text"])
     assert content["project_name"] == "mcp-test"
     assert content["services"][0]["name"] == "web"
@@ -173,7 +173,7 @@ def test_mcp_tool_call_run(tmp_path):
         },
     }
     res = mcp.handle_request(req)
-    assert not res.get("isError")
+    assert res["result"].get("isError") is not True, res["result"]
     assert "finalizado con código de salida 0" in res["result"]["content"][0]["text"]
     assert flag.exists()
     assert flag.read_text() == "mcp_ok"

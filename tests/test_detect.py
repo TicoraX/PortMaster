@@ -755,12 +755,18 @@ def test_python_django_con_uv_lock(tmp_path):
     assert stack.services["api"].command == "uv run python manage.py runserver"
 
 
-def test_node_framework_moderno_astro_hono(tmp_path):
+@pytest.mark.parametrize("framework", ["hono", "fastify", "express", "nitro", "astro"])
+def test_un_framework_moderno_declara_un_servidor(tmp_path, framework):
+    """Uno por dependencia y no uno solo con nombre de varios.
+
+    El test se llamaba `astro_hono` y solo declaraba `hono`: los otros tres que
+    se agregaron a DEV_SERVERS nunca se probaron.
+    """
     write(
         tmp_path,
         "package.json",
         json.dumps({
-            "dependencies": {"hono": "^4.0.0"},
+            "dependencies": {framework: "^4.0.0"},
             "scripts": {"dev": "tsx watch src/index.ts"},
         }),
     )

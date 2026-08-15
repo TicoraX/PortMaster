@@ -4,13 +4,16 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
-## [2.0.0] - 2026-08-15
+## [1.1.0] - 2026-08-15
 
 ### Agregado
 
 - **Runner de Tareas (`portmaster run`)**: Soporte para la sección `scripts:` en `stack.yaml` permitiendo ejecutar tareas individuales o pipelines secuenciales con inyección completa de variables de entorno.
 - **Túneles Seguros (`portmaster share`)**: Integración sin configuración adicional con `cloudflared`, `ngrok`, `lt` y `tailscale` para exponer puertos locales a URLs públicas HTTPS efímeras.
-- **Higiene del Host (`portmaster clean`)**: Limpieza asistida y segura de contenedores parados, redes y volúmenes huérfanos de Docker.
+- **Higiene del Host (`portmaster clean`)**: `docker system prune -f` sobre
+  contenedores parados, redes sin usar, imágenes sin tag y el caché de build.
+  No pide confirmación. Con `--volumes` se lleva además los volúmenes
+  anónimos huérfanos, que sin esa opción no toca.
 - **Servidor MCP para Agentes de IA (`portmaster mcp`)**: Servidor Model Context Protocol nativo sobre `stdio` para introspección y control en tiempo real desde Claude Desktop, Cursor, Gemini y Antigravity.
 - **Proyectos Compuestos (`includes:`)**: Composición modular de stacks importando servicios de otros repositorios o subdirectorios con aislamiento de `cwd` y prevención de ciclos.
 - **Matriz de Colisión de Puertos**: Detección anticipada y alerta visual en `portmaster list` sobre puertos en disputa entre proyectos registrados.
@@ -121,6 +124,7 @@ Primera versión publicada. Lo que sigue es el alcance completo, no un diff.
   la tarjeta, y no lo impide: `docker compose up -d` sobre un contenedor que ya
   está arriba es el mismo caso y ahí es correcto. Ver `docs/pendientes.md`.
 
+[1.1.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.1.0
 [1.0.2]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.2
 [1.0.1]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.1
 [1.0.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.0

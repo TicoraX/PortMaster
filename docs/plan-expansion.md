@@ -30,7 +30,7 @@ Este documento define la evolución de PortMaster desde un orquestador de *stack
 ## 2. Especificación de Fases y Módulos
 
 ### Fase 1: Variables de Entorno y Hooks del Stack
-*   **Módulo**: [`portmaster/config.py`](file:///a:/Proyectos/PortMaster/portmaster/config.py), [`portmaster/runner.py`](file:///a:/Proyectos/PortMaster/portmaster/runner.py)
+*   **Módulo**: [`portmaster/config.py`](../portmaster/config.py), [`portmaster/runner.py`](../portmaster/runner.py)
 *   **`env_file`**: Carga de `.env`, `.env.local` o lista ordenada sin dependencias externas.
 *   **Hooks de Ciclo de Vida**:
     *   `pre_start`: Ejecución síncrona preparatoria (ej. migraciones, build).
@@ -38,24 +38,24 @@ Este documento define la evolución de PortMaster desde un orquestador de *stack
 *   **Bóveda Global (`~/.portmaster/env.global`)**: Herencia automática de variables comunes entre proyectos.
 
 ### Fase 2: Runner de Tareas y Scripts de Proyecto (`portmaster run`)
-*   **Módulo**: [`portmaster/scripts.py`](file:///a:/Proyectos/PortMaster/portmaster/scripts.py), [`portmaster/cli.py`](file:///a:/Proyectos/PortMaster/portmaster/cli.py)
+*   **Módulo**: [`portmaster/scripts.py`](../portmaster/scripts.py), [`portmaster/cli.py`](../portmaster/cli.py)
 *   **Declaración en `stack.yaml`**:
     ```yaml
     scripts:
       test: pytest tests/ -v
       lint: ruff check .
       migrate: alembic upgrade head
-      check: [lint, test]  # Pipeline secuencial o paralelo
+      check: [lint, test]  # Pipeline secuencial
     ```
-*   **Comando CLI**: `portmaster run <script>` ejecuta en el `cwd` y contexto de variables del proyecto.
+*   **Comando CLI**: `portmaster run <script>` ejecuta en la raíz del proyecto, con el contexto de variables del stack.
 
 ### Fase 3: Exposición Segura y Compartir (`portmaster share`)
-*   **Módulo**: [`portmaster/tunnel.py`](file:///a:/Proyectos/PortMaster/portmaster/tunnel.py), [`portmaster/cli.py`](file:///a:/Proyectos/PortMaster/portmaster/cli.py)
+*   **Módulo**: [`portmaster/tunnel.py`](../portmaster/tunnel.py), [`portmaster/cli.py`](../portmaster/cli.py)
 *   **Integración de Túneles**: Detección y manejo de binarios locales (`cloudflared`, `ngrok`, `tailscale`).
 *   **Comando CLI & Web**: `portmaster share web` genera URL pública temporal, QR en consola y botón directo en la UI web.
 
 ### Fase 4: Orquestación Multi-Proyecto y Dependencias Inter-Repositorios
-*   **Módulo**: [`portmaster/registry.py`](file:///a:/Proyectos/PortMaster/portmaster/registry.py), [`portmaster/runner.py`](file:///a:/Proyectos/PortMaster/portmaster/runner.py)
+*   **Módulo**: [`portmaster/registry.py`](../portmaster/registry.py), [`portmaster/runner.py`](../portmaster/runner.py)
 *   **Proyectos Compuestos (`includes`)**:
     ```yaml
     # frontend/stack.yaml
@@ -66,13 +66,13 @@ Este documento define la evolución de PortMaster desde un orquestador de *stack
 *   **Grupos de Proyectos**: `portmaster group up <nombre_grupo>` y matriz preventiva de colisión de puertos.
 
 ### Fase 5: Higiene del Sistema y Docker (`portmaster clean / prune`)
-*   **Módulo**: [`portmaster/doctor.py`](file:///a:/Proyectos/PortMaster/portmaster/doctor.py), [`portmaster/docker.py`](file:///a:/Proyectos/PortMaster/portmaster/docker.py)
+*   **Módulo**: [`portmaster/doctor.py`](../portmaster/doctor.py), [`portmaster/docker.py`](../portmaster/docker.py)
 *   **Limpieza Asistida**:
     *   `portmaster docker prune`: Remueve contenedores parados, redes no usadas y volúmenes huérfanos.
     *   `portmaster doctor --fix`: Auto-reparación (iniciar Docker Desktop, purgar procesos zombies huérfanos).
 
 ### Fase 6: Servidor MCP e Integración con Agentes de IA
-*   **Módulo**: [`portmaster/mcp.py`](file:///a:/Proyectos/PortMaster/portmaster/mcp.py)
+*   **Módulo**: [`portmaster/mcp.py`](../portmaster/mcp.py)
 *   **Herramientas MCP Expuestas**:
     *   `list_services`: Estado de salud, puertos y procesos.
     *   `restart_service`: Reinicio atómico de un servicio específico.
@@ -80,7 +80,7 @@ Este documento define la evolución de PortMaster desde un orquestador de *stack
     *   `free_port`: Liberación de puertos conflictivos.
 
 ### Fase 7: Detección Avanzada (Monorrepos, `uv`, Frameworks) y UI Web Polish
-*   **Módulo**: [`portmaster/detect.py`](file:///a:/Proyectos/PortMaster/portmaster/detect.py), [`portmaster/web/`](file:///a:/Proyectos/PortMaster/portmaster/web)
+*   **Módulo**: [`portmaster/detect.py`](../portmaster/detect.py), [`portmaster/web/`](../portmaster/web)
 *   Detección de `pnpm-workspace.yaml`, `turbo.json`, `uv.lock`, Astro (`4321`), Vite (`5173`).
 *   UI Web: Pausa y búsqueda en streaming de logs, editor de `stack.yaml` y disparador de tareas `run`.
 

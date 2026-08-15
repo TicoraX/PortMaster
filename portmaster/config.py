@@ -364,7 +364,10 @@ def parse_env_file(path: Path) -> dict[str, str]:
     env: dict[str, str] = {}
     try:
         content = path.read_text(encoding="utf-8-sig")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # UnicodeDecodeError no es un OSError: un .env guardado en latin-1, que
+        # es lo que deja cualquier editor viejo en Windows, tumbaba el arranque
+        # entero del stack en vez de quedarse sin esas variables.
         return {}
 
     for raw_line in content.splitlines():
