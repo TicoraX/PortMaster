@@ -100,4 +100,15 @@ Genera un túnel HTTPS seguro y efímero hacia el puerto local, ideal para proba
 compartir vistas previas con clientes o probar en dispositivos móviles. Presioná `Ctrl-C` para
 cerrar el túnel de inmediato.
 
+## Limpieza de recursos Docker (Higiene)
+
+```bash
+portmaster clean             # limpia contenedores parados, redes e imagenes sin tag
+portmaster clean --volumes   # limpia tambien volumenes anonimos/huerfanos
+```
+
+Ejecuta `docker system prune` de manera asistida y segura para liberar espacio en disco
+y eliminar recursos huérfanos dejados por stacks anteriores.
+
+
 

@@ -78,3 +78,30 @@ def _motivo(done: subprocess.CompletedProcess, action: str) -> str:
         if primera:
             return primera[:200]
     return f"docker desktop {action} fallo con codigo {done.returncode}"
+
+
+def prune(volumes: bool = False) -> tuple[bool, str]:
+    """Ejecuta docker system prune para limpiar recursos huerfanos."""
+    cmd = ["docker", "system", "prune", "-f"]
+    if volumes:
+        cmd.append("--volumes")
+    try:
+        done = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=60.0,
+        )
+    except FileNotFoundError:
+        return False, "docker no esta en el PATH"
+    except subprocess.TimeoutExpired:
+        return False, "docker system prune excedio el tiempo limite"
+    except OSError as exc:
+        return False, f"error al ejecutar docker: {exc}"
+
+    if done.returncode != 0:
+        return False, _motivo(done, "prune")
+    output = (done.stdout or "").strip()
+    return True, output or "Recursos de Docker limpiados exitosamente."
+

@@ -581,3 +581,11 @@ def test_cli_share_sin_proveedores(tmp_path, monkeypatch):
     assert "no se encontro ningun cliente de tuneles" in res.output
 
 
+def test_cli_clean_docker(monkeypatch):
+    monkeypatch.setattr(cli.docker, "prune", lambda volumes=False: (True, "Total reclaimed space: 0B"))
+    res = runner.invoke(cli.app, ["clean"])
+    assert res.exit_code == 0
+    assert "Total reclaimed space: 0B" in res.output
+
+
+

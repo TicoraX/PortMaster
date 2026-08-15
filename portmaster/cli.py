@@ -14,6 +14,7 @@ from . import (
     __version__,
     config,
     detect,
+    docker,
     doctor,
     ports,
     registry,
@@ -753,6 +754,25 @@ def share_cmd(
     finally:
         tun.stop()
         console.print("\n[dim]Tunel cerrado.[/]")
+
+
+@app.command("clean")
+def clean_cmd(
+    volumes: bool = typer.Option(
+        False,
+        "--volumes",
+        "-v",
+        help="Elimina tambien volumenes anonimos/huerfanos de Docker.",
+    ),
+) -> None:
+    """Limpia contenedores parados, imagenes sin tag y recursos huerfanos de Docker."""
+    console.print("[bold cyan]Ejecutando limpieza de recursos Docker...[/]")
+    ok, msg = docker.prune(volumes=volumes)
+    if ok:
+        console.print(f"[bold green]Listo:[/] {msg}")
+    else:
+        err.print(f"[bold red]Error al limpiar Docker:[/] {msg}")
+        raise typer.Exit(1)
 
 
 @app.command("version")
