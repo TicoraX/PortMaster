@@ -115,16 +115,15 @@ def handle_request(req: dict[str, Any]) -> dict[str, Any] | None:
                     },
                     {
                         "name": "portmaster_clean",
-                        "description": "Limpia recursos huérfanos de Docker (contenedores parados, redes, imágenes sin tag).",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "volumes": {
-                                    "type": "boolean",
-                                    "description": "Si true, limpia también volúmenes anónimos huérfanos",
-                                }
-                            },
-                        },
+                        "description": (
+                            "Limpia recursos huérfanos de Docker: contenedores parados, redes, "
+                            "imágenes sin tag y caché de build. No borra volúmenes: eso tiene "
+                            "datos adentro y lo hace el usuario con `portmaster clean --volumes`."
+                        ),
+                        # Sin `volumes`: lo que no se puede deshacer no se le ofrece a un
+                        # agente. El chequeo de verdad esta en _execute_tool, porque el
+                        # esquema es una sugerencia y el campo puede llegar igual.
+                        "inputSchema": {"type": "object", "properties": {}},
                     },
                 ]
             },
@@ -237,8 +236,18 @@ def _execute_tool(name: str, args: dict[str, Any]) -> str:
         return f"Script '{script_name}' finalizado con código de salida {code}."
 
     if name == "portmaster_clean":
-        volumes = bool(args.get("volumes", False))
-        ok, msg = docker.prune(volumes=volumes)
+        # Los volumenes no, y no por el esquema sino aca: un agente puede mandar
+        # el campo igual. El resto del prune (cache y capas sin tag) se regenera
+        # solo; un volumen tiene la base de datos del proyecto adentro y no
+        # vuelve. El CLI y la interfaz preguntan antes; el MCP no tiene donde
+        # preguntar, asi que lo que no se puede deshacer no se ofrece.
+        if bool(args.get("volumes", False)):
+            raise ValueError(
+                "borrar volumenes de Docker no se hace desde un agente: tienen datos "
+                "adentro y no se puede deshacer. Corre `portmaster clean --volumes` "
+                "vos mismo, que pregunta antes."
+            )
+        ok, msg = docker.prune(volumes=False)
         return f"Docker prune: {'éxito' if ok else 'fallo'} - {msg}"
 
     raise ValueError(f"Herramienta desconocida: {name}")

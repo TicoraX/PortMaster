@@ -227,3 +227,50 @@ def test_un_script_ruidoso_no_ensucia_el_protocolo(tmp_path):
     assert [json.loads(line)["id"] for line in lineas] == [1, 2]
     assert "RUIDO-EN-STDOUT" not in done.stdout, "la salida del script llego al protocolo"
     assert "RUIDO-EN-STDOUT" in done.stderr, "la salida del script tiene que ir a stderr"
+
+
+def _pedir_clean(argumentos):
+    return mcp.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 20,
+            "method": "tools/call",
+            "params": {"name": "portmaster_clean", "arguments": argumentos},
+        }
+    )
+
+
+def test_mcp_clean_se_niega_a_borrar_volumenes(monkeypatch):
+    """El CLI y la interfaz preguntan antes; el MCP no tiene donde preguntar.
+
+    El resto del prune se regenera solo. Un volumen tiene la base de datos del
+    proyecto adentro y no vuelve, asi que un agente no lo borra: lo hace el
+    usuario, con el comando que pregunta.
+    """
+    llamadas = []
+    monkeypatch.setattr(mcp.docker, "prune", lambda volumes=False: llamadas.append(volumes) or (True, "ok"))
+
+    res = _pedir_clean({"volumes": True})
+
+    assert res["result"]["isError"] is True
+    assert "no se hace desde un agente" in res["result"]["content"][0]["text"]
+    assert llamadas == [], "llego a llamar al prune con volumes"
+
+
+def test_mcp_clean_sin_volumenes_limpia(monkeypatch):
+    llamadas = []
+    monkeypatch.setattr(mcp.docker, "prune", lambda volumes=False: llamadas.append(volumes) or (True, "ok"))
+
+    res = _pedir_clean({})
+
+    assert res["result"].get("isError") is not True
+    assert llamadas == [False]
+
+
+def test_mcp_clean_no_le_ofrece_volumes_al_agente():
+    """El esquema es lo que el agente lee para decidir que puede pedir."""
+    tools = mcp.handle_request(
+        {"jsonrpc": "2.0", "id": 21, "method": "tools/list", "params": {}}
+    )["result"]["tools"]
+    clean = next(t for t in tools if t["name"] == "portmaster_clean")
+    assert "volumes" not in clean["inputSchema"].get("properties", {})
