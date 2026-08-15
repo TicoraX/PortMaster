@@ -1,3 +1,4 @@
+import os
 import sys
 import textwrap
 
@@ -159,3 +160,28 @@ def test_un_ciclo_entre_scripts_se_detecta(tmp_path):
     stack = _stack_con_scripts(tmp_path, "  a: [b]\n  b: [a]")
     with pytest.raises(config.ConfigError, match="ciclo entre scripts"):
         scripts.resolve(stack, "a")
+
+
+def test_un_argumento_extra_no_ejecuta_un_segundo_comando(tmp_path):
+    """Los extra_args iban con un `" ".join` y esto corre con `shell=True`.
+
+    Desde el CLI el argumento lo escribe el usuario, pero `portmaster_run` los
+    recibe de un agente de IA: un separador adentro de un argumento ejecutaba lo
+    que viniera despues.
+
+    El separador es el de cada shell. `cmd.exe` no parte con `;` sino con `&`, y
+    tampoco respeta comillas simples, que es por lo que `shlex.join` a secas no
+    alcanzaba en Windows.
+    """
+    stack = _stack_con_scripts(tmp_path, "  saluda: echo")
+    separador = "&" if os.name == "nt" else ";"
+    argumento = f"hola {separador} echo x > {tmp_path / 'inyectado.txt'}"
+
+    # Por el directorio y no por un nombre puntual: con un entrecomillado a
+    # medias la redireccion igual corre y crea el archivo con la comilla pegada
+    # al nombre. Preguntar por `inyectado.txt` daba verde con la inyeccion hecha.
+    antes = set(tmp_path.iterdir())
+    assert scripts.run_script(stack, "saluda", extra_args=[argumento]) == 0
+    nuevos = set(tmp_path.iterdir()) - antes
+
+    assert not nuevos, f"el shell ejecuto lo que venia despues de '{separador}': {nuevos}"

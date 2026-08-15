@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Sequence
@@ -25,6 +26,23 @@ def build_script_env(stack: Stack) -> dict[str, str]:
     env["PYTHONUNBUFFERED"] = "1"
     env["FORCE_COLOR"] = "1"
     return env
+
+
+def _entrecomillar(args: Sequence[str]) -> str:
+    """Une los argumentos extra respetando sus limites, para una linea de shell.
+
+    Iban con un `" ".join`, y estos comandos corren con `shell=True`: un
+    argumento con un separador ejecutaba lo que viniera despues. Desde el CLI lo
+    escribe el usuario, pero `portmaster_run` los recibe de un agente de IA.
+
+    Por plataforma, porque el shell no es el mismo. `shlex.join` entrecomilla al
+    estilo POSIX y `cmd.exe` no entiende las comillas simples: un `&` adentro le
+    seguiria partiendo el comando. `list2cmdline` usa comillas dobles, que cmd si
+    respeta.
+    """
+    if os.name == "nt":
+        return subprocess.list2cmdline(list(args))
+    return shlex.join(args)
 
 
 def resolve(stack: Stack, name: str, _visto: tuple[str, ...] = ()) -> list[str]:
@@ -68,7 +86,7 @@ def run_script(
 
     commands = resolve(stack, name)
     env = build_script_env(stack)
-    extra_str = (" " + " ".join(extra_args)) if extra_args else ""
+    extra_str = (" " + _entrecomillar(extra_args)) if extra_args else ""
 
     for idx, cmd in enumerate(commands):
         # Si es el ultimo comando del pipeline, le pasamos los extra_args
