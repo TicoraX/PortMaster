@@ -37,6 +37,7 @@ Requiere Python 3.10 o superior. Funciona en Windows, macOS y Linux.
 | `portmaster list` | Lista los proyectos registrados (alias: `ls`) |
 | `portmaster remove .` | Des-registra un proyecto (alias: `rm`) |
 | `portmaster run [tarea]` | Ejecuta scripts o pipelines de tareas del proyecto |
+| `portmaster share [target]` | Expone un servicio local a internet mediante un túnel seguro |
 | `portmaster version` | Versión instalada (también `--version`) |
 
 Cada uno con `--help`.

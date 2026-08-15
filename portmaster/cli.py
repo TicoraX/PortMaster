@@ -10,7 +10,17 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import __version__, config, detect, doctor, ports, registry, runner, scripts
+from . import (
+    __version__,
+    config,
+    detect,
+    doctor,
+    ports,
+    registry,
+    runner,
+    scripts,
+    tunnel,
+)
 
 app = typer.Typer(
     help="Orquestador de entornos de desarrollo locales.",
@@ -678,6 +688,71 @@ def run_cmd(
 
     if code != 0:
         raise typer.Exit(code)
+
+
+@app.command("share")
+def share_cmd(
+    target: str = typer.Argument(
+        None,
+        help="Servicio o puerto a compartir (ej. 3000, web). Sin argumentos, usa el puerto principal.",
+    ),
+    provider: str = typer.Option(
+        None,
+        "--provider",
+        "-p",
+        help="Proveedor de tuneles: cloudflared, ngrok, lt, tailscale.",
+    ),
+) -> None:
+    """Expone un servicio local a internet mediante un tunel seguro."""
+    import time
+
+    port: int | None = None
+    if target and target.isdigit():
+        port = int(target)
+    else:
+        try:
+            stack = detect.stack_for(Path.cwd())
+        except config.ConfigError as exc:
+            err.print(f"{exc}\nEspecifica el puerto a compartir: portmaster share 3000")
+            raise typer.Exit(1)
+
+        if target and target in stack.services:
+            svc = stack.services[target]
+            if svc.port:
+                port = svc.port
+            else:
+                err.print(f"El servicio '{target}' no tiene un puerto fijo declarado.")
+                raise typer.Exit(1)
+        elif target:
+            err.print(f"Servicio o puerto '{target}' no encontrado en el stack.")
+            raise typer.Exit(1)
+        else:
+            ports_list = stack.ports()
+            if not ports_list:
+                err.print(f"{stack.path} no declara ningun puerto.")
+                raise typer.Exit(1)
+            port = ports_list[-1]
+
+    console.print(f"[bold cyan]Iniciando tunel hacia 127.0.0.1:{port}...[/]")
+    try:
+        tun = tunnel.start_tunnel(port, provider=provider)
+    except tunnel.TunnelError as exc:
+        err.print(f"[bold red]Error:[/] {exc}")
+        raise typer.Exit(1)
+
+    console.print(f"[bold green]Tunel activo![/] Proveedor: [bold]{tun.provider}[/]")
+    console.print(f"Local:   [cyan]http://127.0.0.1:{port}[/]")
+    console.print(f"Publico: [bold underline green]{tun.url}[/]")
+    console.print("[dim]Presiona Ctrl-C para cerrar el tunel.[/]")
+
+    try:
+        while tun.proc.poll() is None:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        tun.stop()
+        console.print("\n[dim]Tunel cerrado.[/]")
 
 
 @app.command("version")

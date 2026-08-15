@@ -87,3 +87,17 @@ Permite definir scripts del proyecto en `stack.yaml` (ej. tests, linters, migrac
 y ejecutarlos con el contexto completo de variables de entorno inyectadas (`.env`, `env.global`, etc.).
 Si un paso del pipeline falla, la ejecución se detiene inmediatamente con el código de error correspondiente.
 
+## Compartir servicios vía túneles públicos
+
+```bash
+portmaster share               # expone el servicio web principal
+portmaster share 3000          # expone un puerto específico
+portmaster share api           # expone el servicio por nombre
+portmaster share --provider ngrok  # fuerza el proveedor (cloudflared, ngrok, lt, tailscale)
+```
+
+Genera un túnel HTTPS seguro y efímero hacia el puerto local, ideal para probar webhooks,
+compartir vistas previas con clientes o probar en dispositivos móviles. Presioná `Ctrl-C` para
+cerrar el túnel de inmediato.
+
+

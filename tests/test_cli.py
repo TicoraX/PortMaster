@@ -563,3 +563,21 @@ def test_cli_run_listar_y_ejecutar(tmp_path, monkeypatch):
     assert flag.exists()
     assert flag.read_text() == "flag_ok"
 
+
+def test_cli_share_sin_proveedores(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    body = """
+    name: share-test
+    services:
+      web:
+        command: echo web
+        port: 3000
+    """
+    (tmp_path / "stack.yaml").write_text(textwrap.dedent(body), encoding="utf-8")
+    monkeypatch.setattr(cli.tunnel.shutil, "which", lambda x: None)
+
+    res = runner.invoke(cli.app, ["share", "web"])
+    assert res.exit_code == 1
+    assert "no se encontro ningun cliente de tuneles" in res.output
+
+
