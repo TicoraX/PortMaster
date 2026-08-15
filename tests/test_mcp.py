@@ -178,3 +178,52 @@ def test_mcp_tool_call_run(tmp_path):
     assert flag.exists()
     assert flag.read_text() == "mcp_ok"
 
+
+
+def test_un_script_ruidoso_no_ensucia_el_protocolo(tmp_path):
+    """Un `echo` adentro de un script se colaba entre dos respuestas JSON-RPC.
+
+    Proceso real y no una llamada a `handle_request`: el problema vive en el
+    descriptor 1, que el subproceso del script hereda, y eso no se ve desde el
+    proceso del test.
+    """
+    (tmp_path / "stack.yaml").write_text(
+        "services:\n  web:\n    command: echo web\n"
+        "scripts:\n  ruidoso: echo RUIDO-EN-STDOUT\n",
+        encoding="utf-8",
+    )
+    peticiones = (
+        "\n".join(
+            json.dumps(r)
+            for r in (
+                {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "portmaster_run",
+                        "arguments": {"script": "ruidoso", "path": str(tmp_path)},
+                    },
+                },
+            )
+        )
+        + "\n"
+    )
+
+    done = subprocess.run(
+        [sys.executable, "-m", "portmaster.cli", "mcp"],
+        input=peticiones,
+        capture_output=True,
+        text=True,
+        errors="replace",
+        timeout=60,
+        cwd=tmp_path,
+    )
+
+    lineas = [line for line in done.stdout.splitlines() if line.strip()]
+    for linea in lineas:
+        json.loads(linea)  # cada linea de stdout tiene que ser una respuesta valida
+    assert [json.loads(line)["id"] for line in lineas] == [1, 2]
+    assert "RUIDO-EN-STDOUT" not in done.stdout, "la salida del script llego al protocolo"
+    assert "RUIDO-EN-STDOUT" in done.stderr, "la salida del script tiene que ir a stderr"

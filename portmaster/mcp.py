@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -242,8 +244,32 @@ def _execute_tool(name: str, args: dict[str, Any]) -> str:
     raise ValueError(f"Herramienta desconocida: {name}")
 
 
+def _reservar_stdout():
+    """Deja el descriptor 1 solo para el protocolo y manda lo demas a stderr.
+
+    Sobre stdio el JSON-RPC comparte el descriptor 1 con todo lo que imprima el
+    proceso. `portmaster_run` lanza los comandos del usuario heredando ese
+    descriptor, asi que un `echo` adentro de un script se metia entre dos
+    respuestas y el cliente perdia la sesion.
+
+    Se duplica el descriptor antes de reapuntarlo: el protocolo escribe por la
+    copia, y lo que siga escribiendo en 1 termina en stderr, que los clientes MCP
+    leen como log. Tiene que ser a nivel de descriptor y no cambiando
+    `sys.stdout`: un subproceso hereda el descriptor y no el objeto de Python.
+    """
+    try:
+        copia = os.dup(sys.stdout.fileno())
+        os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+    except (OSError, ValueError, io.UnsupportedOperation):
+        # Sin descriptores de verdad (un arnes que captura la salida): queda el
+        # stdout de Python, que al menos ordena lo que imprima este proceso.
+        return sys.stdout
+    return os.fdopen(copia, "w", encoding="utf-8", buffering=1)
+
+
 def serve_stdio() -> None:
     """Bucle principal de servidor MCP sobre stdio."""
+    protocolo = _reservar_stdout()
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -255,5 +281,5 @@ def serve_stdio() -> None:
 
         resp = handle_request(req)
         if resp is not None:
-            sys.stdout.write(json.dumps(resp) + "\n")
-            sys.stdout.flush()
+            protocolo.write(json.dumps(resp) + "\n")
+            protocolo.flush()
