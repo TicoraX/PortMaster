@@ -1237,3 +1237,58 @@ def test_un_segundo_tunel_para_el_mismo_puerto_se_rechaza(monkeypatch, free_port
         if proc.poll() is None:
             proc.kill()
             proc.wait()
+
+
+def test_el_estado_lista_los_tuneles_abiertos(monkeypatch, free_ports):
+    """Fuera del paginado: un puerto expuesto a internet no puede quedar en la
+    pagina 2, que es donde lo dejaria colgarlo de un proyecto."""
+    (port,) = free_ports(1)
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    _tunel_falso(monkeypatch, proc)
+    try:
+        app = server.create_app(TOKEN)
+        with TestClient(app, base_url="http://127.0.0.1") as cliente:
+            cliente.headers.update({"Authorization": f"Bearer {TOKEN}"})
+            assert cliente.get("/api/state").json()["tunnels"] == []
+
+            cliente.post(f"/api/share?port={port}")
+            (activo,) = cliente.get("/api/state").json()["tunnels"]
+            assert activo["port"] == port
+            assert activo["provider"] == "cloudflared"
+            assert activo["url"].startswith("https://")
+
+            cliente.delete(f"/api/share/{port}")
+            assert cliente.get("/api/state").json()["tunnels"] == []
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
+def test_un_tunel_que_se_murio_solo_deja_de_figurar(monkeypatch, free_ports):
+    """El cliente de tuneles se puede caer por su cuenta.
+
+    Un puerto que figura expuesto sin estarlo es una mentira justo en el panel
+    que existe para no mentir sobre eso.
+    """
+    (port,) = free_ports(1)
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    _tunel_falso(monkeypatch, proc)
+    try:
+        app = server.create_app(TOKEN)
+        with TestClient(app, base_url="http://127.0.0.1") as cliente:
+            cliente.headers.update({"Authorization": f"Bearer {TOKEN}"})
+            cliente.post(f"/api/share?port={port}")
+            assert len(cliente.get("/api/state").json()["tunnels"]) == 1
+
+            # El cloudflared se cae solo, sin que nadie apriete Cerrar.
+            proc.kill()
+            proc.wait()
+
+            assert cliente.get("/api/state").json()["tunnels"] == []
+            # Y el puerto queda libre para volver a compartirse.
+            assert cliente.post(f"/api/share?port={port}").json()["ok"] is True
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()

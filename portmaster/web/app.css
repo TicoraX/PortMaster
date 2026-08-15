@@ -1121,3 +1121,19 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Tuneles abiertos. Hereda la caja de `.orphans` y solo cambia el acento: un
+ * intruso es un estorbo local, un tunel es un puerto tuyo abierto a internet.
+ * El ambar lo separa del rojo de intrusos sin gritar como un error, porque
+ * abrirlo fue una decision deliberada y no una falla. */
+.tunnels {
+  border-color: oklch(70% 0.15 75 / 0.55);
+}
+
+.tunnels .orphan__port {
+  color: oklch(52% 0.13 75);
+}
+
+.tunnels .orphan__name {
+  word-break: break-all;
+}

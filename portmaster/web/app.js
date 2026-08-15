@@ -23,6 +23,9 @@ const ui = {
   pickerNote: document.getElementById("picker-note"),
   tplProject: document.getElementById("tpl-project"),
   tplService: document.getElementById("tpl-service"),
+  tunnels: document.getElementById("tunnels"),
+  tunnelsList: document.getElementById("tunnels-list"),
+  tunnelsHeading: document.getElementById("tunnels-heading"),
   orphans: document.getElementById("orphans"),
   orphansList: document.getElementById("orphans-list"),
   orphansHeading: document.getElementById("orphans-heading"),
@@ -241,13 +244,23 @@ function renderService(service, projectId) {
     link.textContent = "Abrir ↗";
     node.querySelector(".service__act").append(link);
 
+    // Abierto o cerrado, el mismo boton: dos controles para un estado que solo
+    // puede estar de una de las dos formas se pisan y confunden.
+    const abierto = tunnelPorts.has(service.port);
     const shareBtn = document.createElement("button");
     shareBtn.type = "button";
     shareBtn.className = "btn btn--quiet";
-    shareBtn.textContent = "Túnel";
-    shareBtn.title = "Compartir este puerto con un túnel público seguro";
+    shareBtn.textContent = abierto ? "Cerrar túnel" : "Túnel";
+    shareBtn.title = abierto
+      ? `El puerto ${service.port} está expuesto a internet. Cerrar el túnel.`
+      : "Compartir este puerto con un túnel público seguro";
     shareBtn.addEventListener("click", () => {
       act(shareBtn, async () => {
+        if (abierto) {
+          await api(`/api/share/${service.port}`, { method: "DELETE" });
+          flash(`Túnel del puerto ${service.port} cerrado`, "good");
+          return;
+        }
         const res = await api(`/api/share?port=${service.port}`, { method: "POST" });
         if (res.ok && res.url) {
           // El aviso de "copiado" iba antes de copiar, y sin esperar: si el
@@ -690,6 +703,67 @@ function updateFavicon(projects, data) {
 
 /* ciclo ------------------------------------------------------------------- */
 
+/* Los puertos abiertos a internet, sacados de /api/state para no sumar un
+ * sondeo mas. Se pinta con lo que ya llego, sin pedir nada. */
+let tunnelPorts = new Set();
+
+function renderTunnels(list) {
+  tunnelPorts = new Set(list.map((t) => t.port));
+  ui.tunnels.hidden = list.length === 0;
+  if (list.length === 0) {
+    ui.tunnelsList.replaceChildren();
+    return;
+  }
+
+  ui.tunnelsHeading.textContent = `Túneles abiertos (${list.length})`;
+
+  const firma = list.map((t) => `${t.port}:${t.url}`).join(",");
+  if (ui.tunnelsList.dataset.firma === firma) return;
+  ui.tunnelsList.dataset.firma = firma;
+
+  ui.tunnelsList.replaceChildren(
+    ...list.map((tun) => {
+      const li = document.createElement("li");
+      li.className = "orphan";
+
+      const portTag = document.createElement("span");
+      portTag.className = "orphan__port";
+      portTag.textContent = `:${tun.port}`;
+
+      const info = document.createElement("div");
+      info.className = "orphan__info";
+
+      const enlace = document.createElement("a");
+      enlace.className = "orphan__name";
+      enlace.href = tun.url;
+      enlace.target = "_blank";
+      enlace.rel = "noopener noreferrer";
+      enlace.textContent = tun.url;
+
+      const meta = document.createElement("div");
+      meta.className = "orphan__meta";
+      meta.textContent = `via ${tun.provider}`;
+
+      info.append(enlace, meta);
+
+      const cerrar = document.createElement("button");
+      cerrar.className = "orphan__kill";
+      cerrar.type = "button";
+      cerrar.textContent = "Cerrar";
+      cerrar.addEventListener("click", () => {
+        act(cerrar, async () => {
+          await api(`/api/share/${tun.port}`, { method: "DELETE" });
+          delete ui.tunnelsList.dataset.firma;
+          await refresh();
+        });
+      });
+
+      li.append(portTag, info, cerrar);
+      return li;
+    }),
+  );
+}
+
 async function refreshOrphans() {
   try {
     const data = await api("/api/ports/orphans");
@@ -833,6 +907,7 @@ async function refresh() {
     if (query) params.set("q", query);
     if (statusFilter) params.set("status", statusFilter);
     const data = await api(`/api/state?${params}`);
+    renderTunnels(data.tunnels || []);
     render(data.projects, data);
     const n = data.registered;
     ui.connection.textContent = `${n} ${n === 1 ? "proyecto" : "proyectos"}`;

@@ -452,6 +452,25 @@ _active_tunnels: dict[int, tunnel.Tunnel | None] = {}
 _tunnels_lock = threading.Lock()
 
 
+def tunnels_view() -> list[dict]:
+    """Los tuneles abiertos, para que la interfaz pueda mostrarlos y cerrarlos.
+
+    De paso saca del registro los que se murieron por su cuenta: el cliente de
+    tuneles se puede caer solo, y un puerto que figura expuesto sin estarlo es
+    una mentira justo en el panel que existe para no mentir sobre eso.
+    """
+    with _tunnels_lock:
+        for port, tun in list(_active_tunnels.items()):
+            if tun is not None and tun.proc.poll() is not None:
+                del _active_tunnels[port]
+                log.info("el tunel del puerto %d se cerro solo", port)
+        return [
+            {"port": port, "url": tun.url, "provider": tun.provider}
+            for port, tun in sorted(_active_tunnels.items())
+            if tun is not None
+        ]
+
+
 def _cerrar_tuneles() -> None:
     """Cierra todo tunel que siga abierto."""
     with _tunnels_lock:
@@ -557,6 +576,9 @@ def create_app(token: str | None = None) -> FastAPI:
             "registered": len(known),
             "page": page,
             "pages": pages,
+            # Fuera del paginado a proposito: un tunel expone un puerto a
+            # internet y no puede quedar escondido en la pagina 2.
+            "tunnels": tunnels_view(),
         }
 
     @app.get("/api/browse", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])

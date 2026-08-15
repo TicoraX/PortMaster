@@ -76,6 +76,23 @@
         dentro de una carpeta con <code>stack.yaml</code>, o pegá la ruta acá abajo.
       </p>
 
+      <!-- A diferencia de la de intrusos, esta si desaparece cuando esta vacia.
+           Un "no hay intrusos" informa que el chequeo corrio; un "no hay
+           tuneles" es ruido permanente para algo que solo existe si vos
+           apretaste el boton. Cuando hay, es lo que mas grita de la pagina. -->
+      <section class="orphans tunnels" id="tunnels" hidden>
+        <div class="orphans__header">
+          <div>
+            <h2 class="orphans__heading" id="tunnels-heading">Túneles abiertos</h2>
+            <p class="orphans__desc">
+              Estos puertos están accesibles desde internet por una URL pública.
+              Se cierran solos al apagar PortMaster.
+            </p>
+          </div>
+        </div>
+        <ul class="orphans__list" id="tunnels-list"></ul>
+      </section>
+
       <section class="orphans" id="orphans" hidden>
         <div class="orphans__header">
           <div>
