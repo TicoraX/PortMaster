@@ -110,5 +110,17 @@ portmaster clean --volumes   # limpia tambien volumenes anonimos/huerfanos
 Ejecuta `docker system prune` de manera asistida y segura para liberar espacio en disco
 y eliminar recursos huérfanos dejados por stacks anteriores.
 
+## Servidor MCP para Agentes de IA
+
+```bash
+portmaster mcp
+```
+
+Inicia un servidor estándar Model Context Protocol (MCP) sobre `stdio`. Permite que
+asistentes inteligentes (Claude Desktop, Cursor, Gemini, Antigravity) inspeccionen el estado
+del stack, ejecuten scripts declarados en `stack.yaml`, consulten puertos y diagnostiquen errores
+en tiempo real durante sesiones de desarrollo guiado.
+
+
 
 

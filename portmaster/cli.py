@@ -16,6 +16,7 @@ from . import (
     detect,
     docker,
     doctor,
+    mcp,
     ports,
     registry,
     runner,
@@ -773,6 +774,12 @@ def clean_cmd(
     else:
         err.print(f"[bold red]Error al limpiar Docker:[/] {msg}")
         raise typer.Exit(1)
+
+
+@app.command("mcp")
+def mcp_cmd() -> None:
+    """Inicia el servidor Model Context Protocol (MCP) sobre stdio para agentes de IA."""
+    mcp.serve_stdio()
 
 
 @app.command("version")

@@ -39,6 +39,7 @@ Requiere Python 3.10 o superior. Funciona en Windows, macOS y Linux.
 | `portmaster run [tarea]` | Ejecuta scripts o pipelines de tareas del proyecto |
 | `portmaster share [target]` | Expone un servicio local a internet mediante un túnel seguro |
 | `portmaster clean` | Limpia recursos huérfanos de Docker (contenedores, redes, imágenes) |
+| `portmaster mcp` | Inicia el servidor Model Context Protocol (MCP) sobre stdio para IA |
 | `portmaster version` | Versión instalada (también `--version`) |
 
 Cada uno con `--help`.
