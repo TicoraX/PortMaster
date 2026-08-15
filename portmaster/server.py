@@ -13,6 +13,7 @@ como superficie sensible aunque solo escuche en loopback:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import secrets
 import threading
@@ -443,10 +444,48 @@ class KillAllRequest(BaseModel):
 # app ----------------------------------------------------------------------
 
 
+# Tuneles abiertos desde la interfaz. `None` marca un puerto reservado mientras
+# el cliente de tuneles arranca, que tarda segundos: sin la reserva, dos pedidos
+# a la vez dejaban uno de los dos procesos fuera del registro y por lo tanto
+# imposible de cerrar.
+_active_tunnels: dict[int, tunnel.Tunnel | None] = {}
+_tunnels_lock = threading.Lock()
+
+
+def _cerrar_tuneles() -> None:
+    """Cierra todo tunel que siga abierto."""
+    with _tunnels_lock:
+        vivos = [t for t in _active_tunnels.values() if t is not None]
+        _active_tunnels.clear()
+    for tun in vivos:
+        try:
+            tun.stop()
+        except Exception as exc:  # un tunel roto no puede frenar el apagado
+            log.warning("no se pudo cerrar el tunel del puerto %d: %s", tun.port, exc)
+
+
+@contextlib.asynccontextmanager
+async def _ciclo_de_vida(app: FastAPI):
+    """Al apagar, cierra los tuneles.
+
+    Sin esto `portmaster serve` terminaba y el cliente de tuneles seguia vivo,
+    con el puerto expuesto a internet, sin nada en pantalla que lo dijera y sin
+    forma de cerrarlo que no fuera matarlo a mano.
+    """
+    yield
+    _cerrar_tuneles()
+
+
 def create_app(token: str | None = None) -> FastAPI:
     _load_sessions_state()
     token = token or registry.token()
-    app = FastAPI(title="PortMaster", docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(
+        title="PortMaster",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+        lifespan=_ciclo_de_vida,
+    )
     app.state.token = token
     app.state.allowed_hosts = {"127.0.0.1", "localhost", "[::1]"}
 
@@ -849,12 +888,24 @@ def create_app(token: str | None = None) -> FastAPI:
     )
     def share_port(port: int, provider: str | None = None) -> dict:
         """Inicia un tunel efimero para compartir un puerto."""
+        with _tunnels_lock:
+            if port in _active_tunnels:
+                return {"ok": False, "detail": f"ya hay un tunel para el puerto {port}"}
+            _active_tunnels[port] = None  # reserva, ver _active_tunnels
+
         try:
             tun = tunnel.start_tunnel(port, provider=provider)
-            _active_tunnels[port] = tun
-            return {"ok": True, "url": tun.url, "provider": tun.provider, "port": port}
-        except tunnel.TunnelError as exc:
+        except Exception as exc:
+            with _tunnels_lock:
+                _active_tunnels.pop(port, None)
+            if not isinstance(exc, tunnel.TunnelError):
+                raise
             return {"ok": False, "detail": str(exc)}
+
+        with _tunnels_lock:
+            _active_tunnels[port] = tun
+        log.info("tunel abierto en el puerto %d via %s", port, tun.provider)
+        return {"ok": True, "url": tun.url, "provider": tun.provider, "port": port}
 
     @app.delete(
         "/api/share/{port}",
@@ -862,16 +913,19 @@ def create_app(token: str | None = None) -> FastAPI:
     )
     def stop_share_port(port: int) -> dict:
         """Detiene un tunel activo."""
-        tun = _active_tunnels.pop(port, None)
-        if tun:
-            tun.stop()
-            return {"ok": True, "detail": f"Tunel para puerto {port} cerrado."}
-        return {"ok": False, "detail": f"No hay tunel activo para el puerto {port}."}
+        with _tunnels_lock:
+            # Solo un tunel ya arrancado. Sacar una reserva liberaria el puerto
+            # mientras su proceso todavia esta naciendo, y ese quedaria afuera.
+            tun = _active_tunnels.get(port)
+            if tun is not None:
+                del _active_tunnels[port]
+        if tun is None:
+            return {"ok": False, "detail": f"No hay tunel activo para el puerto {port}."}
+        tun.stop()
+        log.info("tunel del puerto %d cerrado", port)
+        return {"ok": True, "detail": f"Tunel para puerto {port} cerrado."}
 
     return app
-
-
-_active_tunnels: dict[int, tunnel.Tunnel] = {}
 
 
 # vistas -------------------------------------------------------------------

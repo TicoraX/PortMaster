@@ -34,6 +34,10 @@ class Tunnel:
                 self.proc.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 self.proc.kill()
+                # Y esperarlo: sin esto queda un zombie, y peor, se volvia antes
+                # de saber si el cliente de tuneles se murio de verdad. Lo que
+                # sigue vivo sigue exponiendo el puerto.
+                self.proc.wait()
 
 
 def detect_providers() -> list[str]:
@@ -88,7 +92,10 @@ def start_tunnel(
     thread.start()
 
     if not ready_event.wait(timeout=timeout):
-        proc.terminate()
+        # Por `stop` y no un `terminate` suelto: el proceso que no contesto en el
+        # plazo puede estar por levantar igual, y si sobrevive al terminate queda
+        # un tunel publico que nadie sabe que existe.
+        Tunnel(provider=chosen, port=port, url="", proc=proc).stop()
         raise TunnelError(f"no se pudo obtener la URL publica del tunel '{chosen}' en {timeout:.0f}s")
 
     return Tunnel(provider=chosen, port=port, url=found_url[0], proc=proc)

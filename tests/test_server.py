@@ -1171,3 +1171,69 @@ def test_cada_id_del_html_lo_usa_el_js():
         if ident not in js and camel not in js:
             huerfanos.append(ident)
     assert not huerfanos, f"ids del HTML que el JS nunca toca: {huerfanos}"
+
+
+def _tunel_falso(monkeypatch, proc):
+    """Un `Tunnel` con un proceso de verdad detras, para poder matarlo y verlo."""
+    monkeypatch.setattr(
+        server.tunnel,
+        "start_tunnel",
+        lambda port, provider=None: server.tunnel.Tunnel(
+            provider="cloudflared",
+            port=port,
+            url=f"https://prueba-{port}.trycloudflare.com",
+            proc=proc,
+        ),
+    )
+
+
+def test_los_tuneles_se_cierran_al_apagar_el_servidor(monkeypatch, free_ports):
+    """`portmaster serve` terminaba y el cliente de tuneles seguia vivo.
+
+    El puerto quedaba expuesto a internet, sin nada en pantalla que lo dijera y
+    sin forma de cerrarlo salvo matar el proceso a mano.
+    """
+    (port,) = free_ports(1)
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    _tunel_falso(monkeypatch, proc)
+    try:
+        app = server.create_app(TOKEN)
+        with TestClient(app, base_url="http://127.0.0.1") as cliente:
+            cliente.headers.update({"Authorization": f"Bearer {TOKEN}"})
+            assert cliente.post(f"/api/share?port={port}").json()["ok"] is True
+            assert proc.poll() is None, "el tunel tiene que seguir vivo mientras el servidor corre"
+
+        # Salir del `with` dispara el apagado de la aplicacion.
+        assert esperar(lambda: proc.poll() is not None), "el tunel sobrevivio al apagado"
+        assert server._active_tunnels == {}
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
+def test_un_segundo_tunel_para_el_mismo_puerto_se_rechaza(monkeypatch, free_ports):
+    """Reemplazar la entrada dejaba al primer proceso fuera del registro.
+
+    Y fuera del registro no lo cierra ni el apagado ni el boton: es la misma
+    fuga, disparada con dos clicks seguidos.
+    """
+    (port,) = free_ports(1)
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    _tunel_falso(monkeypatch, proc)
+    try:
+        app = server.create_app(TOKEN)
+        with TestClient(app, base_url="http://127.0.0.1") as cliente:
+            cliente.headers.update({"Authorization": f"Bearer {TOKEN}"})
+            assert cliente.post(f"/api/share?port={port}").json()["ok"] is True
+
+            segundo = cliente.post(f"/api/share?port={port}").json()
+            assert segundo["ok"] is False
+            assert "ya hay un tunel" in segundo["detail"]
+
+            assert cliente.delete(f"/api/share/{port}").json()["ok"] is True
+            assert esperar(lambda: proc.poll() is not None), "cerrar el tunel no mato el proceso"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
