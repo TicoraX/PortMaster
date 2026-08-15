@@ -780,8 +780,25 @@ def clean_cmd(
         "-v",
         help="Elimina tambien volumenes anonimos/huerfanos de Docker.",
     ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="No preguntar."),
 ) -> None:
     """Limpia contenedores parados, imagenes sin tag y recursos huerfanos de Docker."""
+    # Preguntando, como `free`. Es el unico comando de la herramienta que borra
+    # datos en vez de cerrar procesos, y era el unico que no preguntaba nada: el
+    # boton de la interfaz ya pedia dos clicks y este se ejecutaba en silencio.
+    if not yes:
+        tabla = docker.usage()
+        if tabla:
+            console.print(tabla)
+        console.print(
+            "Se borran contenedores parados, redes sin usar, imagenes sin tag y el cache de build."
+        )
+        if volumes:
+            console.print("[bold]Y los volumenes anonimos huerfanos, que tienen datos adentro.[/]")
+        if not typer.confirm("Seguir?", default=False):
+            console.print("Cancelado.")
+            return
+
     console.print("[bold cyan]Ejecutando limpieza de recursos Docker...[/]")
     ok, msg = docker.prune(volumes=volumes)
     if ok:

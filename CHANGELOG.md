@@ -12,8 +12,9 @@ esquema de `stack.yaml` y las rutas de la API local.
 - **Túneles Seguros (`portmaster share`)**: Integración sin configuración adicional con `cloudflared`, `ngrok`, `lt` y `tailscale` para exponer puertos locales a URLs públicas HTTPS efímeras.
 - **Higiene del Host (`portmaster clean`)**: `docker system prune -f` sobre
   contenedores parados, redes sin usar, imágenes sin tag y el caché de build.
-  No pide confirmación. Con `--volumes` se lleva además los volúmenes
-  anónimos huérfanos, que sin esa opción no toca.
+  Pregunta antes, mostrando `docker system df` para que la respuesta sea
+  informada, y `--yes` la saltea. Con `--volumes` se lleva además los
+  volúmenes anónimos huérfanos, que sin esa opción no toca.
 - **Servidor MCP para Agentes de IA (`portmaster mcp`)**: Servidor Model Context Protocol nativo sobre `stdio` para introspección y control en tiempo real desde Claude Desktop, Cursor, Gemini y Antigravity.
 - **Proyectos Compuestos (`includes:`)**: Composición modular de stacks importando servicios de otros repositorios o subdirectorios con aislamiento de `cwd` y prevención de ciclos.
 - **Matriz de Colisión de Puertos**: Detección anticipada y alerta visual en `portmaster list` sobre puertos en disputa entre proyectos registrados.

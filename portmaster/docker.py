@@ -80,6 +80,26 @@ def _motivo(done: subprocess.CompletedProcess, action: str) -> str:
     return f"docker desktop {action} fallo con codigo {done.returncode}"
 
 
+def usage() -> str | None:
+    """La tabla de `docker system df`, para que la confirmacion diga cuanto hay.
+
+    Sin parsear: Docker ya la formatea, y sacarle el numero a mano seria atarnos
+    a su formato de salida a cambio de nada. None si docker no contesta, y ahi
+    la confirmacion sigue sin la tabla en vez de cancelarse.
+    """
+    try:
+        done = subprocess.run(
+            ["docker", "system", "df"],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() or None if done.returncode == 0 else None
+
+
 def prune(volumes: bool = False) -> tuple[bool, str]:
     """Ejecuta docker system prune para limpiar recursos huerfanos."""
     cmd = ["docker", "system", "prune", "-f"]
