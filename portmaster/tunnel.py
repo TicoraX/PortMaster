@@ -6,6 +6,8 @@ import re
 import shutil
 import subprocess
 import threading
+import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Callable
 
@@ -79,10 +81,16 @@ def start_tunnel(
 
     found_url: list[str] = []
     ready_event = threading.Event()
+    # Las ultimas lineas, para que un fallo diga lo que dijo el cliente en vez de
+    # "no se pudo": el motivo real suele estar ahi (una cuenta sin autenticar, un
+    # puerto ya tomado del lado del proveedor).
+    ultimas: deque[str] = deque(maxlen=3)
 
     def _reader():
         assert proc.stdout is not None
         for line in proc.stdout:
+            if line.strip():
+                ultimas.append(line.strip())
             url = url_extractor(line)
             if url and not found_url:
                 found_url.append(url)
@@ -91,12 +99,27 @@ def start_tunnel(
     thread = threading.Thread(target=_reader, daemon=True)
     thread.start()
 
-    if not ready_event.wait(timeout=timeout):
+    # Mirando tambien si el proceso se murio, y no solo el reloj. Un cliente que
+    # falla al arrancar (`ngrok` sin autenticar) se va en menos de un segundo, y
+    # esperarle el plazo entero dejaba a `portmaster share` pareciendo colgado
+    # antes de dar un error que ya se sabia.
+    limite = time.monotonic() + timeout
+    while not ready_event.wait(0.1):
+        if proc.poll() is not None or time.monotonic() >= limite:
+            break
+
+    if not found_url:
+        salida = proc.poll()
         # Por `stop` y no un `terminate` suelto: el proceso que no contesto en el
         # plazo puede estar por levantar igual, y si sobrevive al terminate queda
         # un tunel publico que nadie sabe que existe.
         Tunnel(provider=chosen, port=port, url="", proc=proc).stop()
-        raise TunnelError(f"no se pudo obtener la URL publica del tunel '{chosen}' en {timeout:.0f}s")
+        motivo = f": {ultimas[-1]}" if ultimas else ""
+        if salida is not None:
+            raise TunnelError(f"'{chosen}' termino con codigo {salida} sin publicar una URL{motivo}")
+        raise TunnelError(
+            f"no se pudo obtener la URL publica del tunel '{chosen}' en {timeout:.0f}s{motivo}"
+        )
 
     return Tunnel(provider=chosen, port=port, url=found_url[0], proc=proc)
 
