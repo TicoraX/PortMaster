@@ -800,6 +800,11 @@ async function refreshOrphans() {
     // entera es el cartel de registrar el primero.
     ui.orphans.hidden = !hayProyectos;
 
+    // Rojo solo cuando hay algo. La seccion se ve igual estando vacia, para
+    // informar que el chequeo corrio, pero vestida de alarma decia lo contrario
+    // de lo que su propio texto dice.
+    ui.orphans.dataset.tone = list.length ? "bad" : "";
+
     // Con uno solo no aporta nada: la fila ya trae su propio boton Cerrar.
     ui.orphansKillAll.hidden = list.length < 2;
     latestOrphansList = list;

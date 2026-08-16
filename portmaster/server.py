@@ -829,11 +829,21 @@ def create_app(token: str | None = None) -> FastAPI:
             active_sessions = list(sessions.values())
         running_ports = set()
         for s in active_sessions:
+            # Los que el servicio eligio al arrancar, ademas de los declarados.
+            # Un proyecto con `ready: listen` no declara puerto, asi que el suyo
+            # no entraba aca: otro proyecto que si declarara ese numero lo veia
+            # ocupado y acusaba de intruso al proceso que acabamos de levantar
+            # nosotros. Cerrarlo desde la interfaz mataba el servicio propio, y
+            # "Liberar todos" lo hacia de un click.
+            descubiertos = s.service_ports()
             for name, state in s.service_states().items():
-                if state != "stopped":
-                    svc = s.stack.services.get(name)
-                    if svc and svc.port:
-                        running_ports.add(svc.port)
+                if state == "stopped":
+                    continue
+                svc = s.stack.services.get(name)
+                if svc and svc.port:
+                    running_ports.add(svc.port)
+                if name in descubiertos:
+                    running_ports.add(descubiertos[name])
         return running_ports
 
     @app.get("/api/ports/orphans", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])

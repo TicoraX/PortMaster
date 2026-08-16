@@ -943,35 +943,45 @@ body {
 
 /* orphans ------------------------------------------------------------------ */
 
-.orphans {
-  margin-block: var(--space-6) 0;
-  border: 1px solid oklch(55% 0.12 27 / 0.25);
-  border-radius: var(--radius-card);
-  background: oklch(96% 0.01 27 / 0.4);
-  overflow: hidden;
-}
-
+/* En reposo la seccion es neutra, y el rojo con el punto que late aparece solo
+ * cuando hay un intruso. La seccion se muestra siempre para informar que el
+ * chequeo corrio; vestida de alarma para decir "no hay nada" comunicaba lo
+ * contrario, y un rojo encendido todo el tiempo deja de significar rojo: el dia
+ * que aparezca uno de verdad no se distingue del dia anterior.
+ *
+ * Lo pone `refreshOrphans` con data-tone, del mismo modo que los estados de
+ * servicio: el color nunca lleva el significado solo, siempre va con su texto. */
 .orphans {
   margin-top: var(--space-xl);
   background: var(--color-paper);
-  border: var(--rule) solid oklch(55% 0.18 27 / 0.4);
+  border: var(--rule) solid var(--color-rule-strong);
   border-radius: var(--radius);
   overflow: hidden;
   box-shadow: var(--shadow-sm);
+}
+
+.orphans[data-tone="bad"] {
+  border-color: oklch(55% 0.18 27 / 0.4);
 }
 
 .orphans__heading {
   font-family: var(--font-body);
   font-size: var(--text-sm);
   font-weight: 600;
-  color: oklch(65% 0.2 27);
-  background: oklch(55% 0.18 27 / 0.1);
+  color: var(--color-ink-2);
+  background: var(--color-paper-3);
   padding: var(--space-sm) var(--space-md);
-  border-bottom: var(--rule) solid oklch(55% 0.18 27 / 0.25);
+  border-bottom: var(--rule) solid var(--color-rule);
   margin: 0;
   display: flex;
   align-items: center;
   gap: var(--space-xs);
+}
+
+.orphans[data-tone="bad"] .orphans__heading {
+  color: oklch(65% 0.2 27);
+  background: oklch(55% 0.18 27 / 0.1);
+  border-bottom-color: oklch(55% 0.18 27 / 0.25);
 }
 
 .orphans__heading::before {
@@ -980,6 +990,10 @@ body {
   width: 7px;
   height: 7px;
   border-radius: 50%;
+  background: var(--color-ink-3);
+}
+
+.orphans[data-tone="bad"] .orphans__heading::before {
   background: oklch(65% 0.2 27);
   box-shadow: 0 0 0 2px oklch(65% 0.2 27 / 0.25);
   animation: orphan-pulse 1.8s ease-in-out infinite;
@@ -1044,6 +1058,10 @@ body {
 }
 
 .orphan:hover {
+  background: var(--color-paper-3);
+}
+
+.orphans[data-tone="bad"] .orphan:hover {
   background: oklch(55% 0.12 27 / 0.07);
 }
 
@@ -1128,6 +1146,20 @@ body {
  * abrirlo fue una decision deliberada y no una falla. */
 .tunnels {
   border-color: oklch(70% 0.15 75 / 0.55);
+}
+
+/* Con la caja de intrusos ya neutra en reposo, el encabezado heredado quedaba
+ * gris. Esta seccion solo existe cuando hay puertos abiertos a internet, asi
+ * que siempre lleva su acento: no tiene estado de reposo. */
+.tunnels .orphans__heading {
+  color: oklch(58% 0.14 75);
+  background: oklch(70% 0.15 75 / 0.12);
+  border-bottom-color: oklch(70% 0.15 75 / 0.3);
+}
+
+.tunnels .orphans__heading::before {
+  background: oklch(65% 0.16 75);
+  box-shadow: 0 0 0 2px oklch(65% 0.16 75 / 0.25);
 }
 
 .tunnels .orphan__port {
