@@ -23,6 +23,9 @@ const ui = {
   pickerNote: document.getElementById("picker-note"),
   tplProject: document.getElementById("tpl-project"),
   tplService: document.getElementById("tpl-service"),
+  tunnels: document.getElementById("tunnels"),
+  tunnelsList: document.getElementById("tunnels-list"),
+  tunnelsHeading: document.getElementById("tunnels-heading"),
   orphans: document.getElementById("orphans"),
   orphansList: document.getElementById("orphans-list"),
   orphansHeading: document.getElementById("orphans-heading"),
@@ -32,6 +35,12 @@ const ui = {
   pathSuggestions: document.getElementById("path-suggestions"),
   dockerState: document.getElementById("docker-state"),
   btnDocker: document.getElementById("btn-docker"),
+  btnDockerClean: document.getElementById("btn-docker-clean"),
+  cleanModal: document.getElementById("clean-modal"),
+  cleanUsage: document.getElementById("clean-usage"),
+  cleanTargets: document.getElementById("clean-targets"),
+  cleanRun: document.getElementById("clean-run"),
+  cleanWarn: document.getElementById("clean-warn"),
   btnPortsModal: document.getElementById("btn-ports-modal"),
   portsModal: document.getElementById("ports-modal"),
   portsModalList: document.getElementById("ports-modal-list"),
@@ -239,6 +248,47 @@ function renderService(service, projectId) {
     link.title = `Abrir http://localhost:${service.port}`;
     link.textContent = "Abrir ↗";
     node.querySelector(".service__act").append(link);
+
+    // Abierto o cerrado, el mismo boton: dos controles para un estado que solo
+    // puede estar de una de las dos formas se pisan y confunden.
+    const abierto = tunnelPorts.has(service.port);
+    const shareBtn = document.createElement("button");
+    shareBtn.type = "button";
+    shareBtn.className = "btn btn--quiet";
+    shareBtn.textContent = abierto ? "Cerrar túnel" : "Túnel";
+    shareBtn.title = abierto
+      ? `El puerto ${service.port} está expuesto a internet. Cerrar el túnel.`
+      : "Compartir este puerto con un túnel público seguro";
+    shareBtn.addEventListener("click", () => {
+      act(shareBtn, async () => {
+        if (abierto) {
+          await api(`/api/share/${service.port}`, { method: "DELETE" });
+          flash(`Túnel del puerto ${service.port} cerrado`, "good");
+          return;
+        }
+        const res = await api(`/api/share?port=${service.port}`, { method: "POST" });
+        if (res.ok && res.url) {
+          // El aviso de "copiado" iba antes de copiar, y sin esperar: si el
+          // navegador negaba el permiso, decia que estaba en el portapapeles y
+          // no estaba. La URL va en el mensaje igual, que es lo unico que no
+          // puede fallar.
+          let copiado = false;
+          if (navigator.clipboard) {
+            try {
+              await navigator.clipboard.writeText(res.url);
+              copiado = true;
+            } catch {
+              copiado = false;
+            }
+          }
+          flash(`Túnel activo: ${res.url}${copiado ? " (copiado al portapapeles)" : ""}`, "good");
+          window.open(res.url, "_blank");
+        } else {
+          flash(res.detail || "Error al iniciar túnel", "bad");
+        }
+      });
+    });
+    node.querySelector(".service__act").append(shareBtn);
   }
 
   node.querySelector(".service__label").textContent = service.name;
@@ -397,8 +447,119 @@ ui.btnDocker.addEventListener("click", (event) => {
   });
 });
 
+/* Que se puede limpiar, en el orden en que conviene mirarlo: primero lo que se
+ * regenera solo, ultimo lo que tiene datos adentro. Los tres primeros vienen
+ * tildados porque son la limpieza de siempre; los volumenes nunca. */
+const CLEAN_TARGETS = [
+  { id: "cache", label: "Caché de build", nota: "se regenera al volver a construir", on: true },
+  { id: "containers", label: "Contenedores parados", nota: "no los que están corriendo", on: true },
+  { id: "networks", label: "Redes sin usar", nota: "las que no tienen contenedores", on: true },
+  { id: "images", label: "Imágenes sin tag", nota: "hay que volver a bajarlas", on: true },
+  {
+    id: "volumes",
+    label: "Volúmenes anónimos",
+    nota: "tienen datos adentro y no se regeneran",
+    on: false,
+    riesgo: true,
+  },
+];
+
+function renderCleanTargets() {
+  ui.cleanTargets.replaceChildren(
+    ...CLEAN_TARGETS.map((target) => {
+      const li = document.createElement("li");
+      const row = document.createElement("label");
+      row.className = "clean__row";
+      if (target.riesgo) row.dataset.riesgo = "true";
+
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.value = target.id;
+      box.checked = target.on;
+      box.addEventListener("change", refreshCleanButton);
+
+      const texto = document.createElement("span");
+      texto.textContent = `${target.label} · ${target.nota}`;
+
+      row.append(box, texto);
+      li.append(row);
+      return li;
+    }),
+  );
+  refreshCleanButton();
+}
+
+function cleanPicks() {
+  return [...ui.cleanTargets.querySelectorAll("input:checked")].map((b) => b.value);
+}
+
+function refreshCleanButton() {
+  const elegidos = cleanPicks();
+  ui.cleanRun.disabled = elegidos.length === 0;
+  ui.cleanRun.textContent = elegidos.length ? `Limpiar ${elegidos.length}` : "Elegí algo";
+  ui.cleanWarn.textContent = elegidos.includes("volumes")
+    ? "Los volúmenes no se pueden recuperar."
+    : "";
+}
+
+ui.btnDockerClean.addEventListener("click", () => {
+  renderCleanTargets();
+  ui.cleanUsage.textContent = "Consultando a Docker…";
+  ui.cleanModal.showModal();
+  api("/api/docker/usage")
+    .then((res) => {
+      // Sin la tabla igual se puede elegir: es contexto, no un requisito.
+      ui.cleanUsage.textContent = res.table || "Docker no informó cuánto ocupa.";
+    })
+    .catch(() => {
+      ui.cleanUsage.textContent = "No se pudo consultar cuánto ocupa Docker.";
+    });
+});
+
+ui.cleanModal.querySelector('[data-clean="close"]').addEventListener("click", () => {
+  ui.cleanModal.close();
+});
+
+ui.cleanRun.addEventListener("click", (event) => {
+  const button = event.currentTarget;
+  const targets = cleanPicks();
+  if (targets.length === 0) return;
+
+  // Dos pasos sobre el mismo boton, como Congelar y como Liberar todos: el
+  // segundo nombra lo que se va a borrar antes de borrarlo.
+  if (button.dataset.armed !== "true") {
+    button.dataset.armed = "true";
+    button.textContent = `Borrar ${targets.join(", ")}?`;
+    setTimeout(() => {
+      delete button.dataset.armed;
+      refreshCleanButton();
+    }, 6000);
+    return;
+  }
+  delete button.dataset.armed;
+
+  act(button, async () => {
+    const res = await api("/api/docker/clean", {
+      method: "POST",
+      body: JSON.stringify({ targets }),
+    });
+    ui.cleanModal.close();
+    flash(res.detail, res.ok ? "good" : "bad");
+  });
+});
+
 let killAllTimer = null;
 let killAllSnapshot = null;
+// Los puertos tildados. Vacio quiere decir "todos", que era el unico
+// comportamiento posible hasta ahora: el boton no puede quedarse sin efecto por
+// no haber tildado nada.
+let orphanPicks = new Set();
+
+function refreshKillAllLabel() {
+  if (ui.orphansKillAll.dataset.armed === "true") return;
+  const elegidos = orphanPicks.size;
+  ui.orphansKillAll.textContent = elegidos ? `Cerrar ${elegidos}` : "Liberar todos";
+}
 
 function disarmKillAll() {
   if (killAllTimer !== null) {
@@ -407,7 +568,7 @@ function disarmKillAll() {
   }
   killAllSnapshot = null;
   delete ui.orphansKillAll.dataset.armed;
-  ui.orphansKillAll.textContent = "Liberar todos";
+  refreshKillAllLabel();
 }
 
 // Dos pasos sobre el mismo boton, igual que Congelar: cerrar varios procesos de
@@ -417,7 +578,8 @@ ui.orphansKillAll.addEventListener("click", (event) => {
   const button = event.currentTarget;
 
   if (button.dataset.armed !== "true") {
-    killAllSnapshot = [...latestOrphansList];
+    const elegidos = latestOrphansList.filter((o) => orphanPicks.has(o.port));
+    killAllSnapshot = elegidos.length ? elegidos : [...latestOrphansList];
     if (killAllSnapshot.length === 0) return;
 
     button.dataset.armed = "true";
@@ -441,6 +603,7 @@ ui.orphansKillAll.addEventListener("click", (event) => {
       body: JSON.stringify({ ports: victimas.map((o) => o.port) }),
     });
     delete ui.orphansList.dataset.ids;
+    orphanPicks.clear();
     if (res.failed.length) {
       const errores = res.failed.map((f) => `:${f.port} (${f.reason})`).join(", ");
       flash(`Cerrados ${res.killed.length} de ${victimas.length}. Fallaron: ${errores}`, "warn");
@@ -530,10 +693,16 @@ function updateCard(entry, project) {
 async function pullLogs(id, entry) {
   try {
     const data = await api(`/api/projects/${id}/logs?since=${entry.logSeq}`);
-    if (!data.lines.length) return;
-    entry.logSeq = data.lines[data.lines.length - 1].seq;
-    entry.rawLogs = (entry.rawLogs || "") + data.lines.map((l) => l.text).join("\n") + "\n";
-    renderLogsText(entry);
+    if (data.lines.length) {
+      entry.logSeq = data.lines[data.lines.length - 1].seq;
+      entry.rawLogs = (entry.rawLogs || "") + data.lines.map((l) => l.text).join("\n") + "\n";
+      renderLogsText(entry);
+    } else if (!entry.rawLogs) {
+      // Sin logs todavia: hay que pintar igual, que es donde va el cartel. Solo
+      // mientras este vacio, y no en cada sondeo: reescribir el contenido cada
+      // 2.5s le borraria la seleccion a quien este copiando una linea.
+      renderLogsText(entry);
+    }
   } catch {
     /* el proximo ciclo reintenta */
   }
@@ -546,11 +715,20 @@ function renderLogsText(entry) {
   const atBottom = logsEl.scrollHeight - logsEl.scrollTop - logsEl.clientHeight < 40;
   const raw = entry.rawLogs || "";
   const filter = (filterInput ? filterInput.value : "").trim().toLowerCase();
-  if (!filter) {
+  if (!raw) {
+    // Una caja en blanco no distingue "no arrancaste nada" de "esto se rompio".
+    // El servidor devuelve {lines: [], seq: 0} para un proyecto sin sesion, que
+    // es correcto, y `pullLogs` cortaba sin escribir nada en la pantalla.
+    logsEl.textContent =
+      "Todavía no hay logs. Solo se registran los de un stack arrancado desde acá.";
+  } else if (!filter) {
     logsEl.textContent = raw;
   } else {
     const lines = raw.split("\n");
-    logsEl.textContent = lines.filter((l) => l.toLowerCase().includes(filter)).join("\n");
+    const encontrados = lines.filter((l) => l.toLowerCase().includes(filter));
+    logsEl.textContent = encontrados.length
+      ? encontrados.join("\n")
+      : `Ningún renglón contiene "${filter}".`;
   }
   if (atBottom) logsEl.scrollTop = logsEl.scrollHeight;
 }
@@ -592,7 +770,7 @@ function render(projects, data) {
   );
   ui.projects.setAttribute("aria-busy", "false");
   hayProyectos = data.registered > 0;
-  updateDocker(projects);
+  updateDocker(data.docker || { needed: false, down: false });
   updateFavicon(projects, data);
 }
 
@@ -601,16 +779,21 @@ function render(projects, data) {
  * distingue "esta todo en orden" de "esto no funciona". Con el motor arriba el
  * boton no se esconde, cambia de trabajo: reiniciar Docker es lo que uno quiere
  * cuando los contenedores empiezan a portarse raro. */
-function updateDocker(projects) {
-  const usan = projects.filter((p) => p.needs_docker);
-  const caido = usan.some((p) => p.docker_down);
+function updateDocker(docker) {
+  // Del estado global y no de los proyectos de la pagina: colgado de la pagina,
+  // apretar "Siguiente" apagaba la fila entera cuando ahi no habia ninguno con
+  // contenedores, y una fila que desaparece no distingue "esta en orden" de
+  // "esto dejo de funcionar".
+  const usan = docker.needed;
+  const caido = docker.down;
 
-  ui.dockerState.hidden = usan.length === 0;
+  ui.dockerState.hidden = !usan;
   ui.dockerState.textContent = caido ? "Docker cerrado" : "Docker corriendo";
   ui.dockerState.dataset.tone = caido ? "bad" : "ready";
 
-  ui.btnDocker.hidden = usan.length === 0;
+  ui.btnDocker.hidden = !usan;
   ui.btnDocker.dataset.action = caido ? "start" : "restart";
+  ui.btnDockerClean.hidden = !usan || caido;
   // El sondeo pasa cada 2.5s y el armado dura 6: sin esto le pisaria la
   // pregunta al usuario mientras la esta leyendo.
   if (ui.btnDocker.dataset.armed !== "true") {
@@ -637,6 +820,73 @@ function updateFavicon(projects, data) {
 
 /* ciclo ------------------------------------------------------------------- */
 
+/* Los puertos abiertos a internet, sacados de /api/state para no sumar un
+ * sondeo mas. Se pinta con lo que ya llego, sin pedir nada. */
+let tunnelPorts = new Set();
+
+function renderTunnels(list) {
+  tunnelPorts = new Set(list.map((t) => t.port));
+  ui.tunnels.hidden = list.length === 0;
+  if (list.length === 0) {
+    ui.tunnelsList.replaceChildren();
+    // Y la firma: sin borrarla, cerrar el ultimo tunel y volver a abrir el
+    // mismo puerto daba la misma cadena, el return temprano se saltaba el
+    // repintado y la lista quedaba vacia con un tunel abierto.
+    delete ui.tunnelsList.dataset.firma;
+    return;
+  }
+
+  ui.tunnelsHeading.textContent = `Túneles abiertos (${list.length})`;
+
+  // El proveedor entra en la firma: es un dato que se muestra, y si cambia sin
+  // cambiar puerto ni URL la fila seguiria diciendo el anterior.
+  const firma = list.map((t) => `${t.port}:${t.provider}:${t.url}`).join(",");
+  if (ui.tunnelsList.dataset.firma === firma) return;
+  ui.tunnelsList.dataset.firma = firma;
+
+  ui.tunnelsList.replaceChildren(
+    ...list.map((tun) => {
+      const li = document.createElement("li");
+      li.className = "orphan";
+
+      const portTag = document.createElement("span");
+      portTag.className = "orphan__port";
+      portTag.textContent = `:${tun.port}`;
+
+      const info = document.createElement("div");
+      info.className = "orphan__info";
+
+      const enlace = document.createElement("a");
+      enlace.className = "orphan__name";
+      enlace.href = tun.url;
+      enlace.target = "_blank";
+      enlace.rel = "noopener noreferrer";
+      enlace.textContent = tun.url;
+
+      const meta = document.createElement("div");
+      meta.className = "orphan__meta";
+      meta.textContent = `via ${tun.provider}`;
+
+      info.append(enlace, meta);
+
+      const cerrar = document.createElement("button");
+      cerrar.className = "orphan__kill";
+      cerrar.type = "button";
+      cerrar.textContent = "Cerrar";
+      cerrar.addEventListener("click", () => {
+        act(cerrar, async () => {
+          await api(`/api/share/${tun.port}`, { method: "DELETE" });
+          delete ui.tunnelsList.dataset.firma;
+          await refresh();
+        });
+      });
+
+      li.append(portTag, info, cerrar);
+      return li;
+    }),
+  );
+}
+
 async function refreshOrphans() {
   try {
     const data = await api("/api/ports/orphans");
@@ -648,9 +898,23 @@ async function refreshOrphans() {
     // entera es el cartel de registrar el primero.
     ui.orphans.hidden = !hayProyectos;
 
+    // Rojo solo cuando hay algo. La seccion se ve igual estando vacia, para
+    // informar que el chequeo corrio, pero vestida de alarma decia lo contrario
+    // de lo que su propio texto dice.
+    ui.orphans.dataset.tone = list.length ? "bad" : "";
+
     // Con uno solo no aporta nada: la fila ya trae su propio boton Cerrar.
-    ui.orphansKillAll.hidden = list.length < 2;
+    const varios = list.length >= 2;
+    ui.orphansKillAll.hidden = !varios;
     latestOrphansList = list;
+
+    // Lo tildado que ya no esta en la lista deja de contar: si no, el boton
+    // diria "Cerrar 3" con dos filas en pantalla.
+    const vigentes = new Set(list.map((o) => o.port));
+    for (const port of [...orphanPicks]) {
+      if (!vigentes.has(port)) orphanPicks.delete(port);
+    }
+    refreshKillAllLabel();
 
     const nextIds = list.map((o) => o.port).join(",") || "__empty__";
     if (ui.orphansList.dataset.ids === nextIds) return;
@@ -672,6 +936,25 @@ async function refreshOrphans() {
         const li = document.createElement("li");
         li.className = "orphan";
 
+        // La casilla solo con dos o mas: con una sola fila, elegirla y despues
+        // apretar un boton es un paso de mas para lo que ya hace su Cerrar.
+        let pick = null;
+        if (varios) {
+          pick = document.createElement("input");
+          pick.type = "checkbox";
+          pick.className = "orphan__pick";
+          pick.checked = orphanPicks.has(orphan.port);
+          pick.setAttribute(
+            "aria-label",
+            `Elegir el puerto ${orphan.port}, ocupado por ${orphan.name}`,
+          );
+          pick.addEventListener("change", () => {
+            if (pick.checked) orphanPicks.add(orphan.port);
+            else orphanPicks.delete(orphan.port);
+            refreshKillAllLabel();
+          });
+        }
+
         const portTag = document.createElement("span");
         portTag.className = "orphan__port";
         portTag.textContent = `:${orphan.port}`;
@@ -679,16 +962,30 @@ async function refreshOrphans() {
         const info = document.createElement("div");
         info.className = "orphan__info";
 
+        // Tres renglones y no dos campos pegados con un punto. `node.exe ·
+        // Decepticon` se lee como "este proceso es de Decepticon", y es al
+        // reves: el proceso es un desconocido y Decepticon es quien reclama el
+        // puerto. Son dos hechos distintos y ahora ocupan lugares distintos.
         const name = document.createElement("div");
         name.className = "orphan__name";
-        name.textContent = `${orphan.name}  ·  ${orphan.project}`;
+        name.textContent = `${orphan.name} · pid ${orphan.pid}`;
+
+        const claim = document.createElement("div");
+        claim.className = "orphan__claim";
+        const reclaman = orphan.projects || [];
+        claim.textContent =
+          reclaman.length > 1
+            ? `ocupa un puerto que declaran ${reclaman.join(" y ")}`
+            : `ocupa un puerto que declara ${reclaman[0] || "un proyecto registrado"}`;
 
         const meta = document.createElement("div");
         meta.className = "orphan__meta";
-        meta.textContent = orphan.cmd ? orphan.cmd : `pid ${orphan.pid}`;
-        if (!orphan.cmd) meta.textContent = `pid ${orphan.pid}`;
+        // La linea de comando es lo que deja decidir si cerrarlo: sale entera
+        // en el title, porque en la fila entra recortada.
+        meta.textContent = orphan.cmd || "sin linea de comando visible";
+        if (orphan.cmd) meta.title = orphan.cmd;
 
-        info.append(name, meta);
+        info.append(name, claim, meta);
 
         const kill = document.createElement("button");
         kill.className = "orphan__kill";
@@ -702,6 +999,7 @@ async function refreshOrphans() {
           });
         });
 
+        if (pick) li.append(pick);
         li.append(portTag, info, kill);
         return li;
       }),
@@ -780,6 +1078,7 @@ async function refresh() {
     if (query) params.set("q", query);
     if (statusFilter) params.set("status", statusFilter);
     const data = await api(`/api/state?${params}`);
+    renderTunnels(data.tunnels || []);
     render(data.projects, data);
     const n = data.registered;
     ui.connection.textContent = `${n} ${n === 1 ? "proyecto" : "proyectos"}`;
@@ -1091,7 +1390,7 @@ async function refreshPortsModal() {
     for (const orphan of orphansData.orphans || []) {
       items.push({
         port: orphan.port,
-        label: `Intruso · ${orphan.name} (${orphan.project})`,
+        label: `${orphan.name} ocupa el puerto de ${(orphan.projects || []).join(" y ")}`,
         kind: "intruso",
         isOrphan: true,
       });

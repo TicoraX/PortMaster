@@ -5,6 +5,10 @@
 
 name: mi-proyecto
 
+# includes:              # importa servicios de otros proyectos o sub-carpetas
+#   - ../shared-backend
+#   - ./services/auth
+
 services:
   db:
     command: docker compose up -d postgres
@@ -18,6 +22,9 @@ services:
     cwd: backend       # relativo a la raiz, no puede escapar de ella
     port: 8080
     needs: [db]
+    env_file: [.env, .env.local]  # archivo o lista de archivos .env a cargar
+    pre_start: npm run build      # comando síncrono previo al arranque
+    post_start: npm run seed      # comando síncrono posterior a la confirmación de salud
     env:
       DATABASE_URL: postgres://localhost:5432/app
 
@@ -31,6 +38,12 @@ profiles:
   fullstack: [db, api, web]
   backend: [db, api]
   db-only: [db]
+
+scripts:
+  test: pytest tests/ -v
+  lint: ruff check .
+  check: [lint, test]           # pipeline secuencial de tareas
+  migrate: npm run db:migrate
 
 # Reglas:
 #

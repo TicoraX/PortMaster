@@ -943,35 +943,45 @@ body {
 
 /* orphans ------------------------------------------------------------------ */
 
-.orphans {
-  margin-block: var(--space-6) 0;
-  border: 1px solid oklch(55% 0.12 27 / 0.25);
-  border-radius: var(--radius-card);
-  background: oklch(96% 0.01 27 / 0.4);
-  overflow: hidden;
-}
-
+/* En reposo la seccion es neutra, y el rojo con el punto que late aparece solo
+ * cuando hay un intruso. La seccion se muestra siempre para informar que el
+ * chequeo corrio; vestida de alarma para decir "no hay nada" comunicaba lo
+ * contrario, y un rojo encendido todo el tiempo deja de significar rojo: el dia
+ * que aparezca uno de verdad no se distingue del dia anterior.
+ *
+ * Lo pone `refreshOrphans` con data-tone, del mismo modo que los estados de
+ * servicio: el color nunca lleva el significado solo, siempre va con su texto. */
 .orphans {
   margin-top: var(--space-xl);
   background: var(--color-paper);
-  border: var(--rule) solid oklch(55% 0.18 27 / 0.4);
+  border: var(--rule) solid var(--color-rule-strong);
   border-radius: var(--radius);
   overflow: hidden;
   box-shadow: var(--shadow-sm);
+}
+
+.orphans[data-tone="bad"] {
+  border-color: oklch(55% 0.18 27 / 0.4);
 }
 
 .orphans__heading {
   font-family: var(--font-body);
   font-size: var(--text-sm);
   font-weight: 600;
-  color: oklch(65% 0.2 27);
-  background: oklch(55% 0.18 27 / 0.1);
+  color: var(--color-ink-2);
+  background: var(--color-paper-3);
   padding: var(--space-sm) var(--space-md);
-  border-bottom: var(--rule) solid oklch(55% 0.18 27 / 0.25);
+  border-bottom: var(--rule) solid var(--color-rule);
   margin: 0;
   display: flex;
   align-items: center;
   gap: var(--space-xs);
+}
+
+.orphans[data-tone="bad"] .orphans__heading {
+  color: oklch(65% 0.2 27);
+  background: oklch(55% 0.18 27 / 0.1);
+  border-bottom-color: oklch(55% 0.18 27 / 0.25);
 }
 
 .orphans__heading::before {
@@ -980,6 +990,10 @@ body {
   width: 7px;
   height: 7px;
   border-radius: 50%;
+  background: var(--color-ink-3);
+}
+
+.orphans[data-tone="bad"] .orphans__heading::before {
   background: oklch(65% 0.2 27);
   box-shadow: 0 0 0 2px oklch(65% 0.2 27 / 0.25);
   animation: orphan-pulse 1.8s ease-in-out infinite;
@@ -1044,7 +1058,23 @@ body {
 }
 
 .orphan:hover {
+  background: var(--color-paper-3);
+}
+
+.orphans[data-tone="bad"] .orphan:hover {
   background: oklch(55% 0.12 27 / 0.07);
+}
+
+/* Elegir cuales cerrar. Sale solo con dos o mas filas, porque con una sola el
+ * boton Cerrar de esa fila ya es la accion. Tamaño de dedo, y con el acento del
+ * proyecto para que no parezca un control del navegador pegado encima. */
+.orphan__pick {
+  flex: none;
+  inline-size: 1rem;
+  block-size: 1rem;
+  margin: 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
 }
 
 .orphan__port {
@@ -1067,6 +1097,16 @@ body {
   font-size: var(--text-sm);
   font-weight: 500;
   color: var(--color-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Por que esta fila esta en la lista. Va entre el proceso y su linea de
+ * comando, con el color de aviso: el dato no es del proceso, es del puerto. */
+.orphan__claim {
+  font-size: var(--text-xs);
+  color: var(--color-warn);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1120,4 +1160,98 @@ body {
   * {
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Tuneles abiertos. Hereda la caja de `.orphans` y solo cambia el acento: un
+ * intruso es un estorbo local, un tunel es un puerto tuyo abierto a internet.
+ * El ambar lo separa del rojo de intrusos sin gritar como un error, porque
+ * abrirlo fue una decision deliberada y no una falla. */
+.tunnels {
+  border-color: oklch(70% 0.15 75 / 0.55);
+}
+
+/* Con la caja de intrusos ya neutra en reposo, el encabezado heredado quedaba
+ * gris. Esta seccion solo existe cuando hay puertos abiertos a internet, asi
+ * que siempre lleva su acento: no tiene estado de reposo. */
+.tunnels .orphans__heading {
+  color: oklch(58% 0.14 75);
+  background: oklch(70% 0.15 75 / 0.12);
+  border-bottom-color: oklch(70% 0.15 75 / 0.3);
+}
+
+.tunnels .orphans__heading::before {
+  background: oklch(65% 0.16 75);
+  box-shadow: 0 0 0 2px oklch(65% 0.16 75 / 0.25);
+}
+
+.tunnels .orphan__port {
+  color: oklch(52% 0.13 75);
+}
+
+/* `.orphan__name` viene con `white-space: nowrap` y elipsis, que para un nombre
+ * de proceso esta bien y para una URL no: la cortaba a la mitad. El
+ * `word-break` solo no alcanzaba, porque contra un `nowrap` no hay donde
+ * quebrar. La URL entera es el dato de esta fila. */
+.tunnels .orphan__name {
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+/* dialogo de limpieza ------------------------------------------------------ */
+
+.clean {
+  flex: 1;
+  min-block-size: 0;
+  overflow-y: auto;
+  padding: var(--space-md);
+}
+
+/* La tabla de `docker system df` tal cual la formatea Docker: alineada por
+   espacios, asi que necesita mono y no puede envolver. */
+.clean__usage {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-ink-2);
+  background: var(--color-paper);
+  border: var(--rule) solid var(--color-rule);
+  border-radius: var(--radius);
+  margin: 0 0 var(--space-md);
+  padding: var(--space-sm);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.clean__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.clean__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  cursor: pointer;
+}
+
+.clean__row input {
+  flex: none;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+/* Los volumenes tienen datos adentro y no se regeneran: el unico de la lista
+   que no se puede deshacer, y por eso el unico que lleva color. */
+.clean__row[data-riesgo="true"] {
+  color: var(--color-bad);
+}
+
+.clean__warn {
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
 }

@@ -13,6 +13,7 @@ como superficie sensible aunque solo escuche en loopback:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import secrets
 import threading
@@ -29,7 +30,17 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from rich.console import Console
 
-from . import __version__, config, detect, docker, doctor, ports, registry, runner
+from . import (
+    __version__,
+    config,
+    detect,
+    docker,
+    doctor,
+    ports,
+    registry,
+    runner,
+    tunnel,
+)
 
 # `browse_module` porque el endpoint de /api/browse ya se llama browse.
 from . import browse as browse_module
@@ -430,13 +441,89 @@ class KillAllRequest(BaseModel):
     ports: list[int] = Field(max_length=MAX_TARGETS)
 
 
+class CleanRequest(BaseModel):
+    """Que categorias de Docker limpiar.
+
+    Obligatorio y sin default, por lo mismo que en KillAllRequest: un body mal
+    formado no puede leerse como "limpia todo". El `Literal` es la validacion,
+    y el comando de cada categoria sale de `docker.TARGETS`, nunca de la red.
+    """
+
+    targets: list[Literal["containers", "images", "networks", "cache", "volumes"]] = Field(
+        min_length=1, max_length=5
+    )
+
+
 # app ----------------------------------------------------------------------
+
+
+# Tuneles abiertos desde la interfaz. `None` marca un puerto reservado mientras
+# el cliente de tuneles arranca, que tarda segundos: sin la reserva, dos pedidos
+# a la vez dejaban uno de los dos procesos fuera del registro y por lo tanto
+# imposible de cerrar.
+_active_tunnels: dict[int, tunnel.Tunnel | None] = {}
+_tunnels_lock = threading.Lock()
+
+
+def _docker_view() -> dict:
+    """Estado de Docker sobre todos los proyectos registrados, no sobre la pagina."""
+    usan = registry.any_uses_docker(max_age=registry.PORTS_TTL)
+    return {"needed": usan, "down": _docker_is_down() if usan else False}
+
+
+def tunnels_view() -> list[dict]:
+    """Los tuneles abiertos, para que la interfaz pueda mostrarlos y cerrarlos.
+
+    De paso saca del registro los que se murieron por su cuenta: el cliente de
+    tuneles se puede caer solo, y un puerto que figura expuesto sin estarlo es
+    una mentira justo en el panel que existe para no mentir sobre eso.
+    """
+    with _tunnels_lock:
+        for port, tun in list(_active_tunnels.items()):
+            if tun is not None and tun.proc.poll() is not None:
+                del _active_tunnels[port]
+                log.info("el tunel del puerto %d se cerro solo", port)
+        return [
+            {"port": port, "url": tun.url, "provider": tun.provider}
+            for port, tun in sorted(_active_tunnels.items())
+            if tun is not None
+        ]
+
+
+def _cerrar_tuneles() -> None:
+    """Cierra todo tunel que siga abierto."""
+    with _tunnels_lock:
+        vivos = [t for t in _active_tunnels.values() if t is not None]
+        _active_tunnels.clear()
+    for tun in vivos:
+        try:
+            tun.stop()
+        except Exception as exc:  # un tunel roto no puede frenar el apagado
+            log.warning("no se pudo cerrar el tunel del puerto %d: %s", tun.port, exc)
+
+
+@contextlib.asynccontextmanager
+async def _ciclo_de_vida(app: FastAPI):
+    """Al apagar, cierra los tuneles.
+
+    Sin esto `portmaster serve` terminaba y el cliente de tuneles seguia vivo,
+    con el puerto expuesto a internet, sin nada en pantalla que lo dijera y sin
+    forma de cerrarlo que no fuera matarlo a mano.
+    """
+    yield
+    _cerrar_tuneles()
 
 
 def create_app(token: str | None = None) -> FastAPI:
     _load_sessions_state()
     token = token or registry.token()
-    app = FastAPI(title="PortMaster", docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(
+        title="PortMaster",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+        lifespan=_ciclo_de_vida,
+    )
     app.state.token = token
     app.state.allowed_hosts = {"127.0.0.1", "localhost", "[::1]"}
 
@@ -508,6 +595,14 @@ def create_app(token: str | None = None) -> FastAPI:
             "registered": len(known),
             "page": page,
             "pages": pages,
+            # Fuera del paginado a proposito: un tunel expone un puerto a
+            # internet y no puede quedar escondido en la pagina 2.
+            "tunnels": tunnels_view(),
+            # Lo mismo con Docker. La interfaz lo sacaba de los cuatro proyectos
+            # de la pagina, asi que pasar a la segunda apagaba la fila entera si
+            # ahi no habia ninguno con contenedores. Un control que desaparece
+            # no distingue "esta en orden" de "esto dejo de funcionar".
+            "docker": _docker_view(),
         }
 
     @app.get("/api/browse", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
@@ -816,6 +911,29 @@ def create_app(token: str | None = None) -> FastAPI:
         return {"ok": True, "killed": killed, "failed": failed}
 
     @app.post(
+        "/api/docker/clean",
+        dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)],
+    )
+    def docker_clean(body: CleanRequest) -> dict:
+        """Limpia las categorias de Docker que pidio el usuario."""
+        ok, detail = docker.prune(body.targets)
+        log.info("docker clean pedido %s: ok=%s (%s)", body.targets, ok, detail)
+        return {"ok": ok, "detail": detail}
+
+    @app.get(
+        "/api/docker/usage",
+        dependencies=[quota("state", QUOTA_READ), Depends(require_token)],
+    )
+    def docker_usage() -> dict:
+        """La tabla de `docker system df`, para elegir con un numero delante.
+
+        "Limpiar Docker?" sin decir cuanto hay no es una pregunta que se pueda
+        contestar. Sale tal cual la formatea Docker: parsearla seria atarnos a
+        su salida a cambio de nada.
+        """
+        return {"table": docker.usage() or ""}
+
+    @app.post(
         "/api/docker/{action}",
         dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)],
     )
@@ -833,6 +951,56 @@ def create_app(token: str | None = None) -> FastAPI:
         ok, detail = docker.run(action)
         log.info("docker %s pedido: ok=%s (%s)", action, ok, detail)
         return {"ok": ok, "detail": detail}
+
+    @app.post(
+        "/api/share",
+        dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)],
+    )
+    def share_port(port: int, provider: str | None = None) -> dict:
+        """Inicia un tunel efimero para compartir un puerto."""
+        with _tunnels_lock:
+            # Un tunel que se murio solo no puede bloquear el puerto hasta que
+            # pase el sondeo de estado: la limpieza vivia en `tunnels_view`, o
+            # sea que reabrir dependia de que la interfaz hubiera refrescado.
+            previo = _active_tunnels.get(port)
+            if previo is not None and previo.proc.poll() is not None:
+                del _active_tunnels[port]
+                log.info("el tunel del puerto %d se cerro solo", port)
+            if port in _active_tunnels:
+                return {"ok": False, "detail": f"ya hay un tunel para el puerto {port}"}
+            _active_tunnels[port] = None  # reserva, ver _active_tunnels
+
+        try:
+            tun = tunnel.start_tunnel(port, provider=provider)
+        except Exception as exc:
+            with _tunnels_lock:
+                _active_tunnels.pop(port, None)
+            if not isinstance(exc, tunnel.TunnelError):
+                raise
+            return {"ok": False, "detail": str(exc)}
+
+        with _tunnels_lock:
+            _active_tunnels[port] = tun
+        log.info("tunel abierto en el puerto %d via %s", port, tun.provider)
+        return {"ok": True, "url": tun.url, "provider": tun.provider, "port": port}
+
+    @app.delete(
+        "/api/share/{port}",
+        dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)],
+    )
+    def stop_share_port(port: int) -> dict:
+        """Detiene un tunel activo."""
+        with _tunnels_lock:
+            # Solo un tunel ya arrancado. Sacar una reserva liberaria el puerto
+            # mientras su proceso todavia esta naciendo, y ese quedaria afuera.
+            tun = _active_tunnels.get(port)
+            if tun is not None:
+                del _active_tunnels[port]
+        if tun is None:
+            return {"ok": False, "detail": f"No hay tunel activo para el puerto {port}."}
+        tun.stop()
+        log.info("tunel del puerto %d cerrado", port)
+        return {"ok": True, "detail": f"Tunel para puerto {port} cerrado."}
 
     return app
 
@@ -881,7 +1049,21 @@ def _project_view(path: Path) -> dict:
     try:
         stack = detect.stack_for(path)
     except config.ConfigError as exc:
-        return {**base, "state": "invalid", "error": str(exc), "services": [], "profiles": []}
+        # Con el contrato completo: este `return` se salteaba `detected`,
+        # `needs_docker` y `docker_down`, y un proyecto con la config rota
+        # llegaba a la interfaz con la mitad de las claves. En JS eso es
+        # `undefined`, o sea falso silencioso, y el proximo que lea
+        # `p.needs_docker` esperando un booleano se come la trampa.
+        return {
+            **base,
+            "state": "invalid",
+            "error": str(exc),
+            "services": [],
+            "profiles": [],
+            "detected": False,
+            "needs_docker": False,
+            "docker_down": False,
+        }
 
     with sessions_lock:
         session = sessions.get(pid)

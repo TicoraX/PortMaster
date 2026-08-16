@@ -1113,6 +1113,56 @@ def test_docker_exige_token(client):
     assert client.post("/api/docker/start").status_code == 401
 
 
+def test_docker_clean_endpoint(client, monkeypatch):
+    pedidos = []
+    monkeypatch.setattr(
+        docker, "prune", lambda targets: pedidos.append(list(targets)) or (True, "cache: 10MB")
+    )
+    res = client.post("/api/docker/clean", json={"targets": ["cache", "images"]})
+    assert res.status_code == 200
+    assert res.json()["ok"] is True
+    assert "10MB" in res.json()["detail"]
+    assert pedidos == [["cache", "images"]], "el servidor limpio otra cosa que la pedida"
+
+
+def test_docker_clean_sin_lista_no_borra_nada(client, monkeypatch):
+    """Falla cerrado, como kill-all.
+
+    Con un campo opcional, un body mal formado se leia como "limpia todo", y
+    este endpoint borra datos que no vuelven.
+    """
+    llamadas = []
+    monkeypatch.setattr(docker, "prune", lambda targets: llamadas.append(targets) or (True, "ok"))
+
+    assert client.post("/api/docker/clean").status_code == 422
+    assert client.post("/api/docker/clean", json={}).status_code == 422
+    assert client.post("/api/docker/clean", json={"targets": []}).status_code == 422
+    assert client.post("/api/docker/clean", json={"targets": ["borrar-todo"]}).status_code == 422
+    assert llamadas == [], "algo llego a ejecutarse con un cuerpo invalido"
+
+
+def test_share_endpoint(client, monkeypatch):
+    monkeypatch.setattr(
+        server.tunnel,
+        "start_tunnel",
+        lambda port, provider=None: server.tunnel.Tunnel(
+            provider="cloudflared",
+            port=port,
+            url="https://test-tunnel.trycloudflare.com",
+            proc=subprocess.Popen("echo ok", shell=True),
+        ),
+    )
+    res = client.post("/api/share?port=3000")
+    assert res.status_code == 200
+    assert res.json()["ok"] is True
+    assert res.json()["url"] == "https://test-tunnel.trycloudflare.com"
+
+    res_del = client.delete("/api/share/3000")
+    assert res_del.status_code == 200
+    assert res_del.json()["ok"] is True
+
+
+
 # interfaz -----------------------------------------------------------------
 
 
@@ -1143,8 +1193,179 @@ def test_cada_id_del_html_lo_usa_el_js():
     assert not huerfanos, f"ids del HTML que el JS nunca toca: {huerfanos}"
 
 
+def _tunel_falso(monkeypatch, proc):
+    """Un `Tunnel` con un proceso de verdad detras, para poder matarlo y verlo."""
+    monkeypatch.setattr(
+        server.tunnel,
+        "start_tunnel",
+        lambda port, provider=None: server.tunnel.Tunnel(
+            provider="cloudflared",
+            port=port,
+            url=f"https://prueba-{port}.trycloudflare.com",
+            proc=proc,
+        ),
+    )
+
+
+def test_los_tuneles_se_cierran_al_apagar_el_servidor(monkeypatch, free_ports):
+    """`portmaster serve` terminaba y el cliente de tuneles seguia vivo.
+
+    El puerto quedaba expuesto a internet, sin nada en pantalla que lo dijera y
+    sin forma de cerrarlo salvo matar el proceso a mano.
+    """
+    (port,) = free_ports(1)
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    _tunel_falso(monkeypatch, proc)
+    try:
+        app = server.create_app(TOKEN)
+        with TestClient(app, base_url="http://127.0.0.1") as cliente:
+            cliente.headers.update({"Authorization": f"Bearer {TOKEN}"})
+            assert cliente.post(f"/api/share?port={port}").json()["ok"] is True
+            assert proc.poll() is None, "el tunel tiene que seguir vivo mientras el servidor corre"
+
+        # Salir del `with` dispara el apagado de la aplicacion.
+        assert esperar(lambda: proc.poll() is not None), "el tunel sobrevivio al apagado"
+        assert server._active_tunnels == {}
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
+def test_un_segundo_tunel_para_el_mismo_puerto_se_rechaza(monkeypatch, free_ports):
+    """Reemplazar la entrada dejaba al primer proceso fuera del registro.
+
+    Y fuera del registro no lo cierra ni el apagado ni el boton: es la misma
+    fuga, disparada con dos clicks seguidos.
+    """
+    (port,) = free_ports(1)
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    _tunel_falso(monkeypatch, proc)
+    try:
+        app = server.create_app(TOKEN)
+        with TestClient(app, base_url="http://127.0.0.1") as cliente:
+            cliente.headers.update({"Authorization": f"Bearer {TOKEN}"})
+            assert cliente.post(f"/api/share?port={port}").json()["ok"] is True
+
+            segundo = cliente.post(f"/api/share?port={port}").json()
+            assert segundo["ok"] is False
+            assert "ya hay un tunel" in segundo["detail"]
+
+            assert cliente.delete(f"/api/share/{port}").json()["ok"] is True
+            assert esperar(lambda: proc.poll() is not None), "cerrar el tunel no mato el proceso"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
+def test_el_estado_lista_los_tuneles_abiertos(monkeypatch, free_ports):
+    """Fuera del paginado: un puerto expuesto a internet no puede quedar en la
+    pagina 2, que es donde lo dejaria colgarlo de un proyecto."""
+    (port,) = free_ports(1)
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    _tunel_falso(monkeypatch, proc)
+    try:
+        app = server.create_app(TOKEN)
+        with TestClient(app, base_url="http://127.0.0.1") as cliente:
+            cliente.headers.update({"Authorization": f"Bearer {TOKEN}"})
+            assert cliente.get("/api/state").json()["tunnels"] == []
+
+            cliente.post(f"/api/share?port={port}")
+            (activo,) = cliente.get("/api/state").json()["tunnels"]
+            assert activo["port"] == port
+            assert activo["provider"] == "cloudflared"
+            assert activo["url"].startswith("https://")
+
+            cliente.delete(f"/api/share/{port}")
+            assert cliente.get("/api/state").json()["tunnels"] == []
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
+def test_un_tunel_que_se_murio_solo_deja_de_figurar(monkeypatch, free_ports):
+    """El cliente de tuneles se puede caer por su cuenta.
+
+    Un puerto que figura expuesto sin estarlo es una mentira justo en el panel
+    que existe para no mentir sobre eso.
+    """
+    (port,) = free_ports(1)
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    _tunel_falso(monkeypatch, proc)
+    try:
+        app = server.create_app(TOKEN)
+        with TestClient(app, base_url="http://127.0.0.1") as cliente:
+            cliente.headers.update({"Authorization": f"Bearer {TOKEN}"})
+            cliente.post(f"/api/share?port={port}")
+            assert len(cliente.get("/api/state").json()["tunnels"]) == 1
+
+            # El cloudflared se cae solo, sin que nadie apriete Cerrar.
+            proc.kill()
+            proc.wait()
+
+            assert cliente.get("/api/state").json()["tunnels"] == []
+            # Y el puerto queda libre para volver a compartirse.
+            assert cliente.post(f"/api/share?port={port}").json()["ok"] is True
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
+def test_el_estado_de_docker_no_depende_de_la_pagina(client, tmp_path):
+    """Apretar "Siguiente" apagaba la fila de Docker entera.
+
+    Salia de los cuatro proyectos de la pagina, asi que bastaba una segunda
+    pagina sin contenedores para que el estado y los dos botones desaparecieran.
+    Una fila que se va no distingue "esta en orden" de "esto dejo de funcionar",
+    que es el mismo motivo por el que /api/health no pagina.
+    """
+    condocker = tmp_path / "condocker"
+    condocker.mkdir()
+    (condocker / "stack.yaml").write_text(
+        "services:\n  db:\n    command: docker compose up -d db\n    detached: true\n",
+        encoding="utf-8",
+    )
+    registry.add(condocker)
+    # Los demas sin contenedores, suficientes para empujar una segunda pagina.
+    for i in range(server.PAGE_SIZE):
+        root = tmp_path / f"simple{i}"
+        root.mkdir()
+        (root / "stack.yaml").write_text(
+            "services:\n  web:\n    command: echo hola\n", encoding="utf-8"
+        )
+        registry.add(root)
+
+    primera = client.get("/api/state?page=1").json()
+    assert primera["pages"] > 1, "hacen falta dos paginas para que el bug sea alcanzable"
+    ultima = client.get(f"/api/state?page={primera['pages']}").json()
+
+    assert primera["docker"]["needed"] is True
+    assert ultima["docker"]["needed"] is True, "la fila de Docker se apago al pasar de pagina"
+    assert primera["docker"]["down"] == ultima["docker"]["down"]
+
+
+def test_un_proyecto_invalido_devuelve_el_contrato_completo(client, tmp_path):
+    """El `return` temprano se salteaba la mitad de las claves.
+
+    En JS eso es `undefined`, o sea falso silencioso: el proximo que lea
+    `p.needs_docker` esperando un booleano se come la trampa.
+    """
+    roto = tmp_path / "roto"
+    roto.mkdir()
+    (roto / "stack.yaml").write_text("services:\n  a:\n    port: 1\n", encoding="utf-8")
+    registry.add(roto)
+
+    (proyecto,) = client.get("/api/state").json()["projects"]
+    assert proyecto["state"] == "invalid"
+    for clave in ("detected", "needs_docker", "docker_down", "services", "profiles", "error"):
+        assert clave in proyecto, f"falta {clave} en un proyecto invalido"
+
+
 def test_un_servicio_sin_puerto_declarado_no_es_intruso_de_nadie(client, tmp_path, free_ports):
-    """El caso de un Next o un vite detectado: `ready: listen`, sin `port:`.
+    """El caso de un Next detectado: `ready: listen`, sin `port:` en el stack.
 
     El puerto lo elige el servicio al arrancar, asi que no estaba en la lista de
     "esto es nuestro", que solo miraba los declarados. Otro proyecto registrado
@@ -1154,6 +1375,7 @@ def test_un_servicio_sin_puerto_declarado_no_es_intruso_de_nadie(client, tmp_pat
     """
     (port,) = free_ports(1)
 
+    # Lo levanta sin declarar el puerto: lo abre y el runner lo descubre.
     sin_declarar = tmp_path / "sindeclarar"
     sin_declarar.mkdir()
     (sin_declarar / "stack.yaml").write_text(
@@ -1163,6 +1385,7 @@ def test_un_servicio_sin_puerto_declarado_no_es_intruso_de_nadie(client, tmp_pat
     )
     pid = registry.project_id(registry.add(sin_declarar))
 
+    # Y otro que si declara ese mismo numero, que es quien lo acusaba.
     declarante = tmp_path / "declarante"
     declarante.mkdir()
     (declarante / "stack.yaml").write_text(
@@ -1179,3 +1402,31 @@ def test_un_servicio_sin_puerto_declarado_no_es_intruso_de_nadie(client, tmp_pat
     assert [o for o in intrusos if o["port"] == port] == [], (
         "el servicio propio figura como intruso de otro proyecto"
     )
+
+
+def test_un_puerto_que_dos_proyectos_declaran_es_una_sola_fila(client, tmp_path, free_ports):
+    """Salia una fila por proyecto: el mismo pid y la misma linea de comando dos
+    veces, que ademas sugeria que habia dos procesos. El puerto es uno y el
+    proceso es uno; lo que hay de a varios son los proyectos que lo reclaman."""
+    (port,) = free_ports(1)
+    for nombre in ("blog", "tienda"):
+        root = tmp_path / nombre
+        root.mkdir()
+        (root / "stack.yaml").write_text(
+            f"services:\n  web:\n    command: echo hola\n    port: {port}\n", encoding="utf-8"
+        )
+        registry.add(root)
+
+    proc = subprocess.Popen([sys.executable, "-c", SERVER.format(port=port)])
+    try:
+        assert esperar(lambda: not ports.is_free(port)), "el intruso nunca tomo el puerto"
+
+        intrusos = [o for o in client.get("/api/ports/orphans").json()["orphans"]
+                    if o["port"] == port]
+
+        assert len(intrusos) == 1, f"una fila por puerto, llegaron {len(intrusos)}"
+        assert intrusos[0]["projects"] == ["blog", "tienda"], "los dos que lo declaran, ordenados"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()

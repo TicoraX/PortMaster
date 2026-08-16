@@ -4,6 +4,46 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
+## [1.1.0] - 2026-08-15
+
+### Agregado
+
+- **Runner de Tareas (`portmaster run`)**: Soporte para la sección `scripts:` en `stack.yaml` permitiendo ejecutar tareas individuales o pipelines secuenciales con inyección completa de variables de entorno.
+- **Túneles Seguros (`portmaster share`)**: Integración sin configuración adicional con `cloudflared`, `ngrok`, `lt` y `tailscale` para exponer puertos locales a URLs públicas HTTPS efímeras.
+- **Higiene del Host (`portmaster clean`)**: limpieza de Docker por categorías,
+  con un comando propio para cada una en vez del `system prune` que las tira
+  todas juntas. Contenedores parados, imágenes sin tag, redes sin usar y caché
+  de build; los volúmenes anónimos van aparte, porque tienen datos adentro y no
+  se regeneran. Pregunta antes mostrando `docker system df`, y `--yes` la
+  saltea. En el CLI se acota con `--solo cache --solo images`; en la interfaz,
+  el botón abre un diálogo con una casilla por categoría.
+- **Servidor MCP para Agentes de IA (`portmaster mcp`)**: Servidor Model Context Protocol nativo sobre `stdio` para introspección y control en tiempo real desde Claude Desktop, Cursor, Gemini y Antigravity.
+- **Proyectos Compuestos (`includes:`)**: Composición modular de stacks importando servicios de otros repositorios o subdirectorios con aislamiento de `cwd` y prevención de ciclos.
+- **Matriz de Colisión de Puertos**: Detección anticipada y alerta visual en `portmaster list` sobre puertos en disputa entre proyectos registrados.
+- **Variables de Entorno & Hooks**: Soporte para `env_file`, bóveda global `~/.portmaster/env.global`, y hooks de ciclo de vida `pre_start` y `post_start`.
+- **Detección Avanzada**: Soporte para `uv run` en proyectos Python y detección de frameworks web modernos (Hono, Fastify, Astro, Vite, Nitro, etc.).
+- **Mejoras Web**: Botones interactivos de "Túnel" y "Limpiar Docker" en la interfaz web local.
+
+### Arreglado
+
+- La fila de estado de Docker desaparecía al pasar de página. Salía de los
+  cuatro proyectos de la página y no del registro entero, así que bastaba una
+  segunda página sin contenedores para que se fueran el estado y los botones.
+- La sección "Procesos intrusos" se veía en rojo, con un punto latiendo, aunque
+  estuviera diciendo que no hay ninguno. Ahora el rojo aparece solo cuando hay
+  algo que mirar: un rojo encendido todo el tiempo deja de significar rojo.
+- La caja de logs quedaba en blanco sin explicar por qué. Solo se registran los
+  de un stack arrancado desde la interfaz, y ahora lo dice.
+
+### Cambiado
+
+- Cada fila de "Procesos intrusos" separa lo que antes iba pegado con un punto:
+  qué proceso ocupa el puerto, qué proyectos lo reclaman, y su línea de comando.
+  `node.exe · Decepticon` se leía como "este proceso es de Decepticon", cuando
+  es al revés. Y ahora hay una fila por puerto y no una por proyecto: un puerto
+  que dos proyectos declaran salía dos veces con el mismo pid.
+- El arreglo del servicio propio listado como intruso salió antes, en 1.0.3.
+
 ## [1.0.3] - 2026-08-15
 
 ### Arreglado
@@ -118,6 +158,7 @@ Primera versión publicada. Lo que sigue es el alcance completo, no un diff.
   la tarjeta, y no lo impide: `docker compose up -d` sobre un contenedor que ya
   está arriba es el mismo caso y ahí es correcto. Ver `docs/pendientes.md`.
 
+[1.1.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.1.0
 [1.0.3]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.3
 [1.0.2]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.2
 [1.0.1]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.1

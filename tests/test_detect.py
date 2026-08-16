@@ -736,3 +736,40 @@ def test_dotnet_en_subcarpeta_de_backend(tmp_path):
     servicio = detect.detect(tmp_path).services["server"]
     assert servicio.command == "dotnet watch run"
     assert servicio.cwd == tmp_path.resolve() / "server"
+
+
+def test_python_fastapi_con_uv_lock(tmp_path):
+    write(tmp_path, "main.py", "app = FastAPI()\n")
+    write(tmp_path, "pyproject.toml", '[project]\ndependencies = ["fastapi", "uvicorn"]\n')
+    write(tmp_path, "uv.lock", "version = 1\n")
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["api"].command == "uv run uvicorn main:app --reload"
+
+
+def test_python_django_con_uv_lock(tmp_path):
+    write(tmp_path, "manage.py", "# django manage.py\n")
+    write(tmp_path, "uv.lock", "version = 1\n")
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["api"].command == "uv run python manage.py runserver"
+
+
+@pytest.mark.parametrize("framework", ["hono", "fastify", "express", "nitro", "astro"])
+def test_un_framework_moderno_declara_un_servidor(tmp_path, framework):
+    """Uno por dependencia y no uno solo con nombre de varios.
+
+    El test se llamaba `astro_hono` y solo declaraba `hono`: los otros tres que
+    se agregaron a DEV_SERVERS nunca se probaron.
+    """
+    write(
+        tmp_path,
+        "package.json",
+        json.dumps({
+            "dependencies": {framework: "^4.0.0"},
+            "scripts": {"dev": "tsx watch src/index.ts"},
+        }),
+    )
+    stack = detect.detect(tmp_path)
+    assert stack.services["web"].command == "npm run dev"
+

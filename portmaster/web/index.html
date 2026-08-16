@@ -76,6 +76,23 @@
         dentro de una carpeta con <code>stack.yaml</code>, o pegá la ruta acá abajo.
       </p>
 
+      <!-- A diferencia de la de intrusos, esta si desaparece cuando esta vacia.
+           Un "no hay intrusos" informa que el chequeo corrio; un "no hay
+           tuneles" es ruido permanente para algo que solo existe si vos
+           apretaste el boton. Cuando hay, es lo que mas grita de la pagina. -->
+      <section class="orphans tunnels" id="tunnels" hidden>
+        <div class="orphans__header">
+          <div>
+            <h2 class="orphans__heading" id="tunnels-heading">Túneles abiertos</h2>
+            <p class="orphans__desc">
+              Estos puertos están accesibles desde internet por una URL pública.
+              Se cierran solos al apagar PortMaster.
+            </p>
+          </div>
+        </div>
+        <ul class="orphans__list" id="tunnels-list"></ul>
+      </section>
+
       <section class="orphans" id="orphans" hidden>
         <div class="orphans__header">
           <div>
@@ -112,9 +129,29 @@
                abre o reinicia segun el estado; el texto lo pone updateDocker. -->
           <span class="tools__docker" id="docker-state" hidden></span>
           <button class="btn btn--quiet" type="button" id="btn-docker" hidden></button>
+          <button class="btn btn--quiet" type="button" id="btn-docker-clean" hidden>Limpiar Docker</button>
           <input type="file" id="file-import" accept=".json" hidden />
         </div>
       </form>
+
+      <!-- Elegir que limpiar. El boton abria un prune de todo junto, y el cache
+           de build puede ser decenas de GB que se regeneran solas mientras que
+           una imagen sin tag puede ser la capa base que vas a volver a bajar.
+           No es lo mismo, y hasta ahora iba en el mismo paquete. -->
+      <dialog class="picker" id="clean-modal" aria-label="Limpiar Docker">
+        <div class="picker__head">
+          <p class="picker__path">Qué limpiar de Docker</p>
+          <button class="btn btn--quiet" type="button" data-clean="close">Cerrar</button>
+        </div>
+        <div class="clean">
+          <pre class="clean__usage" id="clean-usage" tabindex="0"></pre>
+          <ul class="clean__list" id="clean-targets"></ul>
+        </div>
+        <div class="picker__foot">
+          <span class="clean__warn" id="clean-warn"></span>
+          <button class="btn btn--primary" type="button" id="clean-run">Limpiar</button>
+        </div>
+      </dialog>
 
       <dialog class="picker ports-modal" id="ports-modal" aria-label="Mapa de puertos">
         <div class="picker__head">
@@ -162,7 +199,11 @@
     </main>
 
     <footer class="colophon">
-      <span>Solo loopback. Nada de esto sale de tu máquina.</span>
+      <!-- Decia "Nada de esto sale de tu máquina", escrito antes de que
+           existiera el botón Túnel, que está tres bloques más arriba en esta
+           misma página. La primera mitad sigue siendo cierta y es la que
+           tranquiliza; la segunda avisa donde corresponde. -->
+      <span>Solo loopback. Un túnel que abras acá sí expone ese puerto a internet.</span>
       <!-- Sin esto no hay forma de saber si el navegador esta sirviendo una
            pagina vieja de su cache. Lo llena el JS con lo que contesta el
            servidor: si no aparece, lo cargado es viejo. -->

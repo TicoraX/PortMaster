@@ -73,3 +73,54 @@ Sirve cuando el stack ya está corriendo en otra terminal. Recorre los puertos
 en orden inverso al de arranque, porque lo que uno quiere mirar suele ser el
 frontend, y abre el primero que contesta. Una base de datos no contesta HTTP,
 así que nunca es el elegido.
+
+## Ejecutar scripts y pipelines de tareas
+
+```bash
+portmaster run              # lista las tareas declaradas en stack.yaml
+portmaster run test         # ejecuta una tarea específica
+portmaster run test -k foo  # pasa argumentos adicionales al comando
+portmaster run check        # ejecuta un pipeline secuencial de scripts
+```
+
+Permite definir scripts del proyecto en `stack.yaml` (ej. tests, linters, migraciones, seeders)
+y ejecutarlos con el contexto completo de variables de entorno inyectadas (`.env`, `env.global`, etc.).
+Si un paso del pipeline falla, la ejecución se detiene inmediatamente con el código de error correspondiente.
+
+## Compartir servicios vía túneles públicos
+
+```bash
+portmaster share               # expone el servicio web principal
+portmaster share 3000          # expone un puerto específico
+portmaster share api           # expone el servicio por nombre
+portmaster share --provider ngrok  # fuerza el proveedor (cloudflared, ngrok, lt, tailscale)
+```
+
+Genera un túnel HTTPS seguro y efímero hacia el puerto local, ideal para probar webhooks,
+compartir vistas previas con clientes o probar en dispositivos móviles. Presioná `Ctrl-C` para
+cerrar el túnel de inmediato.
+
+## Limpieza de recursos Docker (Higiene)
+
+```bash
+portmaster clean             # limpia contenedores parados, redes e imagenes sin tag
+portmaster clean --volumes   # limpia tambien volumenes anonimos/huerfanos
+```
+
+Ejecuta `docker system prune` de manera asistida y segura para liberar espacio en disco
+y eliminar recursos huérfanos dejados por stacks anteriores.
+
+## Servidor MCP para Agentes de IA
+
+```bash
+portmaster mcp
+```
+
+Inicia un servidor estándar Model Context Protocol (MCP) sobre `stdio`. Permite que
+asistentes inteligentes (Claude Desktop, Cursor, Gemini, Antigravity) inspeccionen el estado
+del stack, ejecuten scripts declarados en `stack.yaml`, consulten puertos y diagnostiquen errores
+en tiempo real durante sesiones de desarrollo guiado.
+
+
+
+

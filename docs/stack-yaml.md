@@ -70,3 +70,57 @@ para un contenedor: `docker compose up -d` termina enseguida y lo que queda
 vivo no es hijo nuestro. Los servicios detectados de un compose traen
 `stop: docker compose stop <nombre>`. Si el comando falla o tarda más de 90s, se
 loguea y el apagado sigue con el resto.
+
+## env_file
+
+`env_file` permite cargar variables de entorno desde uno o varios archivos (ej.
+`env_file: .env` o `env_file: [.env, .env.local]`). La precedencia de variables es:
+1. `os.environ` del sistema anfitrión.
+2. `~/.portmaster/env.global` (bóveda global de variables compartidas, si existe).
+3. Archivos listados en `env_file` (en orden de aparición).
+4. `env:` declarado explícitamente en el servicio.
+
+Con una excepción: después de aplicar todo lo anterior, `build_env` fija
+`PYTHONUNBUFFERED=1` y `FORCE_COLOR=1`. Para esas dos claves `env:` no gana,
+porque de ellas depende que los logs del servicio lleguen a la terminal y a
+la interfaz en vivo en lugar de quedarse en un buffer.
+
+## pre_start y post_start
+
+Hooks síncronos de ciclo de vida:
+*   `pre_start`: Comando que se ejecuta antes de lanzar el proceso principal (ej.
+    migraciones de base de datos o compilación). Si retorna un código distinto de 0,
+    el arranque del servicio se aborta inmediatamente.
+*   `post_start`: Comando que se ejecuta una vez que el servicio confirma que está
+    listo (`ready`). Si falla, se reporta el error y se detiene el stack.
+
+## scripts
+
+La sección `scripts` permite declarar tareas de desarrollo o pipelines secuenciales:
+
+```yaml
+scripts:
+  test: pytest tests/ -v
+  lint: ruff check .
+  check: [lint, test]           # ejecuta lint y luego test
+  migrate: alembic upgrade head
+```
+
+Se ejecutan con `portmaster run <nombre>` (ej. `portmaster run test`). Cada comando corre en la raíz del proyecto y recibe el contexto de variables de entorno inyectadas.
+
+## includes
+
+Permite componer stacks importando servicios de otros repositorios o subcarpetas:
+
+```yaml
+includes:
+  - ../servicio-auth
+  - ./servicios/pagos
+```
+
+Cada ruta relativa se resuelve respecto al `stack.yaml` padre. Los servicios importados
+se ejecutan en su propio directorio de trabajo (`cwd`) y pueden declararse como dependencias
+en `needs:` de cualquier otro servicio del stack. Se detectan y previenen ciclos de inclusión.
+
+
+

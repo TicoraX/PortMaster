@@ -195,3 +195,129 @@ def test_el_ejemplo_del_repo_es_valido(tmp_path):
 
     stack = config.load(destino)
     assert [s.name for s in stack.resolve("fullstack")] == ["db", "api", "web"]
+
+
+def test_env_file_y_hooks(tmp_path):
+    (tmp_path / ".env").write_text("DB_PASS=secret\nPORT=5432\n", encoding="utf-8")
+    (tmp_path / ".env.local").write_text("DEBUG=true\n", encoding="utf-8")
+
+    body = """
+    services:
+      api:
+        command: npm run dev
+        env_file: [.env, .env.local]
+        pre_start: npm run build
+        post_start: npm run seed
+      worker:
+        command: python worker.py
+        env_file: .env
+    """
+    stack = config.load(write(tmp_path, body))
+    api = stack.services["api"]
+    worker = stack.services["worker"]
+
+    assert api.env_file == ((tmp_path / ".env").resolve(), (tmp_path / ".env.local").resolve())
+    assert api.pre_start == "npm run build"
+    assert api.post_start == "npm run seed"
+
+    assert worker.env_file == ((tmp_path / ".env").resolve(),)
+    assert worker.pre_start is None
+    assert worker.post_start is None
+
+
+def test_parse_env_file(tmp_path):
+    env_file = tmp_path / "test.env"
+    env_file.write_text(
+        textwrap.dedent("""
+        # Comentario
+        API_KEY=12345
+        export DB_HOST="localhost"
+        SECRET_TOKEN='super-secret'
+        WITH_INLINE=valor # comentario inline
+        EMPTY=
+        """),
+        encoding="utf-8",
+    )
+    parsed = config.parse_env_file(env_file)
+    assert parsed["API_KEY"] == "12345"
+    assert parsed["DB_HOST"] == "localhost"
+    assert parsed["SECRET_TOKEN"] == "super-secret"
+    assert parsed["WITH_INLINE"] == "valor"
+    assert parsed["EMPTY"] == ""
+    assert "# Comentario" not in parsed
+
+
+def test_env_file_fuera_de_raiz(tmp_path):
+    body = """
+    services:
+      api:
+        command: echo hola
+        env_file: ../../.env
+    """
+    with pytest.raises(config.ConfigError, match="sale de la raiz"):
+        config.load(write(tmp_path, body))
+
+
+def test_includes_combinar_servicios(tmp_path):
+    sub = tmp_path / "subproject"
+    sub.mkdir()
+    sub_body = """
+    services:
+      db:
+        command: echo db
+        port: 5432
+    """
+    write(sub, sub_body)
+
+    main_body = """
+    includes:
+      - subproject
+    services:
+      api:
+        command: echo api
+        port: 8080
+        needs: [db]
+    """
+    stack = config.load(write(tmp_path, main_body))
+    assert "db" in stack.services
+    assert "api" in stack.services
+    assert stack.services["api"].needs == ("db",)
+    resolved = stack.resolve()
+    assert [s.name for s in resolved] == ["db", "api"]
+
+
+def test_includes_ciclo_detectado(tmp_path):
+    p1 = tmp_path / "proj1"
+    p2 = tmp_path / "proj2"
+    p1.mkdir()
+    p2.mkdir()
+
+    write(p1, "includes: [../proj2]\nservices:\n  s1:\n    command: echo s1")
+    write(p2, "includes: [../proj1]\nservices:\n  s2:\n    command: echo s2")
+
+    with pytest.raises(config.ConfigError, match="ciclo de inclusion"):
+        config.load(p1 / "stack.yaml")
+
+
+def test_includes_conflicto_nombre_servicio(tmp_path):
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    write(sub, "services:\n  api:\n    command: echo api2")
+    main = write(tmp_path, "includes: [sub]\nservices:\n  api:\n    command: echo api1")
+
+    with pytest.raises(config.ConfigError, match="conflicto de servicio"):
+        config.load(main)
+
+
+
+
+def test_un_env_con_bytes_invalidos_no_tumba_el_arranque(tmp_path):
+    """UnicodeDecodeError no es un OSError, y solo se atrapaba OSError.
+
+    Un .env guardado en latin-1, que es lo que deja cualquier editor viejo en
+    Windows, hacia reventar el arranque entero del stack en vez de quedarse sin
+    esas variables.
+    """
+    archivo = tmp_path / ".env"
+    archivo.write_bytes(b"CLAVE=valor\nACENTO=caf\xe9\n")
+    assert config.parse_env_file(archivo) == {}

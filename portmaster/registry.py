@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import stat
+import threading
 import time
 from pathlib import Path
 
@@ -126,6 +127,64 @@ def declared_ports(max_age: float = 0.0) -> dict[int, list[Path]]:
     return found
 
 
+_docker_cache: tuple[float, bool] | None = None
+_cache_lock = threading.Lock()
+# Sube con cada cambio del registro. Un escaneo que empezo antes de un `add`
+# no puede escribir su resultado despues: seria el estado viejo pisando al
+# nuevo, con 30s de vida por delante.
+_revision = 0
+
+
+def any_uses_docker(max_age: float = 0.0) -> bool:
+    """Si algun proyecto registrado levanta contenedores.
+
+    La interfaz decide con esto si muestra la fila de Docker, y tiene que salir
+    de todos los proyectos y no de la pagina que estas mirando: colgado de la
+    pagina, pasar a la segunda apagaba la fila entera cuando ahi no habia
+    ninguno con contenedores. Es el mismo motivo por el que `/api/health` no
+    pagina y por el que los tuneles van fuera del paginado.
+
+    ponytail: cache propio, o sea un segundo recorrido de todos los proyectos
+    ademas del de `declared_ports`. Los dos vencen a los 30s, asi que la vista
+    de estado paga uno de cada doce sondeos. Si alguna vez pesa, los dos salen
+    de un unico recorrido que resuelva cada stack una sola vez.
+    """
+    global _docker_cache
+    now = time.monotonic()
+    with _cache_lock:
+        if max_age > 0 and _docker_cache is not None and now - _docker_cache[0] < max_age:
+            return _docker_cache[1]
+        revision = _revision
+
+    usa = any(_uses_docker(path) for path in paths())
+
+    with _cache_lock:
+        # Solo si el registro no cambio mientras se recorria. El escaneo tarda
+        # decenas de milisegundos y `/api/state` corre en un threadpool: sin
+        # esto, un `add` que caia justo en el medio limpiaba el cache y despues
+        # este escaneo, que arranco antes, lo repoblaba con el valor viejo. La
+        # fila de Docker volvia a tardar 30s en aparecer, que es el bug que ya
+        # arreglamos una vez.
+        if revision == _revision:
+            _docker_cache = (now, usa)
+    return usa
+
+
+def _uses_docker(path: Path) -> bool:
+    """Un proyecto roto no cuenta, y no es motivo para no revisar el resto."""
+    # Adentro de la funcion: `doctor` importa este modulo, y arriba seria un
+    # ciclo. Es el mismo `_program` que usa la vista de estado, y compartirlo
+    # importa: si algun dia cambia como se saca el nombre del programa, los dos
+    # lados tienen que cambiar juntos o la fila aparece cuando no debe.
+    from . import doctor
+
+    try:
+        stack = detect.stack_for(path)
+    except (config.ConfigError, OSError):
+        return False
+    return any(doctor._program(s.command) == "docker" for s in stack.services.values())
+
+
 def _ports_of(path: Path) -> set[int]:
     """Puertos declarados por un proyecto. Vacio si no se puede leer.
 
@@ -140,10 +199,16 @@ def _ports_of(path: Path) -> set[int]:
 
 
 def _save(items: list[Path]) -> None:
-    global _ports_cache
+    global _ports_cache, _docker_cache, _revision
     # Agregar o quitar un proyecto cambia el mapa ya mismo: esperar el TTL
     # dejaria la interfaz media hora sin ver el proyecto recien registrado.
-    _ports_cache = None
+    # Los dos caches salen del mismo recorrido del registro y vencen juntos: el
+    # de Docker se sumo despues y quedo afuera de esta linea, y el sintoma fue
+    # registrar un proyecto con contenedores y que la fila tardara 30s en salir.
+    with _cache_lock:
+        _ports_cache = None
+        _docker_cache = None
+        _revision += 1
     HOME.mkdir(parents=True, exist_ok=True)
     ordered = sorted({str(p) for p in items})
     tmp = PROJECTS.with_suffix(".tmp")
@@ -197,7 +262,11 @@ def find_orphans(running_ports: frozenset[int] | set[int] = frozenset()) -> list
     terminal. Quien llame con esa suposicion tiene que mostrar la lista antes de
     cerrar nada.
     """
-    result = []
+    # Una fila por puerto, con todos los proyectos que lo reclaman. Antes salia
+    # una por proyecto, asi que un puerto que dos declaran aparecia dos veces
+    # con el mismo pid y la misma linea de comando: informacion repetida que
+    # ademas sugeria que habia dos procesos.
+    por_puerto: dict[int, dict] = {}
     for path in paths():
         try:
             stack = detect.stack_for(path)
@@ -214,15 +283,28 @@ def find_orphans(running_ports: frozenset[int] | set[int] = frozenset()) -> list
                 continue
             if ports.proxy_owner(status):
                 continue
-            result.append({
-                "port": svc.port,
-                "project": stack.name or path.name,
-                "pid": status.pid,
-                "name": status.name or "desconocido",
-                "cmd": (status.cmdline or "")[:120] or None,
-                "create_time": status.create_time,
-            })
+            nombre = stack.name or path.name
+            fila = por_puerto.get(svc.port)
+            if fila is None:
+                por_puerto[svc.port] = {
+                    "port": svc.port,
+                    "projects": [nombre],
+                    "pid": status.pid,
+                    "name": status.name or "desconocido",
+                    "cmd": (status.cmdline or "")[:120] or None,
+                    "create_time": status.create_time,
+                }
+            elif nombre not in fila["projects"]:
+                fila["projects"].append(nombre)
 
-    result.sort(key=lambda x: x["port"])
-    return result
+    for fila in por_puerto.values():
+        fila["projects"].sort()
+    return [por_puerto[port] for port in sorted(por_puerto)]
+
+
+def find_collisions(max_age: float = 0.0) -> dict[int, list[Path]]:
+    """Devuelve los puertos disputados por dos o mas proyectos registrados."""
+    ports_map = declared_ports(max_age=max_age)
+    return {port: projs for port, projs in ports_map.items() if len(projs) > 1}
+
 

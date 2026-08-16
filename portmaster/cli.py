@@ -10,7 +10,19 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import __version__, config, detect, doctor, ports, registry, runner
+from . import (
+    __version__,
+    config,
+    detect,
+    docker,
+    doctor,
+    mcp,
+    ports,
+    registry,
+    runner,
+    scripts,
+    tunnel,
+)
 
 app = typer.Typer(
     help="Orquestador de entornos de desarrollo locales.",
@@ -162,7 +174,14 @@ def _free_all(yes: bool, force: bool) -> None:
 
     table = Table(box=None, pad_edge=False, show_header=False)
     for item in encontrados:
-        table.add_row(f"  [bold]:{item['port']}[/]", item["name"], f"[dim]{item['project']}[/]")
+        # Los proyectos que reclaman ese puerto, no el dueño del proceso: el
+        # proceso es un desconocido y por eso esta en esta lista.
+        reclaman = ", ".join(item["projects"])
+        table.add_row(
+            f"  [bold]:{item['port']}[/]",
+            f"{item['name']} (pid {item['pid']})",
+            f"[dim]lo declara {reclaman}[/]",
+        )
     console.print(f"Ocupando puertos de tus proyectos ({len(encontrados)}):")
     console.print(table)
     console.print("[dim]Si alguno lo arrancaste vos desde otra terminal, tambien se cierra.[/]")
@@ -486,14 +505,29 @@ def list_cmd() -> None:
         console.print("[dim]No hay proyectos registrados. Registra uno con: portmaster add <ruta>[/]")
         return
 
+    declared = registry.declared_ports()
+    collisions = registry.find_collisions()
+
     table = Table(box=None, pad_edge=False)
     table.add_column("ID")
     table.add_column("NOMBRE")
+    table.add_column("PUERTOS")
     table.add_column("RUTA")
     for path in items:
         pid = registry.project_id(path)
-        table.add_row(pid, path.name, str(path))
+        proj_ports = sorted(p for p, projs in declared.items() if path in projs)
+        port_labels = []
+        for p in proj_ports:
+            if p in collisions:
+                port_labels.append(f"[yellow]{p}[/]")
+            else:
+                port_labels.append(str(p))
+        ports_str = ", ".join(port_labels) if port_labels else "-"
+        table.add_row(pid, path.name, ports_str, str(path))
     console.print(table)
+    if collisions:
+        console.print("[dim yellow]Puertos en amarillo se disputan entre dos o mas proyectos.[/]")
+
 
 
 @app.command("remove")
@@ -641,6 +675,187 @@ def _root(
     ),
 ) -> None:
     pass
+
+
+@app.command(
+    "run",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def run_cmd(
+    ctx: typer.Context,
+    script: str = typer.Argument(None, help="Nombre del script a ejecutar"),
+) -> None:
+    """Ejecuta un script o pipeline de tareas definido en stack.yaml."""
+    try:
+        stack = detect.stack_for(Path.cwd())
+    except config.ConfigError as exc:
+        err.print(f"{exc}")
+        raise typer.Exit(1)
+
+    if not script:
+        if not stack.scripts:
+            console.print("[dim]No hay scripts declarados en stack.yaml.[/]")
+            raise typer.Exit(0)
+        table = Table(box=None, pad_edge=False)
+        table.add_column("SCRIPT", style="bold cyan")
+        table.add_column("COMANDOS")
+        for name, cmds in stack.scripts.items():
+            table.add_row(name, " && ".join(cmds))
+        console.print(table)
+        raise typer.Exit(0)
+
+    try:
+        code = scripts.run_script(stack, script, extra_args=ctx.args, console=console)
+    except config.ConfigError as exc:
+        err.print(f"{exc}")
+        raise typer.Exit(1)
+
+    if code != 0:
+        raise typer.Exit(code)
+
+
+@app.command("share")
+def share_cmd(
+    target: str = typer.Argument(
+        None,
+        help="Servicio o puerto a compartir (ej. 3000, web). Sin argumentos, usa el puerto principal.",
+    ),
+    provider: str = typer.Option(
+        None,
+        "--provider",
+        "-p",
+        help="Proveedor de tuneles: cloudflared, ngrok, lt, tailscale.",
+    ),
+) -> None:
+    """Expone un servicio local a internet mediante un tunel seguro."""
+    import time
+
+    port: int | None = None
+    if target and target.isdigit():
+        port = int(target)
+    else:
+        try:
+            stack = detect.stack_for(Path.cwd())
+        except config.ConfigError as exc:
+            err.print(f"{exc}\nEspecifica el puerto a compartir: portmaster share 3000")
+            raise typer.Exit(1)
+
+        if target and target in stack.services:
+            svc = stack.services[target]
+            if svc.port:
+                port = svc.port
+            else:
+                err.print(f"El servicio '{target}' no tiene un puerto fijo declarado.")
+                raise typer.Exit(1)
+        elif target:
+            err.print(f"Servicio o puerto '{target}' no encontrado en el stack.")
+            raise typer.Exit(1)
+        else:
+            ports_list = stack.ports()
+            if not ports_list:
+                err.print(f"{stack.path} no declara ningun puerto.")
+                raise typer.Exit(1)
+            port = ports_list[-1]
+
+    console.print(f"[bold cyan]Iniciando tunel hacia 127.0.0.1:{port}...[/]")
+    try:
+        tun = tunnel.start_tunnel(port, provider=provider)
+    except tunnel.TunnelError as exc:
+        err.print(f"[bold red]Error:[/] {exc}")
+        raise typer.Exit(1)
+
+    console.print(f"[bold green]Tunel activo![/] Proveedor: [bold]{tun.provider}[/]")
+    console.print(f"Local:   [cyan]http://127.0.0.1:{port}[/]")
+    console.print(f"Publico: [bold underline green]{tun.url}[/]")
+    console.print("[dim]Presiona Ctrl-C para cerrar el tunel.[/]")
+
+    try:
+        while tun.proc.poll() is None:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        tun.stop()
+        console.print("\n[dim]Tunel cerrado.[/]")
+
+
+@app.command("clean")
+def clean_cmd(
+    solo: list[str] = typer.Option(
+        None,
+        "--solo",
+        "-s",
+        help=(
+            "Limpiar solo estas categorias: containers, images, networks, cache. "
+            "Repetible. Sin esto, las cuatro."
+        ),
+    ),
+    volumes: bool = typer.Option(
+        False,
+        "--volumes",
+        "-v",
+        help="Elimina tambien volumenes anonimos/huerfanos de Docker.",
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="No preguntar."),
+) -> None:
+    """Limpia contenedores parados, imagenes sin tag y recursos huerfanos de Docker."""
+    # `--solo` acota, `--volumes` suma. Son cosas distintas: una elige de lo que
+    # se regenera, la otra agrega lo que tiene datos adentro.
+    objetivos = list(solo) if solo else list(docker.DEFAULT_TARGETS)
+    desconocidos = [t for t in objetivos if t not in docker.TARGETS]
+    if desconocidos:
+        err.print(
+            f"Categoria desconocida: {', '.join(desconocidos)}. "
+            f"Validas: {', '.join(docker.DEFAULT_TARGETS)}"
+        )
+        raise typer.Exit(1)
+    if volumes:
+        objetivos.append("volumes")
+    # Preguntando, como `free`. Es el unico comando de la herramienta que borra
+    # datos en vez de cerrar procesos, y era el unico que no preguntaba nada: el
+    # boton de la interfaz ya pedia dos clicks y este se ejecutaba en silencio.
+    if not yes:
+        tabla = docker.usage()
+        if tabla:
+            console.print(tabla)
+        console.print("Se borra: " + ", ".join(docker.ETIQUETAS[t] for t in objetivos if t != "volumes"))
+        if volumes:
+            console.print("[bold]Y los volumenes anonimos huerfanos, que tienen datos adentro.[/]")
+        if not typer.confirm("Seguir?", default=False):
+            console.print("Cancelado.")
+            return
+
+    console.print("[bold cyan]Ejecutando limpieza de recursos Docker...[/]")
+    ok, msg = docker.prune(objetivos)
+    if ok:
+        console.print(f"[bold green]Listo:[/] {msg}")
+    else:
+        err.print(f"[bold red]Error al limpiar Docker:[/] {msg}")
+        raise typer.Exit(1)
+
+
+@app.command("mcp")
+def mcp_cmd(
+    show_config: bool = typer.Option(
+        False,
+        "--config",
+        "-c",
+        help="Muestra el bloque de configuracion JSON para Claude Desktop, Cursor o Antigravity.",
+    ),
+) -> None:
+    """Inicia el servidor Model Context Protocol (MCP) sobre stdio para agentes de IA."""
+    if show_config:
+        cfg = {
+            "mcpServers": {
+                "portmaster": {
+                    "command": "portmaster",
+                    "args": ["mcp"],
+                }
+            }
+        }
+        console.print(json.dumps(cfg, indent=2))
+        return
+    mcp.serve_stdio()
 
 
 @app.command("version")

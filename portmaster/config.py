@@ -10,7 +10,7 @@ proyecto.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -36,6 +36,9 @@ class Service:
     # Comando de apagado propio, para lo que no muere matando al proceso que lo
     # arranco: un contenedor vive fuera de nuestro arbol.
     stop: str | None = None
+    env_file: tuple[Path, ...] = ()
+    pre_start: str | None = None
+    post_start: str | None = None
 
 
 @dataclass(frozen=True)
@@ -45,6 +48,7 @@ class Stack:
     path: Path
     services: dict[str, Service]
     profiles: dict[str, tuple[str, ...]]
+    scripts: dict[str, tuple[str, ...]] = field(default_factory=dict)
     detected: bool = False
     # Que arranca sin pedir perfil. None significa "todo", que es lo que un
     # stack.yaml siempre quiso decir. Existe por los `profiles:` de compose, que
@@ -104,9 +108,15 @@ def find(start: Path | None = None) -> Path:
     raise ConfigError(f"no se encontro {CONFIG_NAMES[0]} desde {current}")
 
 
-def load(path: Path | None = None) -> Stack:
+def load(path: Path | None = None, _visited: set[Path] | None = None) -> Stack:
     path = (path or find()).resolve()
     root = path.parent
+
+    if _visited is None:
+        _visited = set()
+    if path in _visited:
+        raise ConfigError(f"ciclo de inclusion detectado en: {path}")
+    _visited.add(path)
 
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -116,14 +126,49 @@ def load(path: Path | None = None) -> Stack:
     if not isinstance(raw, dict):
         raise ConfigError(f"{path}: la raiz debe ser un mapa")
 
-    services_raw = raw.get("services")
-    if not isinstance(services_raw, dict) or not services_raw:
-        raise ConfigError(f"{path}: falta la seccion 'services' o esta vacia")
+    services_raw = raw.get("services") or {}
+    if not isinstance(services_raw, dict):
+        raise ConfigError(f"{path}: 'services' debe ser un mapa")
 
     services = {
         name: _service(name, spec, root)
         for name, spec in services_raw.items()
     }
+
+    includes_raw = raw.get("includes")
+    if includes_raw is not None:
+        if isinstance(includes_raw, str):
+            includes_list = [includes_raw]
+        elif isinstance(includes_raw, list) and all(isinstance(i, str) for i in includes_raw):
+            includes_list = includes_raw
+        else:
+            raise ConfigError(f"{path}: 'includes' debe ser una ruta o lista de rutas")
+
+        for inc_item in includes_list:
+            inc_path = (root / inc_item).resolve()
+            if inc_path.is_dir():
+                target_file = None
+                for cname in CONFIG_NAMES:
+                    if (inc_path / cname).is_file():
+                        target_file = inc_path / cname
+                        break
+                if target_file is None:
+                    raise ConfigError(f"no se encontro stack.yaml en la ruta incluida: {inc_path}")
+                inc_stack = load(target_file, _visited=set(_visited))
+            elif inc_path.is_file():
+                inc_stack = load(inc_path, _visited=set(_visited))
+            else:
+                raise ConfigError(f"ruta de inclusion no encontrada: {inc_path}")
+
+            for s_name, s_svc in inc_stack.services.items():
+                if s_name in services:
+                    raise ConfigError(
+                        f"conflicto de servicio: '{s_name}' ya esta declarado y no puede ser importado desde '{inc_path}'"
+                    )
+                services[s_name] = s_svc
+
+    if not services:
+        raise ConfigError(f"{path}: falta la seccion 'services' o esta vacia")
 
     for service in services.values():
         for dep in service.needs:
@@ -131,6 +176,7 @@ def load(path: Path | None = None) -> Stack:
                 raise ConfigError(f"'{service.name}.needs' apunta a '{dep}', que no existe")
 
     profiles = _profiles(raw.get("profiles"), services)
+    scripts = _scripts(raw.get("scripts"))
 
     stack = Stack(
         name=str(raw.get("name") or root.name),
@@ -138,6 +184,7 @@ def load(path: Path | None = None) -> Stack:
         path=path,
         services=services,
         profiles=profiles,
+        scripts=scripts,
         default=_default(raw.get("default"), services),
     )
     stack.resolve()  # falla al cargar si hay ciclos, no en tiempo de arranque
@@ -151,6 +198,7 @@ def _service(name: str, spec: object, root: Path) -> Service:
 
     unknown = set(spec) - {
         "command", "cwd", "port", "ready", "needs", "env", "detached", "stop",
+        "env_file", "pre_start", "post_start",
     }
     if unknown:
         raise ConfigError(f"{where}: campos desconocidos: {', '.join(sorted(unknown))}")
@@ -190,6 +238,14 @@ def _service(name: str, spec: object, root: Path) -> Service:
     if stop is not None and (not isinstance(stop, str) or not stop.strip()):
         raise ConfigError(f"{where}.stop debe ser texto no vacio")
 
+    pre_start = spec.get("pre_start")
+    if pre_start is not None and (not isinstance(pre_start, str) or not pre_start.strip()):
+        raise ConfigError(f"{where}.pre_start debe ser texto no vacio")
+
+    post_start = spec.get("post_start")
+    if post_start is not None and (not isinstance(post_start, str) or not post_start.strip()):
+        raise ConfigError(f"{where}.post_start debe ser texto no vacio")
+
     return Service(
         name=name,
         command=command,
@@ -200,6 +256,9 @@ def _service(name: str, spec: object, root: Path) -> Service:
         env=_env(where, spec.get("env")),
         detached=detached,
         stop=stop,
+        env_file=_env_files(where, spec.get("env_file"), root),
+        pre_start=pre_start,
+        post_start=post_start,
     )
 
 
@@ -271,3 +330,91 @@ def _profiles(value: object, services: dict[str, Service]) -> dict[str, tuple[st
                 raise ConfigError(f"profiles.{name} incluye '{member}', que no existe")
         profiles[str(name)] = tuple(members)
     return profiles
+
+
+def _env_files(where: str, value: object, root: Path) -> tuple[Path, ...]:
+    if value is None:
+        return ()
+    raw_list: list[object]
+    if isinstance(value, str):
+        raw_list = [value]
+    elif isinstance(value, list):
+        raw_list = value
+    else:
+        raise ConfigError(f"{where}.env_file debe ser una ruta o lista de rutas")
+
+    paths: list[Path] = []
+    for item in raw_list:
+        if not isinstance(item, str) or not item.strip():
+            raise ConfigError(f"{where}.env_file debe contener rutas relativas de texto no vacias")
+        candidate = Path(item)
+        if candidate.is_absolute():
+            raise ConfigError(f"{where}.env_file debe ser relativa a la raiz del proyecto")
+        resolved = (root / candidate).resolve()
+        if not resolved.is_relative_to(root):
+            raise ConfigError(f"{where}.env_file sale de la raiz del proyecto: {item!r}")
+        paths.append(resolved)
+    return tuple(paths)
+
+
+def parse_env_file(path: Path) -> dict[str, str]:
+    """Lee un archivo .env simple sin dependencias externas."""
+    if not path.is_file():
+        return {}
+    env: dict[str, str] = {}
+    try:
+        content = path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        # UnicodeDecodeError no es un OSError: un .env guardado en latin-1, que
+        # es lo que deja cualquier editor viejo en Windows, tumbaba el arranque
+        # entero del stack en vez de quedarse sin esas variables.
+        return {}
+
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        if "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        key = key.strip()
+        val = val.strip()
+        if not key:
+            continue
+        if len(val) >= 2 and (
+            (val.startswith('"') and val.endswith('"'))
+            or (val.startswith("'") and val.endswith("'"))
+        ):
+            val = val[1:-1]
+        else:
+            if " #" in val:
+                val = val.split(" #", 1)[0].rstrip()
+        env[key] = val
+    return env
+
+
+def _scripts(value: object) -> dict[str, tuple[str, ...]]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ConfigError("'scripts' debe ser un mapa de nombre a comando o lista de comandos")
+
+    scripts = {}
+    for name, cmd in value.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ConfigError("el nombre del script debe ser texto no vacio")
+        if isinstance(cmd, str):
+            if not cmd.strip():
+                raise ConfigError(f"scripts.{name} no puede estar vacio")
+            scripts[str(name)] = (cmd.strip(),)
+        elif isinstance(cmd, list):
+            if not cmd or not all(isinstance(c, str) and c.strip() for c in cmd):
+                raise ConfigError(f"scripts.{name} debe ser una lista de comandos de texto no vacios")
+            scripts[str(name)] = tuple(str(c).strip() for c in cmd)
+        else:
+            raise ConfigError(f"scripts.{name} debe ser un texto o lista de comandos")
+    return scripts
+
+

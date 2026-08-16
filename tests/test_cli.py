@@ -535,3 +535,101 @@ def test_version_por_flag_y_por_subcomando():
         assert res.exit_code == 0, args
         # Rich pinta los numeros: sin sacar los codigos, el 1.0.0 llega partido.
         assert portmaster.__version__ in re.sub(r"\x1b\[[0-9;]*m", "", res.output), args
+
+
+def test_cli_run_listar_y_ejecutar(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    flag = tmp_path / "cli_flag.txt"
+    body = f"""
+    name: cli-run-test
+    services:
+      srv:
+        command: echo srv
+    scripts:
+      touch_flag: {sys.executable} -c "import pathlib; pathlib.Path(r'{flag}').write_text('flag_ok')"
+      test: pytest tests/
+    """
+    (tmp_path / "stack.yaml").write_text(textwrap.dedent(body), encoding="utf-8")
+
+    # Sin argumentos: lista los scripts
+    res_list = runner.invoke(cli.app, ["run"])
+    assert res_list.exit_code == 0
+    assert "touch_flag" in res_list.output
+    assert "test" in res_list.output
+
+    # Ejecutar script existente
+    res_run = runner.invoke(cli.app, ["run", "touch_flag"])
+    assert res_run.exit_code == 0
+    assert flag.exists()
+    assert flag.read_text() == "flag_ok"
+
+
+def test_cli_share_sin_proveedores(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    body = """
+    name: share-test
+    services:
+      web:
+        command: echo web
+        port: 3000
+    """
+    (tmp_path / "stack.yaml").write_text(textwrap.dedent(body), encoding="utf-8")
+    monkeypatch.setattr(cli.tunnel.shutil, "which", lambda x: None)
+
+    res = runner.invoke(cli.app, ["share", "web"])
+    assert res.exit_code == 1
+    assert "no se encontro ningun cliente de tuneles" in res.output
+
+
+def test_cli_clean_docker(monkeypatch):
+    monkeypatch.setattr(cli.docker, "prune", lambda targets: (True, "Total reclaimed space: 0B"))
+    # Con --yes: lo que este test afirma es que el resultado del prune llega a
+    # la salida, y desde que `clean` pregunta, ese camino es el del flag.
+    res = runner.invoke(cli.app, ["clean", "--yes"])
+    assert res.exit_code == 0
+    assert "Total reclaimed space: 0B" in res.output
+
+
+
+
+
+def _prune_espia(monkeypatch):
+    """Registra si `clean` llego a ejecutar el prune, sin correr docker."""
+    llamadas = []
+    monkeypatch.setattr(
+        cli.docker, "prune", lambda targets: llamadas.append(list(targets)) or (True, "ok")
+    )
+    monkeypatch.setattr(cli.docker, "usage", lambda: None)
+    return llamadas
+
+
+def test_clean_no_borra_nada_si_decis_que_no(monkeypatch):
+    """Es el unico comando que borra datos en vez de cerrar procesos, y era el
+    unico que no preguntaba. El boton de la interfaz ya pedia dos clicks."""
+    llamadas = _prune_espia(monkeypatch)
+    res = runner.invoke(cli.app, ["clean"], input="n\n")
+    assert res.exit_code == 0
+    assert "Cancelado" in res.output
+    assert llamadas == [], "borro con la respuesta en no"
+
+
+def test_clean_pregunta_con_no_por_defecto(monkeypatch):
+    """Enter pelado no puede borrar 17 GB."""
+    llamadas = _prune_espia(monkeypatch)
+    runner.invoke(cli.app, ["clean"], input="\n")
+    assert llamadas == [], "el default de la confirmacion no es 'no'"
+
+
+def test_clean_avisa_de_los_volumenes_aparte(monkeypatch):
+    """Los volumenes tienen datos adentro: no es lo mismo que un cache."""
+    _prune_espia(monkeypatch)
+    res = runner.invoke(cli.app, ["clean", "--volumes"], input="n\n")
+    assert "volumenes anonimos huerfanos" in _sin_saltos(res.output)
+
+
+def test_clean_con_yes_no_pregunta(monkeypatch):
+    """Para scripts, igual que `free --yes`."""
+    llamadas = _prune_espia(monkeypatch)
+    res = runner.invoke(cli.app, ["clean", "--yes"])
+    assert res.exit_code == 0
+    assert llamadas == [list(cli.docker.DEFAULT_TARGETS)], "sin --solo van las cuatro"
