@@ -63,6 +63,16 @@ README lo documenta. Por eso el apagado mata el arbol de procesos completo: con
 `shell=True` el hijo directo es el shell y matarlo solo a el deja huerfano al
 servidor de verdad.
 
+Vale para **todo** subproceso, no solo para los servicios del runner. `tunnel.py`
+nacio con un `proc.terminate()` propio y por eso cerrar un tunel mataba el `cmd`
+y dejaba el `cloudflared` publicando el puerto. Hay una sola implementacion,
+`runner._terminate_tree`: cualquier cosa que lance con `shell=True` la usa.
+
+Lo mismo con lo que se concatena a una linea de shell. `shlex.join` es correcto
+en POSIX y no alcanza en Windows, y `subprocess.list2cmdline` tampoco: escapa las
+comillas como `\"`, que es la convencion de `CreateProcess`, y `cmd.exe` no la
+entiende. Hacen falta las dos capas. Ver `scripts._entrecomillar`.
+
 ### La interfaz no usa webfonts
 
 La CSP es `default-src 'self'`. Una herramienta local que le pide fuentes a un
@@ -74,3 +84,41 @@ roles tipograficos salen de stacks del sistema.
 `pytest`. Todo con sockets y procesos reales, sin mocks: es la unica forma de
 probar un modulo cuyo trabajo es hablar con el sistema operativo. La CI corre en
 Linux, macOS y Windows porque los tres divergen justo ahi.
+
+### Un test verde no prueba nada por si solo
+
+Prueba que el test corrio. Que ademas pruebe el codigo hay que ganarselo, y en
+este proyecto se gana de dos formas.
+
+**Reproducir antes de arreglar.** Ejecutando, no leyendo. Si no se puede mostrar
+el sintoma, todavia no se entendio el bug y el arreglo es una apuesta.
+
+**Revertir despues de arreglar.** Se deshace el cambio y se confirma que el test
+se pone rojo. Un test que pasa con y sin el arreglo no cubre nada, y eso no se
+ve mirandolo.
+
+Los tres bugs mas caros de la version 1.1.0 estaban tapados por tests en verde:
+
+- `portmaster_free_port` llamaba `ports.kill(port)`, el numero de puerto en el
+  lugar del pid: pedir liberar el 3000 mataba al proceso 3000. El test parcheaba
+  `kill` con `lambda port: True`. El mock **nombraba el parametro como el bug** y
+  devolvia algo que la funcion real no devuelve, asi que afirmaba un mensaje que
+  el codigo no podia producir.
+- `Tunnel.stop` mataba el shell y dejaba el cliente de tuneles publicando el
+  puerto. El test usaba `MagicMock` y afirmaba `terminate`. **El proceso que
+  sobrevivia es uno que el mock no tiene**, asi que era invisible por
+  construccion.
+- Un cache global sin invalidar hacia que la fila de Docker tardara 30s en
+  aparecer. Se delato como un test que pasa solo y falla acompañado. Ese sintoma
+  nunca es ruido del runner: es estado compartido entre tests.
+
+El patron es siempre el mismo. El mock se escribe mirando el codigo que se va a
+probar, hereda sus errores, y despues los confirma. Contra eso solo sirve el
+sistema operativo de verdad: un proceso que se puede consultar con `psutil`, un
+socket que se puede escanear, un archivo que aparece o no aparece.
+
+**Afirmar el efecto, no la forma.** Un test de "no paso nada malo" que pregunta
+por un nombre exacto es fragil justo contra las variantes de lo malo: con un
+entrecomillado a medias, la redireccion inyectada creaba el archivo con una
+comilla pegada al nombre y preguntar por `inyectado.txt` daba verde con la
+inyeccion hecha. Preguntar si aparecio **cualquier** archivo nuevo, no.
