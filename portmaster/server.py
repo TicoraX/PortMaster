@@ -830,11 +830,12 @@ def create_app(token: str | None = None) -> FastAPI:
         running_ports = set()
         for s in active_sessions:
             # Los que el servicio eligio al arrancar, ademas de los declarados.
-            # Un proyecto con `ready: listen` no declara puerto, asi que el suyo
-            # no entraba aca: otro proyecto que si declarara ese numero lo veia
-            # ocupado y acusaba de intruso al proceso que acabamos de levantar
-            # nosotros. Cerrarlo desde la interfaz mataba el servicio propio, y
-            # "Liberar todos" lo hacia de un click.
+            # Un proyecto con `ready: listen` no declara puerto (un Next, un
+            # vite), asi que el suyo no entraba aca: otro proyecto que si
+            # declarara ese numero lo veia ocupado y acusaba de intruso al
+            # proceso que acabamos de levantar nosotros. Cerrarlo desde la
+            # interfaz mataba el servicio propio, y "Liberar todos" lo hacia de
+            # un click.
             descubiertos = s.service_ports()
             for name, state in s.service_states().items():
                 if state == "stopped":

@@ -22,6 +22,37 @@ esquema de `stack.yaml` y las rutas de la API local.
 - **Detección Avanzada**: Soporte para `uv run` en proyectos Python y detección de frameworks web modernos (Hono, Fastify, Astro, Vite, Nitro, etc.).
 - **Mejoras Web**: Botones interactivos de "Túnel" y "Limpiar Docker" en la interfaz web local.
 
+### Arreglado
+
+- La fila de estado de Docker desaparecía al pasar de página. Salía de los
+  cuatro proyectos de la página y no del registro entero, así que bastaba una
+  segunda página sin contenedores para que se fueran el estado y los botones.
+- La sección "Procesos intrusos" se veía en rojo, con un punto latiendo, aunque
+  estuviera diciendo que no hay ninguno. Ahora el rojo aparece solo cuando hay
+  algo que mirar: un rojo encendido todo el tiempo deja de significar rojo.
+- La caja de logs quedaba en blanco sin explicar por qué. Solo se registran los
+  de un stack arrancado desde la interfaz, y ahora lo dice.
+
+### Cambiado
+
+- Cada fila de "Procesos intrusos" separa lo que antes iba pegado con un punto:
+  qué proceso ocupa el puerto, qué proyectos lo reclaman, y su línea de comando.
+  `node.exe · Decepticon` se leía como "este proceso es de Decepticon", cuando
+  es al revés. Y ahora hay una fila por puerto y no una por proyecto: un puerto
+  que dos proyectos declaran salía dos veces con el mismo pid.
+- El arreglo del servicio propio listado como intruso salió antes, en 1.0.3.
+
+## [1.0.3] - 2026-08-15
+
+### Arreglado
+
+- Un servicio arrancado desde la interfaz podía aparecer en "Procesos intrusos"
+  y ser ofrecido para cerrar. Pasaba con los que no declaran puerto y lo eligen
+  al arrancar (`ready: listen`: un Next, un vite): ese puerto no entraba en la
+  lista de lo que corre por cuenta nuestra, así que otro proyecto registrado que
+  declarara ese mismo número lo veía ocupado por un desconocido. Cerrarlo mataba
+  el servicio propio, y "Liberar todos" lo hacía de un click sobre todos.
+
 ## [1.0.2] - 2026-08-08
 
 ### Arreglado
@@ -126,6 +157,7 @@ Primera versión publicada. Lo que sigue es el alcance completo, no un diff.
   está arriba es el mismo caso y ahí es correcto. Ver `docs/pendientes.md`.
 
 [1.1.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.1.0
+[1.0.3]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.3
 [1.0.2]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.2
 [1.0.1]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.1
 [1.0.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.0
