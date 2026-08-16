@@ -464,6 +464,16 @@ ui.btnDockerClean.addEventListener("click", (event) => {
 
 let killAllTimer = null;
 let killAllSnapshot = null;
+// Los puertos tildados. Vacio quiere decir "todos", que era el unico
+// comportamiento posible hasta ahora: el boton no puede quedarse sin efecto por
+// no haber tildado nada.
+let orphanPicks = new Set();
+
+function refreshKillAllLabel() {
+  if (ui.orphansKillAll.dataset.armed === "true") return;
+  const elegidos = orphanPicks.size;
+  ui.orphansKillAll.textContent = elegidos ? `Cerrar ${elegidos}` : "Liberar todos";
+}
 
 function disarmKillAll() {
   if (killAllTimer !== null) {
@@ -472,7 +482,7 @@ function disarmKillAll() {
   }
   killAllSnapshot = null;
   delete ui.orphansKillAll.dataset.armed;
-  ui.orphansKillAll.textContent = "Liberar todos";
+  refreshKillAllLabel();
 }
 
 // Dos pasos sobre el mismo boton, igual que Congelar: cerrar varios procesos de
@@ -482,7 +492,8 @@ ui.orphansKillAll.addEventListener("click", (event) => {
   const button = event.currentTarget;
 
   if (button.dataset.armed !== "true") {
-    killAllSnapshot = [...latestOrphansList];
+    const elegidos = latestOrphansList.filter((o) => orphanPicks.has(o.port));
+    killAllSnapshot = elegidos.length ? elegidos : [...latestOrphansList];
     if (killAllSnapshot.length === 0) return;
 
     button.dataset.armed = "true";
@@ -506,6 +517,7 @@ ui.orphansKillAll.addEventListener("click", (event) => {
       body: JSON.stringify({ ports: victimas.map((o) => o.port) }),
     });
     delete ui.orphansList.dataset.ids;
+    orphanPicks.clear();
     if (res.failed.length) {
       const errores = res.failed.map((f) => `:${f.port} (${f.reason})`).join(", ");
       flash(`Cerrados ${res.killed.length} de ${victimas.length}. Fallaron: ${errores}`, "warn");
@@ -806,8 +818,17 @@ async function refreshOrphans() {
     ui.orphans.dataset.tone = list.length ? "bad" : "";
 
     // Con uno solo no aporta nada: la fila ya trae su propio boton Cerrar.
-    ui.orphansKillAll.hidden = list.length < 2;
+    const varios = list.length >= 2;
+    ui.orphansKillAll.hidden = !varios;
     latestOrphansList = list;
+
+    // Lo tildado que ya no esta en la lista deja de contar: si no, el boton
+    // diria "Cerrar 3" con dos filas en pantalla.
+    const vigentes = new Set(list.map((o) => o.port));
+    for (const port of [...orphanPicks]) {
+      if (!vigentes.has(port)) orphanPicks.delete(port);
+    }
+    refreshKillAllLabel();
 
     const nextIds = list.map((o) => o.port).join(",") || "__empty__";
     if (ui.orphansList.dataset.ids === nextIds) return;
@@ -828,6 +849,25 @@ async function refreshOrphans() {
       ...list.map((orphan) => {
         const li = document.createElement("li");
         li.className = "orphan";
+
+        // La casilla solo con dos o mas: con una sola fila, elegirla y despues
+        // apretar un boton es un paso de mas para lo que ya hace su Cerrar.
+        let pick = null;
+        if (varios) {
+          pick = document.createElement("input");
+          pick.type = "checkbox";
+          pick.className = "orphan__pick";
+          pick.checked = orphanPicks.has(orphan.port);
+          pick.setAttribute(
+            "aria-label",
+            `Elegir el puerto ${orphan.port}, ocupado por ${orphan.name}`,
+          );
+          pick.addEventListener("change", () => {
+            if (pick.checked) orphanPicks.add(orphan.port);
+            else orphanPicks.delete(orphan.port);
+            refreshKillAllLabel();
+          });
+        }
 
         const portTag = document.createElement("span");
         portTag.className = "orphan__port";
@@ -873,6 +913,7 @@ async function refreshOrphans() {
           });
         });
 
+        if (pick) li.append(pick);
         li.append(portTag, info, kill);
         return li;
       }),

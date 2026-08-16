@@ -1065,6 +1065,18 @@ body {
   background: oklch(55% 0.12 27 / 0.07);
 }
 
+/* Elegir cuales cerrar. Sale solo con dos o mas filas, porque con una sola el
+ * boton Cerrar de esa fila ya es la accion. Tamaño de dedo, y con el acento del
+ * proyecto para que no parezca un control del navegador pegado encima. */
+.orphan__pick {
+  flex: none;
+  inline-size: 1rem;
+  block-size: 1rem;
+  margin: 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
 .orphan__port {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
