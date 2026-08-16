@@ -4,6 +4,17 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
+## [1.0.3] - 2026-08-15
+
+### Arreglado
+
+- Un servicio arrancado desde la interfaz podía aparecer en "Procesos intrusos"
+  y ser ofrecido para cerrar. Pasaba con los que no declaran puerto y lo eligen
+  al arrancar (`ready: listen`: un Next, un vite): ese puerto no entraba en la
+  lista de lo que corre por cuenta nuestra, así que otro proyecto registrado que
+  declarara ese mismo número lo veía ocupado por un desconocido. Cerrarlo mataba
+  el servicio propio, y "Liberar todos" lo hacía de un click sobre todos.
+
 ## [1.0.2] - 2026-08-08
 
 ### Arreglado
@@ -107,6 +118,7 @@ Primera versión publicada. Lo que sigue es el alcance completo, no un diff.
   la tarjeta, y no lo impide: `docker compose up -d` sobre un contenedor que ya
   está arriba es el mismo caso y ahí es correcto. Ver `docs/pendientes.md`.
 
+[1.0.3]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.3
 [1.0.2]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.2
 [1.0.1]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.1
 [1.0.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.0

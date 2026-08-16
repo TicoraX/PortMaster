@@ -1141,3 +1141,41 @@ def test_cada_id_del_html_lo_usa_el_js():
         if ident not in js and camel not in js:
             huerfanos.append(ident)
     assert not huerfanos, f"ids del HTML que el JS nunca toca: {huerfanos}"
+
+
+def test_un_servicio_sin_puerto_declarado_no_es_intruso_de_nadie(client, tmp_path, free_ports):
+    """El caso de un Next o un vite detectado: `ready: listen`, sin `port:`.
+
+    El puerto lo elige el servicio al arrancar, asi que no estaba en la lista de
+    "esto es nuestro", que solo miraba los declarados. Otro proyecto registrado
+    que si declarara ese numero lo veia ocupado y acusaba de intruso al proceso
+    que acababamos de levantar nosotros: cerrarlo mataba el servicio propio, y
+    "Liberar todos" lo hacia de un click.
+    """
+    (port,) = free_ports(1)
+
+    sin_declarar = tmp_path / "sindeclarar"
+    sin_declarar.mkdir()
+    (sin_declarar / "stack.yaml").write_text(
+        f'services:\n  web:\n    command: {sys.executable} -c "{SERVER.format(port=port)}"\n'
+        "    ready: listen\n",
+        encoding="utf-8",
+    )
+    pid = registry.project_id(registry.add(sin_declarar))
+
+    declarante = tmp_path / "declarante"
+    declarante.mkdir()
+    (declarante / "stack.yaml").write_text(
+        f"services:\n  web:\n    command: echo hola\n    port: {port}\n", encoding="utf-8"
+    )
+    registry.add(declarante)
+
+    assert client.post(f"/api/projects/{pid}/up", json={}).status_code == 200
+    assert esperar(lambda: server.sessions[pid].service_ports().get("web") == port), (
+        "el runner nunca descubrio el puerto"
+    )
+
+    intrusos = client.get("/api/ports/orphans").json()["orphans"]
+    assert [o for o in intrusos if o["port"] == port] == [], (
+        "el servicio propio figura como intruso de otro proyecto"
+    )
