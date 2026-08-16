@@ -4,6 +4,16 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
+## [1.1.1] - 2026-08-16
+
+### Cambiado
+
+- La confirmación de "Reiniciar Docker" nombra los contenedores que se va a
+  llevar, en vez de decir "los contenedores". Reiniciar el motor los baja a
+  todos, incluidos los de proyectos que no estás mirando, y no se puede hacer a
+  medias: nombrarlos antes es lo único que se puede hacer por quien aprieta el
+  botón. Si el motor no contesta a tiempo, queda la frase de siempre.
+
 ## [1.1.0] - 2026-08-15
 
 ### Agregado
@@ -158,6 +168,7 @@ Primera versión publicada. Lo que sigue es el alcance completo, no un diff.
   la tarjeta, y no lo impide: `docker compose up -d` sobre un contenedor que ya
   está arriba es el mismo caso y ahí es correcto. Ver `docs/pendientes.md`.
 
+[1.1.1]: https://github.com/TicoraX/PortMaster/releases/tag/v1.1.1
 [1.1.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.1.0
 [1.0.3]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.3
 [1.0.2]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.2

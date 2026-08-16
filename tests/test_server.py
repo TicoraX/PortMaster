@@ -1430,3 +1430,23 @@ def test_un_puerto_que_dos_proyectos_declaran_es_una_sola_fila(client, tmp_path,
         if proc.poll() is None:
             proc.kill()
             proc.wait()
+
+
+def test_el_endpoint_de_contenedores_lista_los_que_corren(client, monkeypatch):
+    """Reiniciar el motor los baja a todos, incluidos los de proyectos que no
+    estas mirando. No se puede a medias, asi que lo unico que queda es nombrarlos
+    antes: "los contenedores" no dice si son dos o nueve."""
+    monkeypatch.setattr(server.docker, "running", lambda: ["web", "db"])
+    assert client.get("/api/docker/containers").json()["running"] == ["web", "db"]
+
+
+def test_los_contenedores_con_docker_caido_no_rompen_la_confirmacion(client, monkeypatch):
+    """Sin motor, la lista vacia y la interfaz se queda con la frase generica.
+
+    Un 500 acá dejaría el botón armado sin decir nada, que es peor que decir de
+    más: la advertencia importa incluso cuando no se puede detallar.
+    """
+    monkeypatch.setattr(server.docker, "running", lambda: [])
+    res = client.get("/api/docker/containers")
+    assert res.status_code == 200
+    assert res.json()["running"] == []
