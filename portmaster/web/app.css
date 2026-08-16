@@ -1090,6 +1090,16 @@ body {
   text-overflow: ellipsis;
 }
 
+/* Por que esta fila esta en la lista. Va entre el proceso y su linea de
+ * comando, con el color de aviso: el dato no es del proceso, es del puerto. */
+.orphan__claim {
+  font-size: var(--text-xs);
+  color: var(--color-warn);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .orphan__meta {
   font-family: var(--font-mono);
   font-size: var(--text-xs);

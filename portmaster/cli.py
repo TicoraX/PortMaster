@@ -174,7 +174,14 @@ def _free_all(yes: bool, force: bool) -> None:
 
     table = Table(box=None, pad_edge=False, show_header=False)
     for item in encontrados:
-        table.add_row(f"  [bold]:{item['port']}[/]", item["name"], f"[dim]{item['project']}[/]")
+        # Los proyectos que reclaman ese puerto, no el dueño del proceso: el
+        # proceso es un desconocido y por eso esta en esta lista.
+        reclaman = ", ".join(item["projects"])
+        table.add_row(
+            f"  [bold]:{item['port']}[/]",
+            f"{item['name']} (pid {item['pid']})",
+            f"[dim]lo declara {reclaman}[/]",
+        )
     console.print(f"Ocupando puertos de tus proyectos ({len(encontrados)}):")
     console.print(table)
     console.print("[dim]Si alguno lo arrancaste vos desde otra terminal, tambien se cierra.[/]")

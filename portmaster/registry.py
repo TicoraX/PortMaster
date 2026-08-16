@@ -262,7 +262,11 @@ def find_orphans(running_ports: frozenset[int] | set[int] = frozenset()) -> list
     terminal. Quien llame con esa suposicion tiene que mostrar la lista antes de
     cerrar nada.
     """
-    result = []
+    # Una fila por puerto, con todos los proyectos que lo reclaman. Antes salia
+    # una por proyecto, asi que un puerto que dos declaran aparecia dos veces
+    # con el mismo pid y la misma linea de comando: informacion repetida que
+    # ademas sugeria que habia dos procesos.
+    por_puerto: dict[int, dict] = {}
     for path in paths():
         try:
             stack = detect.stack_for(path)
@@ -279,17 +283,23 @@ def find_orphans(running_ports: frozenset[int] | set[int] = frozenset()) -> list
                 continue
             if ports.proxy_owner(status):
                 continue
-            result.append({
-                "port": svc.port,
-                "project": stack.name or path.name,
-                "pid": status.pid,
-                "name": status.name or "desconocido",
-                "cmd": (status.cmdline or "")[:120] or None,
-                "create_time": status.create_time,
-            })
+            nombre = stack.name or path.name
+            fila = por_puerto.get(svc.port)
+            if fila is None:
+                por_puerto[svc.port] = {
+                    "port": svc.port,
+                    "projects": [nombre],
+                    "pid": status.pid,
+                    "name": status.name or "desconocido",
+                    "cmd": (status.cmdline or "")[:120] or None,
+                    "create_time": status.create_time,
+                }
+            elif nombre not in fila["projects"]:
+                fila["projects"].append(nombre)
 
-    result.sort(key=lambda x: x["port"])
-    return result
+    for fila in por_puerto.values():
+        fila["projects"].sort()
+    return [por_puerto[port] for port in sorted(por_puerto)]
 
 
 def find_collisions(max_age: float = 0.0) -> dict[int, list[Path]]:

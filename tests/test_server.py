@@ -1382,3 +1382,31 @@ def test_un_servicio_sin_puerto_declarado_no_es_intruso_de_nadie(client, tmp_pat
     assert [o for o in intrusos if o["port"] == port] == [], (
         "el servicio propio figura como intruso de otro proyecto"
     )
+
+
+def test_un_puerto_que_dos_proyectos_declaran_es_una_sola_fila(client, tmp_path, free_ports):
+    """Salia una fila por proyecto: el mismo pid y la misma linea de comando dos
+    veces, que ademas sugeria que habia dos procesos. El puerto es uno y el
+    proceso es uno; lo que hay de a varios son los proyectos que lo reclaman."""
+    (port,) = free_ports(1)
+    for nombre in ("blog", "tienda"):
+        root = tmp_path / nombre
+        root.mkdir()
+        (root / "stack.yaml").write_text(
+            f"services:\n  web:\n    command: echo hola\n    port: {port}\n", encoding="utf-8"
+        )
+        registry.add(root)
+
+    proc = subprocess.Popen([sys.executable, "-c", SERVER.format(port=port)])
+    try:
+        assert esperar(lambda: not ports.is_free(port)), "el intruso nunca tomo el puerto"
+
+        intrusos = [o for o in client.get("/api/ports/orphans").json()["orphans"]
+                    if o["port"] == port]
+
+        assert len(intrusos) == 1, f"una fila por puerto, llegaron {len(intrusos)}"
+        assert intrusos[0]["projects"] == ["blog", "tienda"], "los dos que lo declaran, ordenados"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()

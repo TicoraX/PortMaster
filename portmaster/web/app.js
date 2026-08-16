@@ -836,16 +836,30 @@ async function refreshOrphans() {
         const info = document.createElement("div");
         info.className = "orphan__info";
 
+        // Tres renglones y no dos campos pegados con un punto. `node.exe ·
+        // Decepticon` se lee como "este proceso es de Decepticon", y es al
+        // reves: el proceso es un desconocido y Decepticon es quien reclama el
+        // puerto. Son dos hechos distintos y ahora ocupan lugares distintos.
         const name = document.createElement("div");
         name.className = "orphan__name";
-        name.textContent = `${orphan.name}  ·  ${orphan.project}`;
+        name.textContent = `${orphan.name} · pid ${orphan.pid}`;
+
+        const claim = document.createElement("div");
+        claim.className = "orphan__claim";
+        const reclaman = orphan.projects || [];
+        claim.textContent =
+          reclaman.length > 1
+            ? `ocupa un puerto que declaran ${reclaman.join(" y ")}`
+            : `ocupa un puerto que declara ${reclaman[0] || "un proyecto registrado"}`;
 
         const meta = document.createElement("div");
         meta.className = "orphan__meta";
-        meta.textContent = orphan.cmd ? orphan.cmd : `pid ${orphan.pid}`;
-        if (!orphan.cmd) meta.textContent = `pid ${orphan.pid}`;
+        // La linea de comando es lo que deja decidir si cerrarlo: sale entera
+        // en el title, porque en la fila entra recortada.
+        meta.textContent = orphan.cmd || "sin linea de comando visible";
+        if (orphan.cmd) meta.title = orphan.cmd;
 
-        info.append(name, meta);
+        info.append(name, claim, meta);
 
         const kill = document.createElement("button");
         kill.className = "orphan__kill";
@@ -1249,7 +1263,7 @@ async function refreshPortsModal() {
     for (const orphan of orphansData.orphans || []) {
       items.push({
         port: orphan.port,
-        label: `Intruso · ${orphan.name} (${orphan.project})`,
+        label: `${orphan.name} ocupa el puerto de ${(orphan.projects || []).join(" y ")}`,
         kind: "intruso",
         isOrphan: true,
       });
