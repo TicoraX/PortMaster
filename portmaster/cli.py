@@ -781,6 +781,15 @@ def share_cmd(
 
 @app.command("clean")
 def clean_cmd(
+    solo: list[str] = typer.Option(
+        None,
+        "--solo",
+        "-s",
+        help=(
+            "Limpiar solo estas categorias: containers, images, networks, cache. "
+            "Repetible. Sin esto, las cuatro."
+        ),
+    ),
     volumes: bool = typer.Option(
         False,
         "--volumes",
@@ -790,6 +799,18 @@ def clean_cmd(
     yes: bool = typer.Option(False, "--yes", "-y", help="No preguntar."),
 ) -> None:
     """Limpia contenedores parados, imagenes sin tag y recursos huerfanos de Docker."""
+    # `--solo` acota, `--volumes` suma. Son cosas distintas: una elige de lo que
+    # se regenera, la otra agrega lo que tiene datos adentro.
+    objetivos = list(solo) if solo else list(docker.DEFAULT_TARGETS)
+    desconocidos = [t for t in objetivos if t not in docker.TARGETS]
+    if desconocidos:
+        err.print(
+            f"Categoria desconocida: {', '.join(desconocidos)}. "
+            f"Validas: {', '.join(docker.DEFAULT_TARGETS)}"
+        )
+        raise typer.Exit(1)
+    if volumes:
+        objetivos.append("volumes")
     # Preguntando, como `free`. Es el unico comando de la herramienta que borra
     # datos en vez de cerrar procesos, y era el unico que no preguntaba nada: el
     # boton de la interfaz ya pedia dos clicks y este se ejecutaba en silencio.
@@ -797,9 +818,7 @@ def clean_cmd(
         tabla = docker.usage()
         if tabla:
             console.print(tabla)
-        console.print(
-            "Se borran contenedores parados, redes sin usar, imagenes sin tag y el cache de build."
-        )
+        console.print("Se borra: " + ", ".join(docker.ETIQUETAS[t] for t in objetivos if t != "volumes"))
         if volumes:
             console.print("[bold]Y los volumenes anonimos huerfanos, que tienen datos adentro.[/]")
         if not typer.confirm("Seguir?", default=False):
@@ -807,7 +826,7 @@ def clean_cmd(
             return
 
     console.print("[bold cyan]Ejecutando limpieza de recursos Docker...[/]")
-    ok, msg = docker.prune(volumes=volumes)
+    ok, msg = docker.prune(objetivos)
     if ok:
         console.print(f"[bold green]Listo:[/] {msg}")
     else:

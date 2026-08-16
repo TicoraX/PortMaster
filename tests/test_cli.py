@@ -582,7 +582,7 @@ def test_cli_share_sin_proveedores(tmp_path, monkeypatch):
 
 
 def test_cli_clean_docker(monkeypatch):
-    monkeypatch.setattr(cli.docker, "prune", lambda volumes=False: (True, "Total reclaimed space: 0B"))
+    monkeypatch.setattr(cli.docker, "prune", lambda targets: (True, "Total reclaimed space: 0B"))
     # Con --yes: lo que este test afirma es que el resultado del prune llega a
     # la salida, y desde que `clean` pregunta, ese camino es el del flag.
     res = runner.invoke(cli.app, ["clean", "--yes"])
@@ -597,7 +597,7 @@ def _prune_espia(monkeypatch):
     """Registra si `clean` llego a ejecutar el prune, sin correr docker."""
     llamadas = []
     monkeypatch.setattr(
-        cli.docker, "prune", lambda volumes=False: llamadas.append(volumes) or (True, "ok")
+        cli.docker, "prune", lambda targets: llamadas.append(list(targets)) or (True, "ok")
     )
     monkeypatch.setattr(cli.docker, "usage", lambda: None)
     return llamadas
@@ -632,4 +632,4 @@ def test_clean_con_yes_no_pregunta(monkeypatch):
     llamadas = _prune_espia(monkeypatch)
     res = runner.invoke(cli.app, ["clean", "--yes"])
     assert res.exit_code == 0
-    assert llamadas == [False]
+    assert llamadas == [list(cli.docker.DEFAULT_TARGETS)], "sin --solo van las cuatro"

@@ -247,7 +247,7 @@ def _execute_tool(name: str, args: dict[str, Any]) -> str:
                 "adentro y no se puede deshacer. Corre `portmaster clean --volumes` "
                 "vos mismo, que pregunta antes."
             )
-        ok, msg = docker.prune(volumes=False)
+        ok, msg = docker.prune(docker.DEFAULT_TARGETS)
         return f"Docker prune: {'éxito' if ok else 'fallo'} - {msg}"
 
     raise ValueError(f"Herramienta desconocida: {name}")

@@ -36,6 +36,11 @@ const ui = {
   dockerState: document.getElementById("docker-state"),
   btnDocker: document.getElementById("btn-docker"),
   btnDockerClean: document.getElementById("btn-docker-clean"),
+  cleanModal: document.getElementById("clean-modal"),
+  cleanUsage: document.getElementById("clean-usage"),
+  cleanTargets: document.getElementById("clean-targets"),
+  cleanRun: document.getElementById("clean-run"),
+  cleanWarn: document.getElementById("clean-warn"),
   btnPortsModal: document.getElementById("btn-ports-modal"),
   portsModal: document.getElementById("ports-modal"),
   portsModalList: document.getElementById("ports-modal-list"),
@@ -442,22 +447,103 @@ ui.btnDocker.addEventListener("click", (event) => {
   });
 });
 
-ui.btnDockerClean.addEventListener("click", (event) => {
+/* Que se puede limpiar, en el orden en que conviene mirarlo: primero lo que se
+ * regenera solo, ultimo lo que tiene datos adentro. Los tres primeros vienen
+ * tildados porque son la limpieza de siempre; los volumenes nunca. */
+const CLEAN_TARGETS = [
+  { id: "cache", label: "Caché de build", nota: "se regenera al volver a construir", on: true },
+  { id: "containers", label: "Contenedores parados", nota: "no los que están corriendo", on: true },
+  { id: "networks", label: "Redes sin usar", nota: "las que no tienen contenedores", on: true },
+  { id: "images", label: "Imágenes sin tag", nota: "hay que volver a bajarlas", on: true },
+  {
+    id: "volumes",
+    label: "Volúmenes anónimos",
+    nota: "tienen datos adentro y no se regeneran",
+    on: false,
+    riesgo: true,
+  },
+];
+
+function renderCleanTargets() {
+  ui.cleanTargets.replaceChildren(
+    ...CLEAN_TARGETS.map((target) => {
+      const li = document.createElement("li");
+      const row = document.createElement("label");
+      row.className = "clean__row";
+      if (target.riesgo) row.dataset.riesgo = "true";
+
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.value = target.id;
+      box.checked = target.on;
+      box.addEventListener("change", refreshCleanButton);
+
+      const texto = document.createElement("span");
+      texto.textContent = `${target.label} · ${target.nota}`;
+
+      row.append(box, texto);
+      li.append(row);
+      return li;
+    }),
+  );
+  refreshCleanButton();
+}
+
+function cleanPicks() {
+  return [...ui.cleanTargets.querySelectorAll("input:checked")].map((b) => b.value);
+}
+
+function refreshCleanButton() {
+  const elegidos = cleanPicks();
+  ui.cleanRun.disabled = elegidos.length === 0;
+  ui.cleanRun.textContent = elegidos.length ? `Limpiar ${elegidos.length}` : "Elegí algo";
+  ui.cleanWarn.textContent = elegidos.includes("volumes")
+    ? "Los volúmenes no se pueden recuperar."
+    : "";
+}
+
+ui.btnDockerClean.addEventListener("click", () => {
+  renderCleanTargets();
+  ui.cleanUsage.textContent = "Consultando a Docker…";
+  ui.cleanModal.showModal();
+  api("/api/docker/usage")
+    .then((res) => {
+      // Sin la tabla igual se puede elegir: es contexto, no un requisito.
+      ui.cleanUsage.textContent = res.table || "Docker no informó cuánto ocupa.";
+    })
+    .catch(() => {
+      ui.cleanUsage.textContent = "No se pudo consultar cuánto ocupa Docker.";
+    });
+});
+
+ui.cleanModal.querySelector('[data-clean="close"]').addEventListener("click", () => {
+  ui.cleanModal.close();
+});
+
+ui.cleanRun.addEventListener("click", (event) => {
   const button = event.currentTarget;
+  const targets = cleanPicks();
+  if (targets.length === 0) return;
+
+  // Dos pasos sobre el mismo boton, como Congelar y como Liberar todos: el
+  // segundo nombra lo que se va a borrar antes de borrarlo.
   if (button.dataset.armed !== "true") {
     button.dataset.armed = "true";
-    button.textContent = "Purgar recursos huerfanos?";
+    button.textContent = `Borrar ${targets.join(", ")}?`;
     setTimeout(() => {
       delete button.dataset.armed;
-      button.textContent = "Limpiar Docker";
+      refreshCleanButton();
     }, 6000);
     return;
   }
   delete button.dataset.armed;
-  button.textContent = "Limpiar Docker";
 
   act(button, async () => {
-    const res = await api("/api/docker/clean", { method: "POST" });
+    const res = await api("/api/docker/clean", {
+      method: "POST",
+      body: JSON.stringify({ targets }),
+    });
+    ui.cleanModal.close();
     flash(res.detail, res.ok ? "good" : "bad");
   });
 });

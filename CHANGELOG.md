@@ -10,11 +10,13 @@ esquema de `stack.yaml` y las rutas de la API local.
 
 - **Runner de Tareas (`portmaster run`)**: Soporte para la sección `scripts:` en `stack.yaml` permitiendo ejecutar tareas individuales o pipelines secuenciales con inyección completa de variables de entorno.
 - **Túneles Seguros (`portmaster share`)**: Integración sin configuración adicional con `cloudflared`, `ngrok`, `lt` y `tailscale` para exponer puertos locales a URLs públicas HTTPS efímeras.
-- **Higiene del Host (`portmaster clean`)**: `docker system prune -f` sobre
-  contenedores parados, redes sin usar, imágenes sin tag y el caché de build.
-  Pregunta antes, mostrando `docker system df` para que la respuesta sea
-  informada, y `--yes` la saltea. Con `--volumes` se lleva además los
-  volúmenes anónimos huérfanos, que sin esa opción no toca.
+- **Higiene del Host (`portmaster clean`)**: limpieza de Docker por categorías,
+  con un comando propio para cada una en vez del `system prune` que las tira
+  todas juntas. Contenedores parados, imágenes sin tag, redes sin usar y caché
+  de build; los volúmenes anónimos van aparte, porque tienen datos adentro y no
+  se regeneran. Pregunta antes mostrando `docker system df`, y `--yes` la
+  saltea. En el CLI se acota con `--solo cache --solo images`; en la interfaz,
+  el botón abre un diálogo con una casilla por categoría.
 - **Servidor MCP para Agentes de IA (`portmaster mcp`)**: Servidor Model Context Protocol nativo sobre `stdio` para introspección y control en tiempo real desde Claude Desktop, Cursor, Gemini y Antigravity.
 - **Proyectos Compuestos (`includes:`)**: Composición modular de stacks importando servicios de otros repositorios o subdirectorios con aislamiento de `cwd` y prevención de ciclos.
 - **Matriz de Colisión de Puertos**: Detección anticipada y alerta visual en `portmaster list` sobre puertos en disputa entre proyectos registrados.

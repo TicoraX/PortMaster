@@ -248,7 +248,7 @@ def test_mcp_clean_se_niega_a_borrar_volumenes(monkeypatch):
     usuario, con el comando que pregunta.
     """
     llamadas = []
-    monkeypatch.setattr(mcp.docker, "prune", lambda volumes=False: llamadas.append(volumes) or (True, "ok"))
+    monkeypatch.setattr(mcp.docker, "prune", lambda targets: llamadas.append(list(targets)) or (True, "ok"))
 
     res = _pedir_clean({"volumes": True})
 
@@ -259,12 +259,12 @@ def test_mcp_clean_se_niega_a_borrar_volumenes(monkeypatch):
 
 def test_mcp_clean_sin_volumenes_limpia(monkeypatch):
     llamadas = []
-    monkeypatch.setattr(mcp.docker, "prune", lambda volumes=False: llamadas.append(volumes) or (True, "ok"))
+    monkeypatch.setattr(mcp.docker, "prune", lambda targets: llamadas.append(list(targets)) or (True, "ok"))
 
     res = _pedir_clean({})
 
     assert res["result"].get("isError") is not True
-    assert llamadas == [False]
+    assert llamadas == [list(mcp.docker.DEFAULT_TARGETS)]
 
 
 def test_mcp_clean_no_le_ofrece_volumes_al_agente():

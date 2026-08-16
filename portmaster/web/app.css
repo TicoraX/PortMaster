@@ -1198,3 +1198,60 @@ body {
   overflow-wrap: anywhere;
   word-break: break-all;
 }
+
+/* dialogo de limpieza ------------------------------------------------------ */
+
+.clean {
+  flex: 1;
+  min-block-size: 0;
+  overflow-y: auto;
+  padding: var(--space-md);
+}
+
+/* La tabla de `docker system df` tal cual la formatea Docker: alineada por
+   espacios, asi que necesita mono y no puede envolver. */
+.clean__usage {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-ink-2);
+  background: var(--color-paper);
+  border: var(--rule) solid var(--color-rule);
+  border-radius: var(--radius);
+  margin: 0 0 var(--space-md);
+  padding: var(--space-sm);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.clean__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.clean__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  cursor: pointer;
+}
+
+.clean__row input {
+  flex: none;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+/* Los volumenes tienen datos adentro y no se regeneran: el unico de la lista
+   que no se puede deshacer, y por eso el unico que lleva color. */
+.clean__row[data-riesgo="true"] {
+  color: var(--color-bad);
+}
+
+.clean__warn {
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+}

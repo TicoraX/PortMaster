@@ -1114,11 +1114,31 @@ def test_docker_exige_token(client):
 
 
 def test_docker_clean_endpoint(client, monkeypatch):
-    monkeypatch.setattr(docker, "prune", lambda volumes=False: (True, "Total space reclaimed: 10MB"))
-    res = client.post("/api/docker/clean")
+    pedidos = []
+    monkeypatch.setattr(
+        docker, "prune", lambda targets: pedidos.append(list(targets)) or (True, "cache: 10MB")
+    )
+    res = client.post("/api/docker/clean", json={"targets": ["cache", "images"]})
     assert res.status_code == 200
     assert res.json()["ok"] is True
     assert "10MB" in res.json()["detail"]
+    assert pedidos == [["cache", "images"]], "el servidor limpio otra cosa que la pedida"
+
+
+def test_docker_clean_sin_lista_no_borra_nada(client, monkeypatch):
+    """Falla cerrado, como kill-all.
+
+    Con un campo opcional, un body mal formado se leia como "limpia todo", y
+    este endpoint borra datos que no vuelven.
+    """
+    llamadas = []
+    monkeypatch.setattr(docker, "prune", lambda targets: llamadas.append(targets) or (True, "ok"))
+
+    assert client.post("/api/docker/clean").status_code == 422
+    assert client.post("/api/docker/clean", json={}).status_code == 422
+    assert client.post("/api/docker/clean", json={"targets": []}).status_code == 422
+    assert client.post("/api/docker/clean", json={"targets": ["borrar-todo"]}).status_code == 422
+    assert llamadas == [], "algo llego a ejecutarse con un cuerpo invalido"
 
 
 def test_share_endpoint(client, monkeypatch):

@@ -134,6 +134,25 @@
         </div>
       </form>
 
+      <!-- Elegir que limpiar. El boton abria un prune de todo junto, y el cache
+           de build puede ser decenas de GB que se regeneran solas mientras que
+           una imagen sin tag puede ser la capa base que vas a volver a bajar.
+           No es lo mismo, y hasta ahora iba en el mismo paquete. -->
+      <dialog class="picker" id="clean-modal" aria-label="Limpiar Docker">
+        <div class="picker__head">
+          <p class="picker__path">Qué limpiar de Docker</p>
+          <button class="btn btn--quiet" type="button" data-clean="close">Cerrar</button>
+        </div>
+        <div class="clean">
+          <pre class="clean__usage" id="clean-usage" tabindex="0"></pre>
+          <ul class="clean__list" id="clean-targets"></ul>
+        </div>
+        <div class="picker__foot">
+          <span class="clean__warn" id="clean-warn"></span>
+          <button class="btn btn--primary" type="button" id="clean-run">Limpiar</button>
+        </div>
+      </dialog>
+
       <dialog class="picker ports-modal" id="ports-modal" aria-label="Mapa de puertos">
         <div class="picker__head">
           <p class="picker__path">Mapa de puertos del sistema</p>

@@ -441,6 +441,19 @@ class KillAllRequest(BaseModel):
     ports: list[int] = Field(max_length=MAX_TARGETS)
 
 
+class CleanRequest(BaseModel):
+    """Que categorias de Docker limpiar.
+
+    Obligatorio y sin default, por lo mismo que en KillAllRequest: un body mal
+    formado no puede leerse como "limpia todo". El `Literal` es la validacion,
+    y el comando de cada categoria sale de `docker.TARGETS`, nunca de la red.
+    """
+
+    targets: list[Literal["containers", "images", "networks", "cache", "volumes"]] = Field(
+        min_length=1, max_length=5
+    )
+
+
 # app ----------------------------------------------------------------------
 
 
@@ -901,11 +914,24 @@ def create_app(token: str | None = None) -> FastAPI:
         "/api/docker/clean",
         dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)],
     )
-    def docker_clean(volumes: bool = False) -> dict:
-        """Limpia recursos huerfanos de Docker."""
-        ok, detail = docker.prune(volumes=volumes)
-        log.info("docker clean pedido: ok=%s (%s)", ok, detail)
+    def docker_clean(body: CleanRequest) -> dict:
+        """Limpia las categorias de Docker que pidio el usuario."""
+        ok, detail = docker.prune(body.targets)
+        log.info("docker clean pedido %s: ok=%s (%s)", body.targets, ok, detail)
         return {"ok": ok, "detail": detail}
+
+    @app.get(
+        "/api/docker/usage",
+        dependencies=[quota("state", QUOTA_READ), Depends(require_token)],
+    )
+    def docker_usage() -> dict:
+        """La tabla de `docker system df`, para elegir con un numero delante.
+
+        "Limpiar Docker?" sin decir cuanto hay no es una pregunta que se pueda
+        contestar. Sale tal cual la formatea Docker: parsearla seria atarnos a
+        su salida a cambio de nada.
+        """
+        return {"table": docker.usage() or ""}
 
     @app.post(
         "/api/docker/{action}",
