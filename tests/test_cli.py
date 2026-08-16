@@ -633,3 +633,16 @@ def test_clean_con_yes_no_pregunta(monkeypatch):
     res = runner.invoke(cli.app, ["clean", "--yes"])
     assert res.exit_code == 0
     assert llamadas == [list(cli.docker.DEFAULT_TARGETS)], "sin --solo van las cuatro"
+
+
+def test_docker_running_sin_motor_no_revienta(monkeypatch):
+    """`docker ps` con el daemon caido sale con codigo != 0. Lista vacia, no error:
+    quien lo llama es una confirmacion que tiene que seguir funcionando igual."""
+    guion = "import sys; print('cannot connect to the docker daemon', file=sys.stderr); sys.exit(1)"
+    original = cli.docker.subprocess.run
+
+    def falso(cmd, **kwargs):
+        return original([sys.executable, "-c", guion], **kwargs)
+
+    monkeypatch.setattr(cli.docker.subprocess, "run", falso)
+    assert cli.docker.running() == []

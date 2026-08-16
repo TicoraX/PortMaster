@@ -81,6 +81,30 @@ def _motivo(done: subprocess.CompletedProcess, action: str) -> str:
     return f"docker desktop {action} fallo con codigo {done.returncode}"
 
 
+def running() -> list[str]:
+    """Nombres de los contenedores corriendo.
+
+    Reiniciar el motor los baja a todos, incluidos los de proyectos que no
+    estas mirando. No hay forma de reiniciarlo a medias, asi que lo unico que
+    se puede hacer por el usuario es decirle que se va a llevar antes de
+    llevarselo. Vacio si docker no contesta: la confirmacion sigue, con la
+    frase generica.
+    """
+    try:
+        done = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if done.returncode != 0:
+        return []
+    return [line.strip() for line in (done.stdout or "").splitlines() if line.strip()]
+
+
 def usage() -> str | None:
     """La tabla de `docker system df`, para que la confirmacion diga cuanto hay.
 

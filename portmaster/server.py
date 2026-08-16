@@ -921,6 +921,19 @@ def create_app(token: str | None = None) -> FastAPI:
         return {"ok": ok, "detail": detail}
 
     @app.get(
+        "/api/docker/containers",
+        dependencies=[quota("state", QUOTA_READ), Depends(require_token)],
+    )
+    def docker_containers() -> dict:
+        """Los contenedores corriendo, para que Reiniciar diga que se va a llevar.
+
+        Reiniciar el motor los baja a todos, incluidos los de proyectos que no
+        estas mirando, y eso no se puede hacer a medias. Nombrarlos antes es lo
+        unico que se puede hacer por quien aprieta el boton.
+        """
+        return {"running": docker.running()}
+
+    @app.get(
         "/api/docker/usage",
         dependencies=[quota("state", QUOTA_READ), Depends(require_token)],
     )

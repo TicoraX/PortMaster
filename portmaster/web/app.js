@@ -435,6 +435,19 @@ ui.btnDocker.addEventListener("click", (event) => {
     button.dataset.armed = "true";
     button.textContent = "Reiniciar y bajar los contenedores?";
     setTimeout(() => disarmDocker(button), 6000);
+    // Cuales, si el motor contesta a tiempo. "los contenedores" no dice si son
+    // los dos de este proyecto o los nueve de la maquina, y reiniciar el motor
+    // se los lleva a todos. La respuesta llega despues del primer texto porque
+    // el boton no puede quedarse esperando a docker para armarse.
+    api("/api/docker/containers")
+      .then((res) => {
+        const nombres = res.running || [];
+        if (!nombres.length || button.dataset.armed !== "true") return;
+        button.textContent = `Reiniciar y bajar ${nombres.length}: ${nombres.join(", ")}?`;
+      })
+      .catch(() => {
+        /* se queda con la frase generica, que ya es una advertencia */
+      });
     return;
   }
   if (action === "restart") disarmDocker(button);
