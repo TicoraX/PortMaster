@@ -109,7 +109,11 @@ def proveedor_falso(tmp_path, monkeypatch):
             shim.write_text(f'@echo off\r\n"{sys.executable}" "{impl}" %*\r\n', encoding="utf-8")
         else:
             shim = bin_dir / nombre
-            shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{impl}" "$@"\n', encoding="utf-8")
+            # Sin `exec`: con el, el shell se reemplaza por el interprete y no
+            # queda nieto. Y `sh -c "un solo comando"` hace lo mismo por
+            # optimizacion, asi que toda la cadena colapsaba en un proceso y en
+            # macOS y Linux el test se quedaba sin el caso que viene a cubrir.
+            shim.write_text(f'#!/bin/sh\n"{sys.executable}" "{impl}" "$@"\n', encoding="utf-8")
             shim.chmod(0o755)
         return shim
 
