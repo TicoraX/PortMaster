@@ -657,7 +657,7 @@ function render(projects, data) {
   );
   ui.projects.setAttribute("aria-busy", "false");
   hayProyectos = data.registered > 0;
-  updateDocker(projects);
+  updateDocker(data.docker || { needed: false, down: false });
   updateFavicon(projects, data);
 }
 
@@ -666,17 +666,21 @@ function render(projects, data) {
  * distingue "esta todo en orden" de "esto no funciona". Con el motor arriba el
  * boton no se esconde, cambia de trabajo: reiniciar Docker es lo que uno quiere
  * cuando los contenedores empiezan a portarse raro. */
-function updateDocker(projects) {
-  const usan = projects.filter((p) => p.needs_docker);
-  const caido = usan.some((p) => p.docker_down);
+function updateDocker(docker) {
+  // Del estado global y no de los proyectos de la pagina: colgado de la pagina,
+  // apretar "Siguiente" apagaba la fila entera cuando ahi no habia ninguno con
+  // contenedores, y una fila que desaparece no distingue "esta en orden" de
+  // "esto dejo de funcionar".
+  const usan = docker.needed;
+  const caido = docker.down;
 
-  ui.dockerState.hidden = usan.length === 0;
+  ui.dockerState.hidden = !usan;
   ui.dockerState.textContent = caido ? "Docker cerrado" : "Docker corriendo";
   ui.dockerState.dataset.tone = caido ? "bad" : "ready";
 
-  ui.btnDocker.hidden = usan.length === 0;
+  ui.btnDocker.hidden = !usan;
   ui.btnDocker.dataset.action = caido ? "start" : "restart";
-  ui.btnDockerClean.hidden = usan.length === 0 || caido;
+  ui.btnDockerClean.hidden = !usan || caido;
   // El sondeo pasa cada 2.5s y el armado dura 6: sin esto le pisaria la
   // pregunta al usuario mientras la esta leyendo.
   if (ui.btnDocker.dataset.armed !== "true") {

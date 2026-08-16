@@ -452,6 +452,12 @@ _active_tunnels: dict[int, tunnel.Tunnel | None] = {}
 _tunnels_lock = threading.Lock()
 
 
+def _docker_view() -> dict:
+    """Estado de Docker sobre todos los proyectos registrados, no sobre la pagina."""
+    usan = registry.any_uses_docker(max_age=registry.PORTS_TTL)
+    return {"needed": usan, "down": _docker_is_down() if usan else False}
+
+
 def tunnels_view() -> list[dict]:
     """Los tuneles abiertos, para que la interfaz pueda mostrarlos y cerrarlos.
 
@@ -579,6 +585,11 @@ def create_app(token: str | None = None) -> FastAPI:
             # Fuera del paginado a proposito: un tunel expone un puerto a
             # internet y no puede quedar escondido en la pagina 2.
             "tunnels": tunnels_view(),
+            # Lo mismo con Docker. La interfaz lo sacaba de los cuatro proyectos
+            # de la pagina, asi que pasar a la segunda apagaba la fila entera si
+            # ahi no habia ninguno con contenedores. Un control que desaparece
+            # no distingue "esta en orden" de "esto dejo de funcionar".
+            "docker": _docker_view(),
         }
 
     @app.get("/api/browse", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
@@ -994,7 +1005,21 @@ def _project_view(path: Path) -> dict:
     try:
         stack = detect.stack_for(path)
     except config.ConfigError as exc:
-        return {**base, "state": "invalid", "error": str(exc), "services": [], "profiles": []}
+        # Con el contrato completo: este `return` se salteaba `detected`,
+        # `needs_docker` y `docker_down`, y un proyecto con la config rota
+        # llegaba a la interfaz con la mitad de las claves. En JS eso es
+        # `undefined`, o sea falso silencioso, y el proximo que lea
+        # `p.needs_docker` esperando un booleano se come la trampa.
+        return {
+            **base,
+            "state": "invalid",
+            "error": str(exc),
+            "services": [],
+            "profiles": [],
+            "detected": False,
+            "needs_docker": False,
+            "docker_down": False,
+        }
 
     with sessions_lock:
         session = sessions.get(pid)

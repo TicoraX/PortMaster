@@ -126,6 +126,48 @@ def declared_ports(max_age: float = 0.0) -> dict[int, list[Path]]:
     return found
 
 
+_docker_cache: tuple[float, bool] | None = None
+
+
+def any_uses_docker(max_age: float = 0.0) -> bool:
+    """Si algun proyecto registrado levanta contenedores.
+
+    La interfaz decide con esto si muestra la fila de Docker, y tiene que salir
+    de todos los proyectos y no de la pagina que estas mirando: colgado de la
+    pagina, pasar a la segunda apagaba la fila entera cuando ahi no habia
+    ninguno con contenedores. Es el mismo motivo por el que `/api/health` no
+    pagina y por el que los tuneles van fuera del paginado.
+
+    ponytail: cache propio, o sea un segundo recorrido de todos los proyectos
+    ademas del de `declared_ports`. Los dos vencen a los 30s, asi que la vista
+    de estado paga uno de cada doce sondeos. Si alguna vez pesa, los dos salen
+    de un unico recorrido que resuelva cada stack una sola vez.
+    """
+    global _docker_cache
+    now = time.monotonic()
+    if max_age > 0 and _docker_cache is not None and now - _docker_cache[0] < max_age:
+        return _docker_cache[1]
+
+    usa = any(_uses_docker(path) for path in paths())
+    _docker_cache = (now, usa)
+    return usa
+
+
+def _uses_docker(path: Path) -> bool:
+    """Un proyecto roto no cuenta, y no es motivo para no revisar el resto."""
+    # Adentro de la funcion: `doctor` importa este modulo, y arriba seria un
+    # ciclo. Es el mismo `_program` que usa la vista de estado, y compartirlo
+    # importa: si algun dia cambia como se saca el nombre del programa, los dos
+    # lados tienen que cambiar juntos o la fila aparece cuando no debe.
+    from . import doctor
+
+    try:
+        stack = detect.stack_for(path)
+    except (config.ConfigError, OSError):
+        return False
+    return any(doctor._program(s.command) == "docker" for s in stack.services.values())
+
+
 def _ports_of(path: Path) -> set[int]:
     """Puertos declarados por un proyecto. Vacio si no se puede leer.
 
@@ -140,10 +182,14 @@ def _ports_of(path: Path) -> set[int]:
 
 
 def _save(items: list[Path]) -> None:
-    global _ports_cache
+    global _ports_cache, _docker_cache
     # Agregar o quitar un proyecto cambia el mapa ya mismo: esperar el TTL
     # dejaria la interfaz media hora sin ver el proyecto recien registrado.
+    # Los dos caches salen del mismo recorrido del registro y vencen juntos: el
+    # de Docker se sumo despues y quedo afuera de esta linea, y el sintoma fue
+    # registrar un proyecto con contenedores y que la fila tardara 30s en salir.
     _ports_cache = None
+    _docker_cache = None
     HOME.mkdir(parents=True, exist_ok=True)
     ordered = sorted({str(p) for p in items})
     tmp = PROJECTS.with_suffix(".tmp")

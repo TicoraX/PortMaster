@@ -1292,3 +1292,53 @@ def test_un_tunel_que_se_murio_solo_deja_de_figurar(monkeypatch, free_ports):
         if proc.poll() is None:
             proc.kill()
             proc.wait()
+
+
+def test_el_estado_de_docker_no_depende_de_la_pagina(client, tmp_path):
+    """Apretar "Siguiente" apagaba la fila de Docker entera.
+
+    Salia de los cuatro proyectos de la pagina, asi que bastaba una segunda
+    pagina sin contenedores para que el estado y los dos botones desaparecieran.
+    Una fila que se va no distingue "esta en orden" de "esto dejo de funcionar",
+    que es el mismo motivo por el que /api/health no pagina.
+    """
+    condocker = tmp_path / "condocker"
+    condocker.mkdir()
+    (condocker / "stack.yaml").write_text(
+        "services:\n  db:\n    command: docker compose up -d db\n    detached: true\n",
+        encoding="utf-8",
+    )
+    registry.add(condocker)
+    # Los demas sin contenedores, suficientes para empujar una segunda pagina.
+    for i in range(server.PAGE_SIZE):
+        root = tmp_path / f"simple{i}"
+        root.mkdir()
+        (root / "stack.yaml").write_text(
+            "services:\n  web:\n    command: echo hola\n", encoding="utf-8"
+        )
+        registry.add(root)
+
+    primera = client.get("/api/state?page=1").json()
+    assert primera["pages"] > 1, "hacen falta dos paginas para que el bug sea alcanzable"
+    ultima = client.get(f"/api/state?page={primera['pages']}").json()
+
+    assert primera["docker"]["needed"] is True
+    assert ultima["docker"]["needed"] is True, "la fila de Docker se apago al pasar de pagina"
+    assert primera["docker"]["down"] == ultima["docker"]["down"]
+
+
+def test_un_proyecto_invalido_devuelve_el_contrato_completo(client, tmp_path):
+    """El `return` temprano se salteaba la mitad de las claves.
+
+    En JS eso es `undefined`, o sea falso silencioso: el proximo que lea
+    `p.needs_docker` esperando un booleano se come la trampa.
+    """
+    roto = tmp_path / "roto"
+    roto.mkdir()
+    (roto / "stack.yaml").write_text("services:\n  a:\n    port: 1\n", encoding="utf-8")
+    registry.add(roto)
+
+    (proyecto,) = client.get("/api/state").json()["projects"]
+    assert proyecto["state"] == "invalid"
+    for clave in ("detected", "needs_docker", "docker_down", "services", "profiles", "error"):
+        assert clave in proyecto, f"falta {clave} en un proyecto invalido"
