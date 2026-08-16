@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import subprocess
 from pathlib import Path
@@ -37,12 +38,27 @@ def _entrecomillar(args: Sequence[str]) -> str:
 
     Por plataforma, porque el shell no es el mismo. `shlex.join` entrecomilla al
     estilo POSIX y `cmd.exe` no entiende las comillas simples: un `&` adentro le
-    seguiria partiendo el comando. `list2cmdline` usa comillas dobles, que cmd si
-    respeta.
+    seguiria partiendo el comando.
+
+    En Windows hacen falta las dos capas, y con `list2cmdline` sola no alcanza:
+    escapa las comillas dobles como `\\"`, que es la convencion de CreateProcess,
+    y `cmd.exe` no la conoce. Ve esa comilla como cierre, lo que sigue queda
+    afuera del entrecomillado y un `&` ahi ejecuta un segundo comando. Probado:
+    con `a" & echo x > archivo & echo "b` el archivo se creaba.
+
+    Entonces: `list2cmdline` para la capa de argumentos, y despues `^` delante
+    de cada metacaracter de cmd, comillas incluidas. Asi cmd los pasa literales
+    y el programa los parsea con sus propias reglas, que es lo que corresponde.
     """
     if os.name == "nt":
-        return subprocess.list2cmdline(list(args))
+        linea = subprocess.list2cmdline(list(args))
+        return _CMD_META.sub(r"^\g<0>", linea)
     return shlex.join(args)
+
+
+# Lo que `cmd.exe` interpreta antes de partir en argumentos. El `%` entra porque
+# expande variables adentro de comillas, que es la otra forma de salirse.
+_CMD_META = re.compile(r'[()%!^"<>&|]')
 
 
 def resolve(stack: Stack, name: str, _visto: tuple[str, ...] = ()) -> list[str]:

@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import stat
+import threading
 import time
 from pathlib import Path
 
@@ -127,6 +128,11 @@ def declared_ports(max_age: float = 0.0) -> dict[int, list[Path]]:
 
 
 _docker_cache: tuple[float, bool] | None = None
+_cache_lock = threading.Lock()
+# Sube con cada cambio del registro. Un escaneo que empezo antes de un `add`
+# no puede escribir su resultado despues: seria el estado viejo pisando al
+# nuevo, con 30s de vida por delante.
+_revision = 0
 
 
 def any_uses_docker(max_age: float = 0.0) -> bool:
@@ -145,11 +151,22 @@ def any_uses_docker(max_age: float = 0.0) -> bool:
     """
     global _docker_cache
     now = time.monotonic()
-    if max_age > 0 and _docker_cache is not None and now - _docker_cache[0] < max_age:
-        return _docker_cache[1]
+    with _cache_lock:
+        if max_age > 0 and _docker_cache is not None and now - _docker_cache[0] < max_age:
+            return _docker_cache[1]
+        revision = _revision
 
     usa = any(_uses_docker(path) for path in paths())
-    _docker_cache = (now, usa)
+
+    with _cache_lock:
+        # Solo si el registro no cambio mientras se recorria. El escaneo tarda
+        # decenas de milisegundos y `/api/state` corre en un threadpool: sin
+        # esto, un `add` que caia justo en el medio limpiaba el cache y despues
+        # este escaneo, que arranco antes, lo repoblaba con el valor viejo. La
+        # fila de Docker volvia a tardar 30s en aparecer, que es el bug que ya
+        # arreglamos una vez.
+        if revision == _revision:
+            _docker_cache = (now, usa)
     return usa
 
 
@@ -182,14 +199,16 @@ def _ports_of(path: Path) -> set[int]:
 
 
 def _save(items: list[Path]) -> None:
-    global _ports_cache, _docker_cache
+    global _ports_cache, _docker_cache, _revision
     # Agregar o quitar un proyecto cambia el mapa ya mismo: esperar el TTL
     # dejaria la interfaz media hora sin ver el proyecto recien registrado.
     # Los dos caches salen del mismo recorrido del registro y vencen juntos: el
     # de Docker se sumo despues y quedo afuera de esta linea, y el sintoma fue
     # registrar un proyecto con contenedores y que la fila tardara 30s en salir.
-    _ports_cache = None
-    _docker_cache = None
+    with _cache_lock:
+        _ports_cache = None
+        _docker_cache = None
+        _revision += 1
     HOME.mkdir(parents=True, exist_ok=True)
     ordered = sorted({str(p) for p in items})
     tmp = PROJECTS.with_suffix(".tmp")

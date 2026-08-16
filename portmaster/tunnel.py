@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 import shutil
 import subprocess
@@ -10,6 +11,8 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from typing import Callable
+
+from . import runner
 
 PROVIDERS = ("cloudflared", "ngrok", "lt", "tailscale")
 
@@ -30,16 +33,22 @@ class Tunnel:
     proc: subprocess.Popen
 
     def stop(self) -> None:
+        """Cierra el cliente de tuneles, y no solo el shell que lo lanzo.
+
+        Con `shell=True` el hijo directo es el shell y el cliente es nieto:
+        `self.proc.terminate()` mataba el `cmd` y dejaba el cloudflared vivo,
+        con la URL publica funcionando. Todo lo que se hizo contra las fugas de
+        tuneles (el cierre al apagar, el boton, el camino del timeout) cerraba
+        el shell y no el tunel.
+
+        `runner._terminate_tree` ya existia con este mismo problema resuelto y
+        documentado, y ademas espera acotado: sin timeout, un cliente que ignora
+        la señal colgaba el apagado del servidor para siempre.
+        """
         if self.proc.poll() is None:
-            self.proc.terminate()
-            try:
-                self.proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                self.proc.kill()
-                # Y esperarlo: sin esto queda un zombie, y peor, se volvia antes
-                # de saber si el cliente de tuneles se murio de verdad. Lo que
-                # sigue vivo sigue exponiendo el puerto.
-                self.proc.wait()
+            runner._terminate_tree(self.proc.pid)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            self.proc.wait(timeout=3)
 
 
 def detect_providers() -> list[str]:

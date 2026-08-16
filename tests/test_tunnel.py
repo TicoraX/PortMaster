@@ -2,8 +2,8 @@ import os
 import subprocess
 import sys
 import time
-from unittest.mock import MagicMock
 
+import psutil
 import pytest
 
 from portmaster import tunnel
@@ -34,14 +34,11 @@ def test_start_tunnel_proveedor_no_instalado(monkeypatch):
         tunnel.start_tunnel(3000)
 
 
-def test_tunnel_stop():
-    mock_proc = MagicMock(spec=subprocess.Popen)
-    mock_proc.poll.return_value = None
-    mock_proc.wait.return_value = 0
-
-    tun = tunnel.Tunnel(provider="cloudflared", port=3000, url="https://test.trycloudflare.com", proc=mock_proc)
-    tun.stop()
-    mock_proc.terminate.assert_called_once()
+# El test que habia aca afirmaba `mock_proc.terminate.assert_called_once()`, o
+# sea justo el comportamiento que resulto estar mal: terminar el shell y dar el
+# tunel por cerrado. Un mock no podia notarlo, porque el proceso que sobrevivia
+# es uno que el mock no tiene. Lo cubre
+# `test_stop_cierra_al_cliente_y_no_solo_al_shell`, con procesos de verdad.
 
 
 # El pipeline de start_tunnel: Popen, el hilo lector, el Event y el timeout. Las
@@ -75,6 +72,12 @@ MUESTRAS = {
 }
 
 
+# Cada Popen que abrio start_tunnel en el test en curso. Cuando el arranque
+# falla no devuelve el Tunnel, asi que sin esto no hay forma de comprobar que no
+# quedo un cliente vivo, que es justo lo que hay que comprobar.
+lanzados: list[subprocess.Popen] = []
+
+
 @pytest.fixture
 def proveedor_falso(tmp_path, monkeypatch):
     """Pone en el PATH un binario con el nombre de un proveedor.
@@ -83,6 +86,16 @@ def proveedor_falso(tmp_path, monkeypatch):
     en este mismo interprete: es la unica forma de que `shell=True` lo encuentre
     igual en las tres plataformas del CI.
     """
+    lanzados.clear()
+    original = subprocess.Popen
+
+    def espiado(*args, **kwargs):
+        proc = original(*args, **kwargs)
+        lanzados.append(proc)
+        return proc
+
+    monkeypatch.setattr(tunnel.subprocess, "Popen", espiado)
+
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
@@ -124,17 +137,58 @@ def test_detect_providers_ve_lo_que_hay_en_el_path(proveedor_falso):
     assert "lt" in tunnel.detect_providers()
 
 
+def _arbol_muerto(pid, plazo=10.0):
+    """El shell y sus descendientes, todos cerrados.
+
+    Mirar solo el shell no alcanzaba: con `shell=True` el cliente de tuneles es
+    nieto, y matar al padre lo dejaba vivo publicando el puerto.
+    """
+    try:
+        padre = psutil.Process(pid)
+        procesos = padre.children(recursive=True) + [padre]
+    except psutil.NoSuchProcess:
+        return True
+    _, vivos = psutil.wait_procs(procesos, timeout=plazo)
+    return not vivos
+
+
 def test_start_tunnel_sin_url_en_la_salida_corta_y_no_deja_el_proceso_vivo(proveedor_falso):
     """El caso de un cliente que arranca y nunca publica nada.
 
-    Lo que importa no es solo el error: es que el proceso quede muerto. Un
-    cliente de tuneles que sobrevive al fallo puede terminar publicando el
-    puerto igual, y ahi nadie sabe que existe.
+    Lo que importa no es solo el error: es que no quede ningun proceso vivo. Un
+    cliente de tuneles que sobrevive al fallo sigue publicando el puerto, y ahi
+    nadie sabe que existe.
     """
     proveedor_falso("cloudflared", ["INF arrancando", "INF conectando"])
 
     with pytest.raises(TunnelError, match="no se pudo obtener la URL"):
         tunnel.start_tunnel(3000, provider="cloudflared", timeout=2)
+
+    assert lanzados, "el shim nunca llego a arrancar"
+    for proc in lanzados:
+        assert _arbol_muerto(proc.pid), "quedo un cliente de tuneles vivo despues del fallo"
+
+
+def test_stop_cierra_al_cliente_y_no_solo_al_shell(proveedor_falso):
+    """Con `shell=True` el hijo directo es el shell y el cliente es nieto.
+
+    `proc.terminate()` mataba el cmd y dejaba el cloudflared corriendo con la
+    URL publica activa: todo lo que se hizo contra las fugas cerraba el shell y
+    no el tunel. Es el mismo problema que `runner._terminate_tree` ya resolvia
+    para los servicios, documentado en CLAUDE.md.
+    """
+    lineas, esperada = MUESTRAS["cloudflared"]
+    proveedor_falso("cloudflared", lineas)
+
+    tun = tunnel.start_tunnel(3000, provider="cloudflared", timeout=20)
+    assert tun.url == esperada
+    descendientes = psutil.Process(tun.proc.pid).children(recursive=True)
+    assert descendientes, "el shim tiene que dejar un nieto, que es el caso a probar"
+
+    tun.stop()
+
+    _, vivos = psutil.wait_procs(descendientes, timeout=10)
+    assert not vivos, f"el cliente sobrevivio al stop: {[p.pid for p in vivos]}"
 
 
 def test_start_tunnel_no_espera_a_un_cliente_que_ya_murio(proveedor_falso):

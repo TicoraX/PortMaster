@@ -922,6 +922,13 @@ def create_app(token: str | None = None) -> FastAPI:
     def share_port(port: int, provider: str | None = None) -> dict:
         """Inicia un tunel efimero para compartir un puerto."""
         with _tunnels_lock:
+            # Un tunel que se murio solo no puede bloquear el puerto hasta que
+            # pase el sondeo de estado: la limpieza vivia en `tunnels_view`, o
+            # sea que reabrir dependia de que la interfaz hubiera refrescado.
+            previo = _active_tunnels.get(port)
+            if previo is not None and previo.proc.poll() is not None:
+                del _active_tunnels[port]
+                log.info("el tunel del puerto %d se cerro solo", port)
             if port in _active_tunnels:
                 return {"ok": False, "detail": f"ya hay un tunel para el puerto {port}"}
             _active_tunnels[port] = None  # reserva, ver _active_tunnels

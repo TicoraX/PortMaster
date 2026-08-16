@@ -595,10 +595,16 @@ function updateCard(entry, project) {
 async function pullLogs(id, entry) {
   try {
     const data = await api(`/api/projects/${id}/logs?since=${entry.logSeq}`);
-    if (!data.lines.length) return;
-    entry.logSeq = data.lines[data.lines.length - 1].seq;
-    entry.rawLogs = (entry.rawLogs || "") + data.lines.map((l) => l.text).join("\n") + "\n";
-    renderLogsText(entry);
+    if (data.lines.length) {
+      entry.logSeq = data.lines[data.lines.length - 1].seq;
+      entry.rawLogs = (entry.rawLogs || "") + data.lines.map((l) => l.text).join("\n") + "\n";
+      renderLogsText(entry);
+    } else if (!entry.rawLogs) {
+      // Sin logs todavia: hay que pintar igual, que es donde va el cartel. Solo
+      // mientras este vacio, y no en cada sondeo: reescribir el contenido cada
+      // 2.5s le borraria la seleccion a quien este copiando una linea.
+      renderLogsText(entry);
+    }
   } catch {
     /* el proximo ciclo reintenta */
   }
@@ -611,11 +617,20 @@ function renderLogsText(entry) {
   const atBottom = logsEl.scrollHeight - logsEl.scrollTop - logsEl.clientHeight < 40;
   const raw = entry.rawLogs || "";
   const filter = (filterInput ? filterInput.value : "").trim().toLowerCase();
-  if (!filter) {
+  if (!raw) {
+    // Una caja en blanco no distingue "no arrancaste nada" de "esto se rompio".
+    // El servidor devuelve {lines: [], seq: 0} para un proyecto sin sesion, que
+    // es correcto, y `pullLogs` cortaba sin escribir nada en la pantalla.
+    logsEl.textContent =
+      "Todavía no hay logs. Solo se registran los de un stack arrancado desde acá.";
+  } else if (!filter) {
     logsEl.textContent = raw;
   } else {
     const lines = raw.split("\n");
-    logsEl.textContent = lines.filter((l) => l.toLowerCase().includes(filter)).join("\n");
+    const encontrados = lines.filter((l) => l.toLowerCase().includes(filter));
+    logsEl.textContent = encontrados.length
+      ? encontrados.join("\n")
+      : `Ningún renglón contiene "${filter}".`;
   }
   if (atBottom) logsEl.scrollTop = logsEl.scrollHeight;
 }
@@ -716,12 +731,18 @@ function renderTunnels(list) {
   ui.tunnels.hidden = list.length === 0;
   if (list.length === 0) {
     ui.tunnelsList.replaceChildren();
+    // Y la firma: sin borrarla, cerrar el ultimo tunel y volver a abrir el
+    // mismo puerto daba la misma cadena, el return temprano se saltaba el
+    // repintado y la lista quedaba vacia con un tunel abierto.
+    delete ui.tunnelsList.dataset.firma;
     return;
   }
 
   ui.tunnelsHeading.textContent = `Túneles abiertos (${list.length})`;
 
-  const firma = list.map((t) => `${t.port}:${t.url}`).join(",");
+  // El proveedor entra en la firma: es un dato que se muestra, y si cambia sin
+  // cambiar puerto ni URL la fila seguiria diciendo el anterior.
+  const firma = list.map((t) => `${t.port}:${t.provider}:${t.url}`).join(",");
   if (ui.tunnelsList.dataset.firma === firma) return;
   ui.tunnelsList.dataset.firma = firma;
 

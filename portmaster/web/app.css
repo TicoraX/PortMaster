@@ -1134,6 +1134,13 @@ body {
   color: oklch(52% 0.13 75);
 }
 
+/* `.orphan__name` viene con `white-space: nowrap` y elipsis, que para un nombre
+ * de proceso esta bien y para una URL no: la cortaba a la mitad. El
+ * `word-break` solo no alcanzaba, porque contra un `nowrap` no hay donde
+ * quebrar. La URL entera es el dato de esta fila. */
 .tunnels .orphan__name {
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
   word-break: break-all;
 }
