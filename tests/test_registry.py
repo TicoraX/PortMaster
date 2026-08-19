@@ -52,3 +52,48 @@ def test_registrar_un_proyecto_con_docker_se_ve_ya_mismo(tmp_path, monkeypatch):
 
     registry.add(_proyecto(tmp_path, "condocker", "docker compose up -d db"))
     assert registry.any_uses_docker(max_age=30.0) is True, "el cache no se invalido al registrar"
+
+
+def test_el_nombre_de_un_proyecto_sale_del_stack_no_de_la_carpeta(tmp_path, monkeypatch):
+    """La carpeta `apps/Fitness` declara `name: fittrack`, y la ficha dice eso.
+
+    El aviso de puerto compartido nombraba la carpeta: te mandaba a buscar un
+    proyecto llamado "Fitness" que en la interfaz no existe, porque ahi y en
+    todos lados se llama "fittrack". Es la misma pregunta con dos respuestas.
+    """
+    monkeypatch.setattr(registry, "HOME", tmp_path / "home")
+    monkeypatch.setattr(registry, "PROJECTS", tmp_path / "home" / "projects.json")
+
+    carpeta = tmp_path / "Fitness"
+    carpeta.mkdir()
+    (carpeta / "stack.yaml").write_text(
+        "name: fittrack\nservices:\n  db:\n    command: echo db\n    port: 5433\n",
+        encoding="utf-8",
+    )
+    registry.add(carpeta)
+
+    assert registry.name_of(carpeta.resolve()) == "fittrack"
+    assert registry.name_of(carpeta.resolve()) != carpeta.name
+
+
+def test_un_proyecto_que_se_rompio_cae_en_el_nombre_de_la_carpeta(tmp_path, monkeypatch):
+    """Un proyecto borrado despues de registrado no puede dejar la fila sin nombre.
+
+    Registrar exige un stack.yaml o algo detectable, pero eso vale en el momento
+    de registrar: la carpeta se puede borrar o romper despues. `doctor` es quien
+    avisa que esta rota; la lista solo tiene que seguir siendo legible.
+    """
+    monkeypatch.setattr(registry, "HOME", tmp_path / "home")
+    monkeypatch.setattr(registry, "PROJECTS", tmp_path / "home" / "projects.json")
+
+    carpeta = tmp_path / "borrado"
+    carpeta.mkdir()
+    (carpeta / "stack.yaml").write_text(
+        "name: efimero\nservices:\n  web:\n    command: echo hola\n", encoding="utf-8"
+    )
+    registry.add(carpeta)
+    assert registry.name_of(carpeta.resolve(), max_age=0.0) == "efimero"
+
+    (carpeta / "stack.yaml").unlink()
+    carpeta.rmdir()
+    assert registry.name_of(carpeta.resolve(), max_age=0.0) == "borrado"

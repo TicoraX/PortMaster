@@ -33,7 +33,12 @@ def servidor_http(free_ports):
     server = HTTPServer(("127.0.0.1", port), BaseHTTPRequestHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield port
+    # Las dos, y en este orden: `shutdown` corta el bucle de atencion y deja el
+    # socket bindeado. Sin `server_close`, cada test que usa este fixture se
+    # queda con un puerto de la banda hasta que termina la sesion entera, y
+    # `free_ports` los busca al azar ahi y se rinde a los 200 intentos.
     server.shutdown()
+    server.server_close()
 
 
 @pytest.fixture
@@ -646,3 +651,140 @@ def test_docker_running_sin_motor_no_revienta(monkeypatch):
 
     monkeypatch.setattr(cli.docker.subprocess, "run", falso)
     assert cli.docker.running() == []
+
+
+def test_open_usa_la_url_declarada_en_vez_de_la_raiz_del_puerto(
+    tmp_path, monkeypatch, servidor_http, abierto
+):
+    """El caso de ORQUESTER: la raiz del puerto carga una cascara que despues
+    falla en cada llamada, y el `?token=` es lo que hace que sirva.
+    """
+    (tmp_path / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        services:
+          web:
+            command: echo web
+            port: {servidor_http}
+            url: http://127.0.0.1:{servidor_http}/?token=${{TOK}}
+            env:
+              TOK: abc123
+        """),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["open"])
+    assert resultado.exit_code == 0
+    assert abierto == [f"http://127.0.0.1:{servidor_http}/?token=abc123"]
+
+
+def test_open_con_url_y_sin_puerto_abre_sin_sondear(tmp_path, monkeypatch, abierto):
+    """Sin `port:` no hay que sondear: no hay puerto que preguntar. Una pestaña
+    muerta es lo mismo que pasa hoy escribiendo la URL a mano, y es preferible a
+    no poder abrirla nunca.
+    """
+    (tmp_path / "stack.yaml").write_text(
+        textwrap.dedent("""
+        services:
+          studio:
+            command: echo studio
+            url: http://127.0.0.1:8765/estudio
+        """),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["open"])
+    assert resultado.exit_code == 0
+    assert abierto == ["http://127.0.0.1:8765/estudio"]
+
+
+def test_open_ignora_una_url_con_una_variable_sin_valor(
+    tmp_path, monkeypatch, servidor_http, abierto
+):
+    """Cae al default del puerto. Abrir la URL con el `${TOK}` literal adentro
+    seria peor: la pagina carga y falla por dentro.
+    """
+    (tmp_path / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        services:
+          web:
+            command: echo web
+            port: {servidor_http}
+            url: http://127.0.0.1:{servidor_http}/?token=${{NO_EXISTE_EN_NINGUN_LADO}}
+        """),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["open"])
+    assert resultado.exit_code == 0
+    assert abierto == [f"http://localhost:{servidor_http}"]
+
+
+def test_open_sin_puerto_y_con_una_variable_sin_valor_no_revienta(
+    tmp_path, monkeypatch, abierto
+):
+    """Sin `port:` no hay default al que caer, y `_abrir(None)` reventaba.
+
+    `os.startfile(None)` levanta TypeError, y `webbrowser.open` solo atrapa
+    OSError: el traceback salia crudo a la terminal despues de imprimir
+    "Abriendo None". Es la forma exacta del caso que motivo el campo `url:`, un
+    Studio con `ready: listen` y el token en una variable, el dia que falta el
+    .env.
+    """
+    (tmp_path / "stack.yaml").write_text(
+        textwrap.dedent("""
+        services:
+          studio:
+            command: echo studio
+            url: http://127.0.0.1:8765/?token=${NO_EXISTE_EN_NINGUN_LADO}
+        """),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["open"])
+    assert resultado.exit_code == 1
+    assert abierto == []
+    assert "Ningun puerto del stack contesta HTTP" in resultado.output
+
+
+def test_open_sin_puerto_no_tapa_al_servicio_que_si_contesta(
+    tmp_path, monkeypatch, servidor_http, abierto
+):
+    """El candidato sin URL resoluble se saltea, no corta el recorrido.
+
+    Antes cualquier servicio sin `port:` cortocircuitaba con `return` y los que
+    venian despues no se miraban nunca.
+    """
+    (tmp_path / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        services:
+          api:
+            command: echo api
+            port: {servidor_http}
+          studio:
+            command: echo studio
+            needs: [api]
+            url: http://127.0.0.1:8765/?token=${{NO_EXISTE_EN_NINGUN_LADO}}
+        """),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["open"])
+    assert resultado.exit_code == 0
+    assert abierto == [f"http://localhost:{servidor_http}"]
+
+
+def test_share_rechaza_un_puerto_fuera_de_rango(tmp_path, monkeypatch):
+    """`target` es texto porque tambien acepta el nombre de un servicio, asi que
+    se pierde el min/max que traen los demas comandos. Sin la validacion a mano,
+    `portmaster share 0` levantaba el cliente de tuneles contra 127.0.0.1:0.
+    """
+    monkeypatch.chdir(tmp_path)
+    for target in ("0", "70000", "99999"):
+        resultado = runner.invoke(cli.app, ["share", target])
+        assert resultado.exit_code == 1, target
+        assert "rango" in resultado.output

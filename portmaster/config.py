@@ -39,6 +39,10 @@ class Service:
     env_file: tuple[Path, ...] = ()
     pre_start: str | None = None
     post_start: str | None = None
+    # Adonde lleva "Abrir". Sin esto es la raiz del puerto, que no alcanza para
+    # una app que vive en un path o que necesita un token en la query. Puede
+    # traer ${VAR}: lo expande runner.service_url, no la carga.
+    url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -198,7 +202,7 @@ def _service(name: str, spec: object, root: Path) -> Service:
 
     unknown = set(spec) - {
         "command", "cwd", "port", "ready", "needs", "env", "detached", "stop",
-        "env_file", "pre_start", "post_start",
+        "env_file", "pre_start", "post_start", "url",
     }
     if unknown:
         raise ConfigError(f"{where}: campos desconocidos: {', '.join(sorted(unknown))}")
@@ -246,6 +250,20 @@ def _service(name: str, spec: object, root: Path) -> Service:
     if post_start is not None and (not isinstance(post_start, str) or not post_start.strip()):
         raise ConfigError(f"{where}.post_start debe ser texto no vacio")
 
+    url = spec.get("url")
+    if url is not None:
+        if not isinstance(url, str) or not url.strip():
+            raise ConfigError(f"{where}.url debe ser texto no vacio")
+        url = url.strip()
+        # Solo http y https. No es una barrera de seguridad —un stack.yaml ya
+        # ejecuta comandos— sino que convierte el error de tipeo mas comun,
+        # escribir `127.0.0.1:8765` sin esquema, en un mensaje claro al cargar
+        # en vez de una ruta relativa que el navegador interpreta como pueda.
+        if not url.startswith(("http://", "https://")):
+            raise ConfigError(
+                f"{where}.url debe empezar con http:// o https://, y es {url!r}"
+            )
+
     return Service(
         name=name,
         command=command,
@@ -259,6 +277,7 @@ def _service(name: str, spec: object, root: Path) -> Service:
         env_file=_env_files(where, spec.get("env_file"), root),
         pre_start=pre_start,
         post_start=post_start,
+        url=url,
     )
 
 
@@ -383,14 +402,15 @@ def parse_env_file(path: Path) -> dict[str, str]:
         val = val.strip()
         if not key:
             continue
-        if len(val) >= 2 and (
-            (val.startswith('"') and val.endswith('"'))
-            or (val.startswith("'") and val.endswith("'"))
-        ):
-            val = val[1:-1]
-        else:
-            if " #" in val:
-                val = val.split(" #", 1)[0].rstrip()
+        # El valor entrecomillado se corta en su comilla de cierre, no en el
+        # final de la linea: exigir que TERMINE en comilla fallaba en cuanto
+        # habia un comentario detras, y `TOKEN="abc" # el de prod` entregaba el
+        # token con las comillas pegadas. Y como lo de adentro se toma tal cual,
+        # un `#` dentro de las comillas sigue siendo parte del valor.
+        if len(val) >= 2 and val[0] in "\"'" and val.find(val[0], 1) != -1:
+            val = val[1 : val.find(val[0], 1)]
+        elif " #" in val:
+            val = val.split(" #", 1)[0].rstrip()
         env[key] = val
     return env
 

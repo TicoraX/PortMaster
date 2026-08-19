@@ -5,6 +5,7 @@ import socket
 import sys
 import textwrap
 import time
+from pathlib import Path
 
 import psutil
 import pytest
@@ -679,3 +680,118 @@ def test_pre_start_fallo_aborta_arranque(tmp_path, free_ports):
     with pytest.raises(runner.StartupError, match="pre_start fallo con codigo 42"):
         engine.up()
 
+
+
+@pytest.fixture
+def sin_env_global(tmp_path, monkeypatch):
+    """`build_env` lee `~/.portmaster/env.global`, o sea el disco de quien corre.
+
+    Las reglas de precedencia dejan las aserciones de abajo a salvo hoy, pero un
+    env.global que defina una de las variables que estos tests dan por ausentes
+    las vuelve rojas en una maquina y verdes en otra. La suite no puede depender
+    de que nadie haya usado la boveda global.
+    """
+    hogar = tmp_path / "hogar-de-prueba"
+    hogar.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: hogar))
+    return hogar
+
+
+def _servicio_con_url(tmp_path, url, env=None, env_file=()):
+    return config.Service(
+        name="studio",
+        command="echo hola",
+        cwd=tmp_path,
+        port=8765,
+        ready="port",
+        needs=(),
+        env=env or {},
+        detached=False,
+        env_file=env_file,
+        url=url,
+    )
+
+
+def test_la_url_expande_la_variable_desde_un_env_de_verdad(tmp_path, sin_env_global):
+    """El caso que motivo el campo: un Studio que sirve la cascara sin token y
+    exige `?token=` en toda su API. La variable sale del mismo entorno con el
+    que corre el servicio, no de uno paralelo.
+    """
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("ORQUESTER_TOKEN=abc123\n", encoding="utf-8")
+
+    service = _servicio_con_url(
+        tmp_path,
+        "http://127.0.0.1:8765/?token=${ORQUESTER_TOKEN}",
+        env_file=(dotenv,),
+    )
+    assert runner.service_url(service) == "http://127.0.0.1:8765/?token=abc123"
+
+
+def test_el_env_declarado_le_gana_al_env_file(tmp_path):
+    """La precedencia es la que documenta `build_env`, no una segunda inventada
+    para las URLs: si hubiera dos ordenes distintos, uno de los dos seria el bug.
+    """
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("TOK=delarchivo\n", encoding="utf-8")
+
+    service = _servicio_con_url(
+        tmp_path, "http://h/?t=${TOK}", env={"TOK": "declarado"}, env_file=(dotenv,)
+    )
+    assert runner.service_url(service) == "http://h/?t=declarado"
+
+
+def test_una_variable_sin_valor_deja_el_servicio_sin_url(tmp_path, sin_env_global):
+    """Abrir `?token=${TOK}` con el literal adentro es peor que no ofrecer el
+    boton: la pagina carga, falla por dentro, y parece que funciono.
+    """
+    service = _servicio_con_url(tmp_path, "http://h/?t=${NO_EXISTE_EN_NINGUN_LADO}")
+    assert runner.service_url(service) is None
+
+
+def test_una_variable_sin_valor_pero_con_default_si_expande(tmp_path):
+    service = _servicio_con_url(tmp_path, "http://h/?t=${NO_EXISTE_TAMPOCO:-vacio}")
+    assert runner.service_url(service) == "http://h/?t=vacio"
+
+
+def test_sin_url_declarada_no_hay_url(tmp_path, sin_env_global):
+    """El que llama arma el default con el puerto. Que `service_url` invente
+    `http://localhost:<port>` seria un tercer lugar donde vive ese literal.
+    """
+    service = _servicio_con_url(tmp_path, None)
+    assert runner.service_url(service) is None
+
+
+def test_un_pre_start_colgado_falla_como_arranque_y_no_como_traceback(tmp_path, monkeypatch):
+    """`subprocess.run(timeout=...)` levanta TimeoutExpired, que nadie atrapaba.
+
+    Un `npm run build` colgado rompia el arranque con un traceback crudo en vez
+    de decir que servicio y que hook se quedaron esperando, que es lo unico que
+    hace falta para saber donde mirar.
+
+    ponytail: el timeout avisa, no acota. Con `shell=True` y la salida por un
+    pipe, `subprocess.run` mata al shell al vencer y vuelve a esperar la salida
+    SIN timeout; el nieto todavia tiene el pipe heredado, asi que la espera dura
+    lo que dure el comando colgado. Medido: `timeout=1` sobre un `sleep(20)`
+    tarda 20.1s en levantar. No deja huerfanos, pero el numero no limita nada.
+    Acotarlo de verdad es Popen + `_terminate_tree`, como el resto del modulo.
+    Por eso este test usa un sleep corto: mide el mensaje, no el limite.
+    """
+    monkeypatch.setattr(runner, "DETACHED_TIMEOUT", 1)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          web:
+            command: echo arriba
+            pre_start: {sys.executable} -c "import time; time.sleep(3)"
+        """,
+    )
+    engine = make_runner(stack)
+    try:
+        with pytest.raises(runner.StartupError) as exc:
+            engine.up()
+        assert "web" in str(exc.value)
+        assert "pre_start" in str(exc.value)
+    finally:
+        engine.down()

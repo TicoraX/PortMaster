@@ -971,6 +971,16 @@ def create_app(token: str | None = None) -> FastAPI:
     )
     def share_port(port: int, provider: str | None = None) -> dict:
         """Inicia un tunel efimero para compartir un puerto."""
+        # Antes del candado y de la reserva: un puerto que no existe no puede
+        # dejar una entrada a medias en `_active_tunnels`. `kill` valida gratis
+        # porque llama a `ports.scan`; aca no hay ningun scan que lo traiga, y
+        # sin esto el 0, el -5 y el 99999 contestaban 200.
+        try:
+            ports.check_port(port)
+        except ValueError as exc:
+            log.info("puerto rechazado: %s", exc)
+            raise HTTPException(400, str(exc))
+
         with _tunnels_lock:
             # Un tunel que se murio solo no puede bloquear el puerto hasta que
             # pase el sondeo de estado: la limpieza vivia en `tunnels_view`, o
@@ -1114,6 +1124,9 @@ def _project_view(path: Path) -> dict:
         # esto se sondea cada 2.5s.
         if state == "stopped" and service.detached and _published(status):
             state = "ready"
+        # Solo lo que contesta HTTP se ofrece para abrir: un postgres listo tiene
+        # puerto y no es algo que mandar al navegador.
+        abrible = state != "stopped" and service.name in openable
         services.append(
             {
                 "name": service.name,
@@ -1121,9 +1134,15 @@ def _project_view(path: Path) -> dict:
                 # del rol de un servicio. Adivinar "backend" por el nombre no.
                 "kind": "container" if service.detached else "local",
                 "port": service.port or discovered.get(service.name),
-                # Solo lo que contesta HTTP se ofrece para abrir: un postgres
-                # listo tiene puerto y no es algo que mandar al navegador.
-                "openable": state != "stopped" and service.name in openable,
+                "openable": abrible,
+                # Adonde lleva "Abrir", si el stack.yaml lo declara. None deja
+                # que la interfaz arme el default con el puerto.
+                #
+                # Se pregunta SOLO si ya es abrible: `runner.service_url` lee
+                # `env.global` y cada `env_file` de disco, y esto corre cada 2.5s
+                # para cada servicio de cada proyecto. Con los stacks apagados,
+                # que es el caso normal, el boton ni se dibuja y no se toca disco.
+                "url": runner.service_url(service) if abrible else None,
                 "needs": list(service.needs),
                 "state": state,
                 "occupant": _occupant(status, state != "stopped"),
@@ -1160,7 +1179,7 @@ def _shared_with(mapa: dict[int, list[Path]], port: int | None, mio: Path) -> li
     """Nombres de los otros proyectos que declaran `port`. Vacio si no hay."""
     if not port:
         return []
-    return [otro.name for otro in mapa.get(port, []) if otro != mio]
+    return [registry.name_of(otro) for otro in mapa.get(port, []) if otro != mio]
 
 
 def _published(status: ports.PortStatus | None) -> bool:

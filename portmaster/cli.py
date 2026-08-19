@@ -450,6 +450,13 @@ def _bajar(root: Path) -> None:
         err.print(f"{stack.name}: quedo algo sin bajar, el puerto puede seguir ocupado.")
 
 
+def _abrir(url: str) -> None:
+    console.print(f"Abriendo [bold]{url}[/]")
+    import webbrowser
+
+    webbrowser.open(url)
+
+
 @app.command("open")
 def open_cmd(
     port: int = typer.Argument(None, min=1, max=65535, help="Puerto, si ya lo sabes."),
@@ -463,17 +470,33 @@ def open_cmd(
             raise typer.Exit(1)
         # En orden de arranque: los contenedores primero, el frontend al final.
         # Se recorre al reves porque lo que uno quiere abrir suele ser lo ultimo.
-        candidates = [s.port for s in reversed(stack.resolve()) if s.port]
+        # Cada candidato es (url declarada o None, puerto o None): un puerto
+        # suelto no es un servicio y fabricarle uno seria un objeto que miente.
+        candidates = [
+            (runner.service_url(s), s.port)
+            for s in reversed(stack.resolve())
+            if s.port or s.url
+        ]
     else:
-        candidates = [port]
+        candidates = [(None, port)]
 
-    for candidate in candidates:
-        if runner.speaks_http(candidate):
-            url = f"http://localhost:{candidate}"
-            console.print(f"Abriendo [bold]{url}[/]")
-            import webbrowser
-
-            webbrowser.open(url)
+    for declarada, puerto in candidates:
+        # Sin puerto no hay que sondear: no hay nada que preguntar. Puede abrir
+        # una pestaña muerta si el stack no esta arriba, que es exactamente lo
+        # que pasa hoy escribiendo la URL a mano, y es preferible a no poder
+        # abrirla nunca.
+        if puerto is None:
+            # Una `url:` con una variable sin valor no resuelve, y sin `port:` no
+            # hay a que caer: `_abrir(None)` reventaba con un TypeError crudo en
+            # la terminal. Saltearlo deja contestar al candidato siguiente, y si
+            # no queda ninguno cae en el error de abajo, que es lo que hay que
+            # leer cuando falta la variable.
+            if declarada is None:
+                continue
+            _abrir(declarada)
+            return
+        if runner.speaks_http(puerto):
+            _abrir(declarada or f"http://localhost:{puerto}")
             return
 
     err.print(
@@ -523,7 +546,7 @@ def list_cmd() -> None:
             else:
                 port_labels.append(str(p))
         ports_str = ", ".join(port_labels) if port_labels else "-"
-        table.add_row(pid, path.name, ports_str, str(path))
+        table.add_row(pid, registry.name_of(path), ports_str, str(path))
     console.print(table)
     if collisions:
         console.print("[dim yellow]Puertos en amarillo se disputan entre dos o mas proyectos.[/]")
@@ -732,7 +755,14 @@ def share_cmd(
 
     port: int | None = None
     if target and target.isdigit():
-        port = int(target)
+        # `target` es texto porque tambien acepta el nombre de un servicio, asi
+        # que se pierde el `min`/`max` que traen los demas comandos. Sin esto,
+        # `portmaster share 0` levantaba el cliente de tuneles contra 127.0.0.1:0.
+        try:
+            port = ports.check_port(int(target))
+        except ValueError as exc:
+            err.print(str(exc))
+            raise typer.Exit(1)
     else:
         try:
             stack = detect.stack_for(Path.cwd())

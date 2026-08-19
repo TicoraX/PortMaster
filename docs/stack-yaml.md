@@ -74,7 +74,13 @@ loguea y el apagado sigue con el resto.
 ## env_file
 
 `env_file` permite cargar variables de entorno desde uno o varios archivos (ej.
-`env_file: .env` o `env_file: [.env, .env.local]`). La precedencia de variables es:
+`env_file: .env` o `env_file: [.env, .env.local]`).
+
+Las rutas van **relativas a la raíz del proyecto y no pueden salir de ella**:
+`../../.env` o una ruta absoluta son `ConfigError` al cargar el archivo, igual
+que `cwd`. Un `stack.yaml` ajeno no puede pedir el `.env` de otro proyecto tuyo.
+
+La precedencia de variables es:
 1. `os.environ` del sistema anfitrión.
 2. `~/.portmaster/env.global` (bóveda global de variables compartidas, si existe).
 3. Archivos listados en `env_file` (en orden de aparición).
@@ -84,6 +90,46 @@ Con una excepción: después de aplicar todo lo anterior, `build_env` fija
 `PYTHONUNBUFFERED=1` y `FORCE_COLOR=1`. Para esas dos claves `env:` no gana,
 porque de ellas depende que los logs del servicio lleguen a la terminal y a
 la interfaz en vivo en lugar de quedarse en un buffer.
+
+## url
+
+Adónde lleva el botón `Abrir`, en la interfaz y en `portmaster open`. Sin él es
+`http://localhost:<port>`, que es lo correcto para la mayoría de los servicios y
+no alcanza para los que no viven en la raíz del puerto:
+
+```yaml
+services:
+  studio:
+    command: uv run python ui/server.py 8765
+    port: 8765
+    env_file: [.env]
+    url: http://127.0.0.1:8765/?token=${ORQUESTER_TOKEN}
+```
+
+Reglas:
+
+- Solo `http://` y `https://`. Otro esquema es error al cargar el archivo. No es
+  una barrera de seguridad —un `stack.yaml` ya ejecuta comandos arbitrarios, y
+  eso está en el modelo de confianza del README— sino que convierte el error de
+  tipeo más probable, escribir `127.0.0.1:8765` sin esquema, en un mensaje claro
+  en vez de una ruta relativa que el navegador interpreta como puede.
+- Admite `${VAR}` y `${VAR:-default}`, resueltos con **el mismo entorno con el
+  que corre el servicio**: la precedencia es la de `env_file`, de arriba. Si la
+  URL necesita un token, es el token que recibió el proceso.
+- No se combina con `ready: listen`. El puerto de un servicio `listen` lo elige
+  el proceso y se descubre al arrancar, así que cualquier puerto escrito en la
+  URL es una apuesta. Y como `url` le gana al puerto descubierto, declararla
+  **empeora** el botón: si el proceso arranca en 3001, sigue llevando al 3000.
+- Una variable sin valor y sin default deja el servicio **sin URL**. Con `port:`,
+  el botón vuelve al `http://localhost:<port>` de siempre. **Sin `port:` no hay
+  a qué caer**: ese servicio se saltea y `portmaster open` sigue con el siguiente
+  candidato; si no queda ninguno, sale con código 1. Abrir una URL con un
+  `${TOKEN}` literal adentro sería peor: la página carga, falla por dentro, y
+  parece que funcionó.
+- En la interfaz, el botón sigue apareciendo solo cuando el puerto contestó
+  HTTP. Un servicio sin `port:` nunca se puede saber si está arriba, así que ahí
+  no se dibuja; ese caso lo abre `portmaster open` desde la terminal, que no
+  sondea nada.
 
 ## pre_start y post_start
 

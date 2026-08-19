@@ -103,12 +103,25 @@ cerrar el túnel de inmediato.
 ## Limpieza de recursos Docker (Higiene)
 
 ```bash
-portmaster clean             # limpia contenedores parados, redes e imagenes sin tag
-portmaster clean --volumes   # limpia tambien volumenes anonimos/huerfanos
+portmaster clean                        # contenedores parados, imagenes sin tag, redes sin usar y cache de build
+portmaster clean --solo cache --solo images   # solo esas dos categorias
+portmaster clean --volumes              # ademas, volumenes anonimos/huerfanos
 ```
 
-Ejecuta `docker system prune` de manera asistida y segura para liberar espacio en disco
-y eliminar recursos huérfanos dejados por stacks anteriores.
+Limpia **por categorías**, con un comando propio para cada una, no con un
+`docker system prune` que las tira todas juntas. No es lo mismo borrar
+contenedores parados que caché de build: la caché se regenera sola y las
+imágenes sin tag pueden ser la capa base que vas a volver a bajar. Poder
+separarlo es el punto.
+
+Los **volúmenes van aparte en todos lados** y nunca entran por defecto: adentro
+hay datos y no se regeneran. Hay que pedirlos con `--volumes`; en la interfaz
+son una casilla propia, y el servidor MCP directamente los rechaza.
+
+Antes de borrar nada muestra `docker system df` para que veas qué hay en juego,
+y pregunta. `--yes` saltea la pregunta, para scripts. Si una categoría falla, las
+demás siguen y el resumen dice cuál falló: quedarse a mitad sin decir dónde es
+peor que terminar y contarlo.
 
 ## Servidor MCP para Agentes de IA
 

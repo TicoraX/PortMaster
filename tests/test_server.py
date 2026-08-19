@@ -266,13 +266,20 @@ def proxy_de_docker(free_ports):
 
 
 def test_el_estado_delata_el_puerto_compartido(client, tmp_path, free_ports):
-    """Dos proyectos que declaran el mismo puerto, sin que ninguno corra."""
+    """Dos proyectos que declaran el mismo puerto, sin que ninguno corra.
+
+    Las carpetas se llaman distinto que los stacks a proposito. El aviso nombraba
+    la carpeta y la ficha el `name:`: con `Fitness/` declarando `name: fittrack`,
+    el mensaje mandaba a buscar un proyecto que en la interfaz no existe. Si
+    carpeta y stack se llaman igual, revertir ese arreglo no se nota.
+    """
     (port,) = free_ports(1)
-    for nombre in ("blog", "fitness"):
-        root = tmp_path / nombre
+    for carpeta, nombre in (("Blog", "blog"), ("Fitness", "fitness")):
+        root = tmp_path / carpeta
         root.mkdir()
         (root / "stack.yaml").write_text(
-            f"services:\n  web:\n    command: python web\n    port: {port}\n", encoding="utf-8"
+            f"name: {nombre}\nservices:\n  web:\n    command: python web\n    port: {port}\n",
+            encoding="utf-8",
         )
         registry.add(root)
 
@@ -1450,3 +1457,92 @@ def test_los_contenedores_con_docker_caido_no_rompen_la_confirmacion(client, mon
     res = client.get("/api/docker/containers")
     assert res.status_code == 200
     assert res.json()["running"] == []
+
+
+def _proyecto_http_con_url(tmp_path, port, url):
+    """Un proyecto cuyo servicio contesta HTTP de verdad, con `url:` declarada."""
+    servidor = (
+        "from http.server import HTTPServer, SimpleHTTPRequestHandler; "
+        f"HTTPServer(('127.0.0.1', {port}), SimpleHTTPRequestHandler).serve_forever()"
+    )
+    root = tmp_path / "conurl"
+    root.mkdir()
+    (root / "stack.yaml").write_text(
+        f'services:\n'
+        f'  web:\n'
+        f'    command: {sys.executable} -c "{servidor}"\n'
+        f'    port: {port}\n'
+        f'    url: {url}\n',
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_el_estado_trae_la_url_declarada_con_la_variable_expandida(
+    client, tmp_path, free_ports
+):
+    """El caso de ORQUESTER: el boton tiene que llevar al `?token=`, no a la raiz
+    del puerto, que carga una pagina que se ve bien y falla en cada llamada.
+    """
+    (port,) = free_ports(1)
+    root = _proyecto_http_con_url(
+        tmp_path, port, "http://127.0.0.1:8765/?token=${PM_TOKEN_DE_PRUEBA}"
+    )
+    (root / "stack.yaml").write_text(
+        (root / "stack.yaml").read_text(encoding="utf-8")
+        + "    env:\n      PM_TOKEN_DE_PRUEBA: secreto-expandido\n",
+        encoding="utf-8",
+    )
+    pid = registry.project_id(registry.add(root))
+    assert client.post(f"/api/projects/{pid}/up", json={}).status_code == 200
+
+    def con_url():
+        servicio = client.get("/api/state").json()["projects"][0]["services"][0]
+        return servicio["openable"] and servicio["url"]
+
+    assert esperar(con_url, sum(server.HTTP_RETRIES) + 20), "nunca llego la url"
+    servicio = client.get("/api/state").json()["projects"][0]["services"][0]
+    assert servicio["url"] == "http://127.0.0.1:8765/?token=secreto-expandido"
+
+
+def test_un_servicio_detenido_no_trae_url_aunque_la_declare(client, tmp_path, free_ports):
+    """La expansion lee `env.global` y cada `env_file` de disco, y esto se sondea
+    cada 2.5s para cada servicio de cada proyecto. Con el stack apagado el boton
+    ni se dibuja, asi que preguntarla seria pagar disco por nada.
+
+    Este test se pone rojo si alguien saca la compuerta de `openable` y vuelve a
+    poner la expansion en el camino caliente.
+    """
+    (port,) = free_ports(1)
+    root = _proyecto_http_con_url(tmp_path, port, "http://localhost:3000/admin")
+    registry.add(root)
+
+    servicio = client.get("/api/state").json()["projects"][0]["services"][0]
+    assert servicio["openable"] is False
+    assert servicio["url"] is None
+
+
+def test_un_servicio_sin_url_declarada_la_trae_en_none(client, proyecto):
+    """La interfaz arma el default con el puerto. Que el servidor mande
+    `http://localhost:<port>` seria un cuarto lugar donde vive ese literal.
+    """
+    path, _ = proyecto
+    pid = registry.project_id(path)
+    client.post(f"/api/projects/{pid}/up", json={})
+    esperar_listo(client)
+
+    servicio = client.get("/api/state").json()["projects"][0]["services"][0]
+    assert servicio["url"] is None
+
+
+def test_share_rechaza_un_puerto_fuera_de_rango(client):
+    """`kill` validaba gratis porque llama a `ports.scan`; `share` no tiene scan.
+
+    Sin la validacion propia, el 0, el -5 y el 99999 contestaban 200 y llegaban
+    hasta el cliente de tuneles. Y la reserva en `_active_tunnels` se hacia antes,
+    asi que un puerto imposible dejaba una entrada a medias.
+    """
+    for port in (0, -5, 70000, 99999):
+        res = client.post(f"/api/share?port={port}")
+        assert res.status_code == 400, port
+        assert "rango" in res.json()["detail"]

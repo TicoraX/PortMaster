@@ -11,11 +11,33 @@ from typing import Any
 
 from . import __version__, detect, docker, doctor, ports, registry, scripts, tunnel
 
+# Los tuneles que abrio esta sesion de MCP. `serve_stdio` los cierra al salir:
+# un tunel es lo unico que este servidor deja fuera de su propio proceso, y del
+# otro lado no hay nadie mirando la pantalla.
+_tuneles: list[tunnel.Tunnel] = []
+
+
+def cerrar_tuneles() -> None:
+    """Cierra lo que quedo abierto. Un fallo no puede tapar a los demas."""
+    while _tuneles:
+        try:
+            _tuneles.pop().stop()
+        except Exception:
+            pass
+
 
 def handle_request(req: dict[str, Any]) -> dict[str, Any] | None:
     req_id = req.get("id")
     method = req.get("method")
     params = req.get("params", {})
+
+    # JSON-RPC 2.0: una notificacion es una peticion SIN `id`, y a una
+    # notificacion no se contesta nunca. Reconocer solo
+    # `notifications/initialized` por nombre dejaba que `notifications/cancelled`
+    # y `notifications/progress` cayeran al final y se llevaran una respuesta de
+    # error con `id: null`, que es justo lo que el protocolo prohibe.
+    if "id" not in req:
+        return None
 
     if method == "initialize":
         return {
@@ -223,9 +245,10 @@ def _execute_tool(name: str, args: dict[str, Any]) -> str:
         return f"Proceso en puerto {port} (pid {status.pid}) liberado."
 
     if name == "portmaster_share":
-        port = int(args["port"])
+        port = ports.check_port(int(args["port"]))
         provider = args.get("provider")
         tun = tunnel.start_tunnel(port, provider=provider)
+        _tuneles.append(tun)
         return f"Tunel activo via {tun.provider}: {tun.url}"
 
     if name == "portmaster_run":
@@ -277,18 +300,28 @@ def _reservar_stdout():
 
 
 def serve_stdio() -> None:
-    """Bucle principal de servidor MCP sobre stdio."""
-    protocolo = _reservar_stdout()
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            req = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    """Bucle principal de servidor MCP sobre stdio.
 
-        resp = handle_request(req)
-        if resp is not None:
-            protocolo.write(json.dumps(resp) + "\n")
-            protocolo.flush()
+    Al terminar cierra los tuneles que abrio, por el mismo motivo que
+    `server._ciclo_de_vida`: sin esto el agente cerraba la sesion y el cliente
+    de tuneles seguia vivo, con el puerto expuesto a internet, sin nada en
+    pantalla que lo dijera. Aca es peor que en la interfaz, porque del otro lado
+    no hay nadie mirando.
+    """
+    protocolo = _reservar_stdout()
+    try:
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                req = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            resp = handle_request(req)
+            if resp is not None:
+                protocolo.write(json.dumps(resp) + "\n")
+                protocolo.flush()
+    finally:
+        cerrar_tuneles()

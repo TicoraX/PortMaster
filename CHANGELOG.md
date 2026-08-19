@@ -4,6 +4,66 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
+## [1.2.0] - 2026-08-19
+
+### Agregado
+
+- **`url:` por servicio en `stack.yaml`**: adónde lleva el botón `Abrir`, en la
+  interfaz y en `portmaster open`. Sin él sigue siendo `http://localhost:<port>`,
+  que es correcto para casi todo y no alcanza para lo que no vive en la raíz del
+  puerto: una app montada en `/admin`, o una que pide un token en la query.
+  Admite `${VAR}` y `${VAR:-default}`, resueltos con **el mismo entorno con el
+  que corre el servicio**, así que si la URL necesita un token es el token que
+  recibió el proceso. Solo `http://` y `https://`: otro esquema es error al
+  cargar el archivo, no por seguridad —un `stack.yaml` ya ejecuta comandos
+  arbitrarios— sino para que escribir `127.0.0.1:8765` sin esquema dé un mensaje
+  claro en vez de una ruta relativa. Una variable sin valor deja el servicio sin
+  URL: abrir una con el `${TOKEN}` literal adentro carga una página que falla por
+  dentro y parece que funcionó.
+
+### Arreglado
+
+- **La interfaz se recortaba por debajo de 640px.** Dos filas de acciones eran
+  flex sin `flex-wrap`, así que su ancho mínimo era la suma de los botones y no
+  podían encoger. Como `html, body` llevan `overflow-x: clip`, ese desborde no
+  daba scroll: daba contenido invisible e inalcanzable. A 375px, `Detalles`,
+  `Quitar proyecto` y `Limpiar Docker` quedaban fuera de la pantalla.
+- **Con la ficha cerrada se tabulaba hasta `Quitar proyecto`.** El acordeón
+  cerraba con `opacity: 0`, que no saca nada del orden de tabulación ni del árbol
+  de accesibilidad: cuatro Tab desde el propio toggle caían en controles
+  invisibles, el último destructivo, mientras `aria-expanded` decía `false`. Un
+  lector de pantalla además leía la lista completa de servicios de cada proyecto
+  cerrado.
+- **El aviso de puerto compartido nombraba la carpeta y no el proyecto.** Con
+  `apps/Fitness` declarando `name: fittrack`, el aviso mandaba a buscar un
+  proyecto que en la interfaz no existe. `portmaster list` tenía lo mismo en la
+  columna NOMBRE.
+- **`portmaster open` reventaba con un traceback** cuando un servicio declaraba
+  `url:` con una variable sin valor y no tenía `port:`: no hay default al que
+  caer y se abría `None`. Además, un candidato sin puerto cortocircuitaba el
+  recorrido y tapaba a los servicios que sí contestaban.
+- **`share` aceptaba puertos que no existen.** `POST /api/share?port=0`
+  contestaba 200, igual que -5, 70000 y 99999, y reservaba la entrada antes de
+  validar; `portmaster share 0` levantaba el cliente de túneles contra
+  `127.0.0.1:0`.
+- **El servidor MCP dejaba los túneles abiertos** al terminar la sesión, con el
+  puerto expuesto a internet. Es el mismo cierre que la interfaz ya hacía.
+- **El MCP contestaba notificaciones.** JSON-RPC define notificación como
+  petición sin `id` y prohíbe responderlas; se reconocía una sola por nombre.
+- **Un hook `pre_start` o `post_start` colgado rompía el arranque** con un
+  traceback crudo en vez de decir qué servicio y qué hook se quedaron esperando.
+- **Un valor de `.env` entrecomillado con un comentario detrás conservaba las
+  comillas.** `TOKEN="abc"  # el de prod` entregaba el token con las comillas
+  pegadas, que no falla al arrancar: falla en la primera petición autenticada.
+- **El botón de limpieza de Docker podía quedar armado** entre aperturas del
+  diálogo, salteándose la confirmación de un borrado.
+- **El extractor de URL de tailscale aceptaba cualquier `https://` del log**, así
+  que un enlace a la documentación o al login se reportaba como la URL del túnel.
+- La pestaña del túnel bloqueada por el navegador ahora se avisa; el mapa de
+  puertos ya no se corta en "ocupa el puerto de "; el aviso de volúmenes se
+  anuncia a un lector de pantalla; y la casilla de intrusos llega a los 24px de
+  área sensible que pide WCAG 2.5.8.
+
 ## [1.1.1] - 2026-08-16
 
 ### Cambiado
@@ -168,6 +228,7 @@ Primera versión publicada. Lo que sigue es el alcance completo, no un diff.
   la tarjeta, y no lo impide: `docker compose up -d` sobre un contenedor que ya
   está arriba es el mismo caso y ahí es correcto. Ver `docs/pendientes.md`.
 
+[1.2.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.2.0
 [1.1.1]: https://github.com/TicoraX/PortMaster/releases/tag/v1.1.1
 [1.1.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.1.0
 [1.0.3]: https://github.com/TicoraX/PortMaster/releases/tag/v1.0.3

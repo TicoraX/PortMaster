@@ -38,7 +38,7 @@ Requiere Python 3.10 o superior. Funciona en Windows, macOS y Linux.
 | `portmaster remove .` | Des-registra un proyecto (alias: `rm`) |
 | `portmaster run [tarea]` | Ejecuta scripts o pipelines de tareas del proyecto |
 | `portmaster share [target]` | Expone un servicio local a internet mediante un túnel seguro |
-| `portmaster clean` | `docker system prune -f`: contenedores parados, redes, imágenes sin tag y caché de build. Pregunta antes |
+| `portmaster clean` | Limpia Docker por categorías: contenedores parados, imágenes sin tag, redes sin usar y caché de build. Los volúmenes van aparte, con `--volumes`. Pregunta antes |
 | `portmaster mcp` | Inicia el servidor Model Context Protocol (MCP) sobre stdio para IA |
 | `portmaster version` | Versión instalada (también `--version`) |
 

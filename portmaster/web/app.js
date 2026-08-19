@@ -198,6 +198,14 @@ function kindIcon(kind) {
   return svg;
 }
 
+/* Adonde lleva "Abrir". El `url:` del stack.yaml gana cuando existe: la raiz
+   del puerto no siempre es la entrada, y hay apps que piden un token en la
+   query o viven en un path. El servidor solo lo manda para servicios ya
+   abribles, asi que aca no hay que chequear estado otra vez. */
+function abrirUrl(service) {
+  return service.url || `http://localhost:${service.port}`;
+}
+
 function renderService(service, projectId) {
   const node = ui.tplService.content.firstElementChild.cloneNode(true);
   node.querySelector(".service__name").prepend(kindIcon(service.kind));
@@ -240,12 +248,13 @@ function renderService(service, projectId) {
   // El boton de abrir sale solo cuando el puerto contesto HTTP. Un postgres
   // listo tiene puerto y abrirlo en el navegador no lleva a ningun lado.
   if (service.openable && service.port) {
+    const destino = abrirUrl(service);
     const link = document.createElement("a");
-    link.href = `http://localhost:${service.port}`;
+    link.href = destino;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.className = "btn btn--open";
-    link.title = `Abrir http://localhost:${service.port}`;
+    link.title = `Abrir ${destino}`;
     link.textContent = "Abrir ↗";
     node.querySelector(".service__act").append(link);
 
@@ -281,8 +290,20 @@ function renderService(service, projectId) {
               copiado = false;
             }
           }
-          flash(`Túnel activo: ${res.url}${copiado ? " (copiado al portapapeles)" : ""}`, "good");
-          window.open(res.url, "_blank");
+          // El `open` va despues de un `await`, asi que el navegador ya no lo
+          // cuenta como gesto del usuario y el bloqueador de popups se lo come
+          // sin avisar. Mismo criterio que el portapapeles de arriba: no decir
+          // que paso algo que no paso. La URL viaja en el mensaje igual, que es
+          // lo unico que no puede fallar.
+          const pestaña = window.open(res.url, "_blank");
+          const detalle = [
+            copiado ? "copiado al portapapeles" : null,
+            pestaña ? null : "el navegador bloqueó la pestaña nueva",
+          ].filter(Boolean);
+          flash(
+            `Túnel activo: ${res.url}${detalle.length ? ` (${detalle.join("; ")})` : ""}`,
+            "good",
+          );
         } else {
           flash(res.detail || "Error al iniciar túnel", "bad");
         }
@@ -508,6 +529,10 @@ function cleanPicks() {
 
 function refreshCleanButton() {
   const elegidos = cleanPicks();
+  // Desarmar junto con la etiqueta. Sin esto, armar el boton y cerrar el
+  // dialogo antes de que venzan los 6s dejaba el `armed` puesto: al reabrirlo,
+  // el primer click borraba sin el paso de confirmacion que el boton promete.
+  delete ui.cleanRun.dataset.armed;
   ui.cleanRun.disabled = elegidos.length === 0;
   ui.cleanRun.textContent = elegidos.length ? `Limpiar ${elegidos.length}` : "Elegí algo";
   ui.cleanWarn.textContent = elegidos.includes("volumes")
@@ -649,8 +674,8 @@ function updateCard(entry, project) {
   const open = root.querySelector(".project__open");
   open.hidden = !abrible;
   if (abrible) {
-    open.href = `http://localhost:${abrible.port}`;
-    open.title = `Abrir ${abrible.name} en http://localhost:${abrible.port}`;
+    open.href = abrirUrl(abrible);
+    open.title = `Abrir ${abrible.name} en ${abrirUrl(abrible)}`;
   }
 
   // Solo lo detectado se puede congelar: lo que ya tiene archivo, no.
@@ -889,8 +914,10 @@ function renderTunnels(list) {
       cerrar.addEventListener("click", () => {
         act(cerrar, async () => {
           await api(`/api/share/${tun.port}`, { method: "DELETE" });
+          // Sin `refresh()` propio: `act` ya lo llama al terminar el trabajo.
+          // Borrar la firma antes alcanza para forzar el repintado, y el que
+          // habia aca duplicaba /api/state y refreshHealth en cada cierre.
           delete ui.tunnelsList.dataset.firma;
-          await refresh();
         });
       });
 
@@ -1395,6 +1422,7 @@ async function refreshPortsModal() {
             label: `${project.name} · ${service.name}`,
             kind: service.state === "ready" ? "corriendo" : "detenido",
             openable: service.openable,
+            url: service.url,
           });
         }
       }
@@ -1403,7 +1431,11 @@ async function refreshPortsModal() {
     for (const orphan of orphansData.orphans || []) {
       items.push({
         port: orphan.port,
-        label: `${orphan.name} ocupa el puerto de ${(orphan.projects || []).join(" y ")}`,
+        // El mismo fallback que la lista de intrusos: sin esto, un intruso cuyo
+        // puerto no reclama nadie quedaba en "ocupa el puerto de " y se cortaba.
+        label: `${orphan.name} ocupa el puerto de ${
+          (orphan.projects || []).join(" y ") || "un proyecto registrado"
+        }`,
         kind: "intruso",
         isOrphan: true,
       });
@@ -1446,7 +1478,7 @@ async function refreshPortsModal() {
           actLink.className = "btn btn--open";
           actLink.target = "_blank";
           actLink.rel = "noopener noreferrer";
-          actLink.href = `http://localhost:${item.port}`;
+          actLink.href = abrirUrl(item);
           actLink.textContent = "Abrir ↗";
           li.append(portTag, info, actLink);
         } else if (item.isOrphan) {

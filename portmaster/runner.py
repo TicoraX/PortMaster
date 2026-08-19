@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import subprocess
 import threading
 import time
@@ -24,7 +25,7 @@ from pathlib import Path
 import psutil
 from rich.console import Console
 
-from . import config, ports
+from . import config, detect, ports
 from .config import Service, Stack
 
 
@@ -46,6 +47,41 @@ def build_env(service: Service) -> dict[str, str]:
     env["PYTHONUNBUFFERED"] = "1"
     env["FORCE_COLOR"] = "1"
     return env
+
+
+def service_url(service: Service) -> str | None:
+    """Adonde lleva "Abrir" para este servicio, o None si no se puede saber.
+
+    Sin `url:` devuelve None y el que llama arma el default de siempre con el
+    puerto. Con `url:`, expande `${VAR}` y `${VAR:-default}` desde el entorno
+    que `build_env` ya compone, que es el mismo con el que corre el servicio: si
+    la URL necesita un token, es el token que el proceso recibio.
+
+    Una variable sin valor tambien devuelve None. Abrir el navegador en una URL
+    con un `${TOKEN}` literal adentro es peor que no ofrecer el boton: parece
+    que funciono.
+
+    Toca disco (`build_env` lee `env.global` y cada `env_file`), asi que no se
+    llama en el sondeo de la interfaz salvo para servicios ya abribles.
+    """
+    if not service.url:
+        return None
+
+    env = build_env(service)
+    faltante = False
+
+    def resolve(match: re.Match) -> str:
+        nonlocal faltante
+        valor = env.get(match.group(1))
+        if valor:
+            return valor
+        if match.group(2) is not None:
+            return match.group(2)
+        faltante = True
+        return match.group(0)
+
+    expandida = detect.VARIABLE.sub(resolve, service.url)
+    return None if faltante else expandida
 
 
 COLORS = ("cyan", "magenta", "green", "yellow", "blue", "bright_red")
@@ -266,17 +302,26 @@ class Runner:
         # arriba cae aca y es el caso legitimo. Por eso avisa y no cancela.
         if service.pre_start:
             self._say_raw(service.name, color, f"$ pre_start: {service.pre_start}")
-            res = subprocess.run(
-                service.pre_start,
-                shell=True,
-                cwd=service.cwd,
-                env=build_env(service),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                errors="replace",
-                timeout=DETACHED_TIMEOUT,
-            )
+            try:
+                res = subprocess.run(
+                    service.pre_start,
+                    shell=True,
+                    cwd=service.cwd,
+                    env=build_env(service),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    errors="replace",
+                    timeout=DETACHED_TIMEOUT,
+                )
+            except subprocess.TimeoutExpired:
+                # Sin esto el timeout salia crudo. Un `npm run build` colgado
+                # rompia el arranque con un traceback en vez de decir que
+                # servicio y que hook se quedaron esperando, que es lo unico que
+                # hace falta para saber donde mirar.
+                raise StartupError(
+                    f"{service.name} pre_start no termino en {DETACHED_TIMEOUT:.0f}s"
+                ) from None
             for line in (res.stdout or "").splitlines():
                 self._write_raw(service.name, color, line)
             if res.returncode != 0:
@@ -335,17 +380,22 @@ class Runner:
 
                 if service.post_start:
                     self._say(proc, f"$ post_start: {service.post_start}")
-                    res = subprocess.run(
-                        service.post_start,
-                        shell=True,
-                        cwd=service.cwd,
-                        env=build_env(service),
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        errors="replace",
-                        timeout=DETACHED_TIMEOUT,
-                    )
+                    try:
+                        res = subprocess.run(
+                            service.post_start,
+                            shell=True,
+                            cwd=service.cwd,
+                            env=build_env(service),
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                            errors="replace",
+                            timeout=DETACHED_TIMEOUT,
+                        )
+                    except subprocess.TimeoutExpired:
+                        raise StartupError(
+                            f"{service.name} post_start no termino en {DETACHED_TIMEOUT:.0f}s"
+                        ) from None
                     for line in (res.stdout or "").splitlines():
                         self._write(proc, line)
                     if res.returncode != 0:

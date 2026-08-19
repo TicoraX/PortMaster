@@ -8,7 +8,7 @@ saliendo de `doctor._docker`, que es quien ya lo sabe.
 from __future__ import annotations
 
 import subprocess
-from typing import Sequence
+from collections.abc import Sequence
 
 # El plugin del CLI y no el ejecutable. `docker` ya es una dependencia del
 # proyecto y ya tiene que estar en el PATH para que un stack con compose sirva

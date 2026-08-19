@@ -57,7 +57,10 @@ class PortStatus:
         return not self.free and self.pid is None
 
 
-def _check_port(port: int) -> int:
+def check_port(port: int) -> int:
+    """Rechaza lo que no es un puerto TCP. Publica porque no la usa solo este
+    modulo: `server.share_port` valida antes de tocar el candado de tuneles, y
+    ahi no hay ningun `scan` que la traiga de arrastre."""
     if not isinstance(port, int) or isinstance(port, bool):
         raise ValueError(f"puerto invalido: {port!r}")
     if not 1 <= port <= 65535:
@@ -108,7 +111,7 @@ def _process_listeners_cache() -> dict[int, int]:
 
 def is_free(port: int) -> bool:
     """Libre solo si nadie escucha en la tabla y ademas el bind funciona."""
-    _check_port(port)
+    check_port(port)
     return port not in _listeners({port}) and _bind_free(port)
 
 
@@ -146,7 +149,7 @@ def accepts(port: int, timeout: float = ACCEPT_TIMEOUT) -> bool:
 
     Prueba IPv4 y despues IPv6: ver LOOPBACK.
     """
-    _check_port(port)
+    check_port(port)
     # El presupuesto es total y se reparte, no uno por direccion: con el timeout
     # entero para cada una, un puerto que no contesta costaba el doble de lo que
     # promete el parametro, y esto lo llama el sondeo del arranque cada 150ms.
@@ -201,7 +204,7 @@ def scan_many(wanted: list[int]) -> dict[int, PortStatus]:
     una llamada al SO por puerto se nota.
     """
     for port in wanted:
-        _check_port(port)
+        check_port(port)
 
     listeners = _listeners(set(wanted))
     proc_cache: dict[int, int] | None = None
@@ -269,7 +272,7 @@ def listening(pid: int) -> int | None:
 
 def next_free(start: int, limit: int = 20) -> int:
     """Primer puerto libre desde start (incluido)."""
-    _check_port(start)
+    check_port(start)
     candidates = range(start, min(start + limit, 65536))
     taken = _listeners(set(candidates))
     for port in candidates:
