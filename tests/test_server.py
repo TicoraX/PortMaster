@@ -266,13 +266,20 @@ def proxy_de_docker(free_ports):
 
 
 def test_el_estado_delata_el_puerto_compartido(client, tmp_path, free_ports):
-    """Dos proyectos que declaran el mismo puerto, sin que ninguno corra."""
+    """Dos proyectos que declaran el mismo puerto, sin que ninguno corra.
+
+    Las carpetas se llaman distinto que los stacks a proposito. El aviso nombraba
+    la carpeta y la ficha el `name:`: con `Fitness/` declarando `name: fittrack`,
+    el mensaje mandaba a buscar un proyecto que en la interfaz no existe. Si
+    carpeta y stack se llaman igual, revertir ese arreglo no se nota.
+    """
     (port,) = free_ports(1)
-    for nombre in ("blog", "fitness"):
-        root = tmp_path / nombre
+    for carpeta, nombre in (("Blog", "blog"), ("Fitness", "fitness")):
+        root = tmp_path / carpeta
         root.mkdir()
         (root / "stack.yaml").write_text(
-            f"services:\n  web:\n    command: python web\n    port: {port}\n", encoding="utf-8"
+            f"name: {nombre}\nservices:\n  web:\n    command: python web\n    port: {port}\n",
+            encoding="utf-8",
         )
         registry.add(root)
 

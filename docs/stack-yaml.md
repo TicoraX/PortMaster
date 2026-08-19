@@ -74,7 +74,13 @@ loguea y el apagado sigue con el resto.
 ## env_file
 
 `env_file` permite cargar variables de entorno desde uno o varios archivos (ej.
-`env_file: .env` o `env_file: [.env, .env.local]`). La precedencia de variables es:
+`env_file: .env` o `env_file: [.env, .env.local]`).
+
+Las rutas van **relativas a la raíz del proyecto y no pueden salir de ella**:
+`../../.env` o una ruta absoluta son `ConfigError` al cargar el archivo, igual
+que `cwd`. Un `stack.yaml` ajeno no puede pedir el `.env` de otro proyecto tuyo.
+
+La precedencia de variables es:
 1. `os.environ` del sistema anfitrión.
 2. `~/.portmaster/env.global` (bóveda global de variables compartidas, si existe).
 3. Archivos listados en `env_file` (en orden de aparición).
@@ -110,8 +116,14 @@ Reglas:
 - Admite `${VAR}` y `${VAR:-default}`, resueltos con **el mismo entorno con el
   que corre el servicio**: la precedencia es la de `env_file`, de arriba. Si la
   URL necesita un token, es el token que recibió el proceso.
-- Una variable sin valor y sin default deja el servicio **sin URL**, y el botón
-  vuelve al `http://localhost:<port>` de siempre. Abrir una URL con un
+- No se combina con `ready: listen`. El puerto de un servicio `listen` lo elige
+  el proceso y se descubre al arrancar, así que cualquier puerto escrito en la
+  URL es una apuesta. Y como `url` le gana al puerto descubierto, declararla
+  **empeora** el botón: si el proceso arranca en 3001, sigue llevando al 3000.
+- Una variable sin valor y sin default deja el servicio **sin URL**. Con `port:`,
+  el botón vuelve al `http://localhost:<port>` de siempre. **Sin `port:` no hay
+  a qué caer**: ese servicio se saltea y `portmaster open` sigue con el siguiente
+  candidato; si no queda ninguno, sale con código 1. Abrir una URL con un
   `${TOKEN}` literal adentro sería peor: la página carga, falla por dentro, y
   parece que funcionó.
 - En la interfaz, el botón sigue apareciendo solo cuando el puerto contestó

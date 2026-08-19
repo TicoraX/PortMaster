@@ -22,9 +22,10 @@ services:
     cwd: backend       # relativo a la raiz, no puede escapar de ella
     port: 8080
     needs: [db]
-    env_file: [.env, .env.local]  # archivo o lista de archivos .env a cargar
+    env_file: [.env, .env.local]  # archivo o lista de archivos .env a cargar, dentro de la raiz
     pre_start: npm run build      # comando síncrono previo al arranque
     post_start: npm run seed      # comando síncrono posterior a la confirmación de salud
+    url: http://localhost:8080/docs   # adonde lleva "Abrir". Admite ${VAR}
     env:
       DATABASE_URL: postgres://localhost:5432/app
 
@@ -32,8 +33,7 @@ services:
     command: npm run dev
     cwd: frontend
     ready: listen      # el puerto lo elige el, se descubre al arrancar
-    url: http://localhost:3000/admin   # adonde lleva "Abrir". Admite ${VAR}
-    needs: [api]
+    needs: [api]       # sin `url:` a proposito: ver la nota de abajo
 
 profiles:
   fullstack: [db, api, web]
@@ -65,4 +65,10 @@ scripts:
 #   `${VAR:-default}`, resueltos con el mismo entorno con el que corre el
 #   servicio (`env`, `env_file`, y el del shell). Una variable sin valor deja el
 #   servicio sin URL en vez de abrir una con el `${VAR}` literal adentro.
+# - `url` y `ready: listen` no se combinan. El puerto de un servicio `listen` lo
+#   elige el proceso, asi que cualquier puerto escrito en la URL es una apuesta,
+#   y `url` le gana al puerto descubierto: escribirla empeora el boton en vez de
+#   mejorarlo. Por eso `web` de arriba no la declara.
+# - `env_file` van relativos a la raiz del proyecto y no pueden salir de ella:
+#   `../../.env` es error al cargar el archivo.
 # - Sin `--profile`, arrancan todos los servicios.

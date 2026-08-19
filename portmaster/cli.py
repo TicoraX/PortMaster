@@ -486,6 +486,13 @@ def open_cmd(
         # que pasa hoy escribiendo la URL a mano, y es preferible a no poder
         # abrirla nunca.
         if puerto is None:
+            # Una `url:` con una variable sin valor no resuelve, y sin `port:` no
+            # hay a que caer: `_abrir(None)` reventaba con un TypeError crudo en
+            # la terminal. Saltearlo deja contestar al candidato siguiente, y si
+            # no queda ninguno cae en el error de abajo, que es lo que hay que
+            # leer cuando falta la variable.
+            if declarada is None:
+                continue
             _abrir(declarada)
             return
         if runner.speaks_http(puerto):

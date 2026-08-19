@@ -720,3 +720,59 @@ def test_open_ignora_una_url_con_una_variable_sin_valor(
     resultado = runner.invoke(cli.app, ["open"])
     assert resultado.exit_code == 0
     assert abierto == [f"http://localhost:{servidor_http}"]
+
+
+def test_open_sin_puerto_y_con_una_variable_sin_valor_no_revienta(
+    tmp_path, monkeypatch, abierto
+):
+    """Sin `port:` no hay default al que caer, y `_abrir(None)` reventaba.
+
+    `os.startfile(None)` levanta TypeError, y `webbrowser.open` solo atrapa
+    OSError: el traceback salia crudo a la terminal despues de imprimir
+    "Abriendo None". Es la forma exacta del caso que motivo el campo `url:`, un
+    Studio con `ready: listen` y el token en una variable, el dia que falta el
+    .env.
+    """
+    (tmp_path / "stack.yaml").write_text(
+        textwrap.dedent("""
+        services:
+          studio:
+            command: echo studio
+            url: http://127.0.0.1:8765/?token=${NO_EXISTE_EN_NINGUN_LADO}
+        """),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["open"])
+    assert resultado.exit_code == 1
+    assert abierto == []
+    assert "Ningun puerto del stack contesta HTTP" in resultado.output
+
+
+def test_open_sin_puerto_no_tapa_al_servicio_que_si_contesta(
+    tmp_path, monkeypatch, servidor_http, abierto
+):
+    """El candidato sin URL resoluble se saltea, no corta el recorrido.
+
+    Antes cualquier servicio sin `port:` cortocircuitaba con `return` y los que
+    venian despues no se miraban nunca.
+    """
+    (tmp_path / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        services:
+          api:
+            command: echo api
+            port: {servidor_http}
+          studio:
+            command: echo studio
+            needs: [api]
+            url: http://127.0.0.1:8765/?token=${{NO_EXISTE_EN_NINGUN_LADO}}
+        """),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["open"])
+    assert resultado.exit_code == 0
+    assert abierto == [f"http://localhost:{servidor_http}"]
