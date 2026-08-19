@@ -470,24 +470,26 @@ def open_cmd(
             raise typer.Exit(1)
         # En orden de arranque: los contenedores primero, el frontend al final.
         # Se recorre al reves porque lo que uno quiere abrir suele ser lo ultimo.
-        candidates = [s for s in reversed(stack.resolve()) if s.port or s.url]
+        # Cada candidato es (url declarada o None, puerto o None): un puerto
+        # suelto no es un servicio y fabricarle uno seria un objeto que miente.
+        candidates = [
+            (runner.service_url(s), s.port)
+            for s in reversed(stack.resolve())
+            if s.port or s.url
+        ]
     else:
-        candidates = [config.Service(
-            name=str(port), command="", cwd=Path.cwd(), port=port,
-            ready="port", needs=(), env={}, detached=False,
-        )]
+        candidates = [(None, port)]
 
-    for service in candidates:
-        declarada = runner.service_url(service)
-        # Un servicio con `url:` y sin `port:` no tiene que sondear: no hay
-        # puerto que preguntar. Puede abrir una pestaña muerta si el stack no
-        # esta arriba, que es exactamente lo que pasa hoy escribiendo la URL a
-        # mano, y es preferible a no poder abrirla nunca.
-        if declarada and service.port is None:
+    for declarada, puerto in candidates:
+        # Sin puerto no hay que sondear: no hay nada que preguntar. Puede abrir
+        # una pestaña muerta si el stack no esta arriba, que es exactamente lo
+        # que pasa hoy escribiendo la URL a mano, y es preferible a no poder
+        # abrirla nunca.
+        if puerto is None:
             _abrir(declarada)
             return
-        if service.port and runner.speaks_http(service.port):
-            _abrir(declarada or f"http://localhost:{service.port}")
+        if runner.speaks_http(puerto):
+            _abrir(declarada or f"http://localhost:{puerto}")
             return
 
     err.print(

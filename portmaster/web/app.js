@@ -198,6 +198,14 @@ function kindIcon(kind) {
   return svg;
 }
 
+/* Adonde lleva "Abrir". El `url:` del stack.yaml gana cuando existe: la raiz
+   del puerto no siempre es la entrada, y hay apps que piden un token en la
+   query o viven en un path. El servidor solo lo manda para servicios ya
+   abribles, asi que aca no hay que chequear estado otra vez. */
+function abrirUrl(service) {
+  return service.url || `http://localhost:${service.port}`;
+}
+
 function renderService(service, projectId) {
   const node = ui.tplService.content.firstElementChild.cloneNode(true);
   node.querySelector(".service__name").prepend(kindIcon(service.kind));
@@ -1363,14 +1371,6 @@ ui.enroll.addEventListener("submit", (event) => {
     if (ui.pathSuggestions) ui.pathSuggestions.replaceChildren();
   });
 });
-
-/* Adonde lleva "Abrir". El `url:` del stack.yaml gana cuando existe: la raiz
-   del puerto no siempre es la entrada, y hay apps que piden un token en la
-   query o viven en un path. El servidor solo lo manda para servicios ya
-   abribles, asi que aca no hay que chequear estado otra vez. */
-function abrirUrl(service) {
-  return service.url || `http://localhost:${service.port}`;
-}
 
 /* mapa de puertos modal --------------------------------------------------- */
 
