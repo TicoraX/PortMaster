@@ -226,3 +226,39 @@ def test_tailscale_no_confunde_un_enlace_del_log_con_el_tunel():
     assert extract("To use funnel, see https://tailscale.com/kb/1223/funnel") is None
     assert extract("Log in at https://login.tailscale.com/a/abc123") is None
     assert extract("una linea sin ninguna url") is None
+
+
+def test_el_mcp_cierra_sus_tuneles_al_terminar_la_sesion(proveedor_falso):
+    """`portmaster_share` abria el tunel y nadie lo cerraba nunca.
+
+    Es el mismo agujero que `server._ciclo_de_vida` ya documenta para la
+    interfaz: la sesion terminaba y el cliente seguia vivo, con el puerto
+    expuesto a internet. Aca es peor, porque del otro lado hay un agente y no
+    una persona mirando la pantalla.
+    """
+    from portmaster import mcp
+
+    lineas, esperada = MUESTRAS["cloudflared"]
+    proveedor_falso("cloudflared", lineas)
+    mcp.cerrar_tuneles()  # arrancar de cero: el registro es de modulo
+
+    salida = mcp._execute_tool("portmaster_share", {"port": 3000, "provider": "cloudflared"})
+    assert esperada in salida
+    assert len(mcp._tuneles) == 1
+
+    descendientes = psutil.Process(mcp._tuneles[0].proc.pid).children(recursive=True)
+    assert descendientes, "el shim tiene que dejar un nieto, que es el caso a probar"
+
+    mcp.cerrar_tuneles()
+
+    assert mcp._tuneles == []
+    _, vivos = psutil.wait_procs(descendientes, timeout=10)
+    assert not vivos, f"el cliente sobrevivio a la sesion: {[p.pid for p in vivos]}"
+
+
+def test_el_mcp_rechaza_un_puerto_fuera_de_rango():
+    """`int(args["port"])` aceptaba cualquier entero y llegaba al cliente."""
+    from portmaster import mcp
+
+    with pytest.raises(ValueError, match="rango"):
+        mcp._execute_tool("portmaster_share", {"port": 0})
