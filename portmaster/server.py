@@ -1160,7 +1160,7 @@ def _shared_with(mapa: dict[int, list[Path]], port: int | None, mio: Path) -> li
     """Nombres de los otros proyectos que declaran `port`. Vacio si no hay."""
     if not port:
         return []
-    return [otro.name for otro in mapa.get(port, []) if otro != mio]
+    return [registry.name_of(otro) for otro in mapa.get(port, []) if otro != mio]
 
 
 def _published(status: ports.PortStatus | None) -> bool:

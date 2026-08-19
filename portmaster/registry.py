@@ -90,7 +90,9 @@ def import_data(data: list[str]) -> list[str]:
 
 # Cuanto vale reusar el mapa antes de recalcularlo, para quien lo pida cacheado.
 PORTS_TTL = 30.0
-_ports_cache: tuple[float, dict[int, list[Path]]] | None = None
+# Los puertos y los nombres salen del mismo recorrido: un solo cache, que es
+# una cosa menos que olvidarse de invalidar en `_save`.
+_ports_cache: tuple[float, dict[int, list[Path]], dict[Path, str]] | None = None
 
 
 def declared_ports(max_age: float = 0.0) -> dict[int, list[Path]]:
@@ -120,11 +122,25 @@ def declared_ports(max_age: float = 0.0) -> dict[int, list[Path]]:
         return _ports_cache[1]
 
     found: dict[int, list[Path]] = {}
+    names: dict[Path, str] = {}
     for path in paths():
-        for port in sorted(_ports_of(path)):
+        names[path], puertos = _stack_of(path)
+        for port in sorted(puertos):
             found.setdefault(port, []).append(path)
-    _ports_cache = (now, found)
+    _ports_cache = (now, found, names)
     return found
+
+
+def name_of(path: Path, max_age: float = PORTS_TTL) -> str:
+    """Como se llama un proyecto registrado, igual que en su ficha.
+
+    El nombre lo declara `stack.yaml` y puede no coincidir con el de la carpeta:
+    `apps/Fitness` se llama `fittrack`. Nombrar la carpeta en un aviso manda al
+    usuario a buscar un proyecto que en la interfaz no existe.
+    """
+    declared_ports(max_age=max_age)
+    cache = _ports_cache
+    return cache[2].get(path, path.name) if cache else path.name
 
 
 _docker_cache: tuple[float, bool] | None = None
@@ -185,17 +201,18 @@ def _uses_docker(path: Path) -> bool:
     return any(doctor._program(s.command) == "docker" for s in stack.services.values())
 
 
-def _ports_of(path: Path) -> set[int]:
-    """Puertos declarados por un proyecto. Vacio si no se puede leer.
+def _stack_of(path: Path) -> tuple[str, set[int]]:
+    """Nombre y puertos declarados por un proyecto. Vacio si no se puede leer.
 
     Un proyecto roto o borrado no es motivo para que el resto no se revise:
-    tiene su propio chequeo en `doctor`.
+    tiene su propio chequeo en `doctor`. Ahi el nombre cae en el de la carpeta,
+    que es lo unico que se sabe de un proyecto que no se puede leer.
     """
     try:
         stack = detect.stack_for(path)
-        return {s.port for s in stack.resolve() if s.port}
+        return stack.name, {s.port for s in stack.resolve() if s.port}
     except (config.ConfigError, OSError):
-        return set()
+        return path.name, set()
 
 
 def _save(items: list[Path]) -> None:

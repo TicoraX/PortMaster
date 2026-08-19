@@ -523,7 +523,7 @@ def list_cmd() -> None:
             else:
                 port_labels.append(str(p))
         ports_str = ", ".join(port_labels) if port_labels else "-"
-        table.add_row(pid, path.name, ports_str, str(path))
+        table.add_row(pid, registry.name_of(path), ports_str, str(path))
     console.print(table)
     if collisions:
         console.print("[dim yellow]Puertos en amarillo se disputan entre dos o mas proyectos.[/]")
