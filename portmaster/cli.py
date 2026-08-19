@@ -755,7 +755,14 @@ def share_cmd(
 
     port: int | None = None
     if target and target.isdigit():
-        port = int(target)
+        # `target` es texto porque tambien acepta el nombre de un servicio, asi
+        # que se pierde el `min`/`max` que traen los demas comandos. Sin esto,
+        # `portmaster share 0` levantaba el cliente de tuneles contra 127.0.0.1:0.
+        try:
+            port = ports.check_port(int(target))
+        except ValueError as exc:
+            err.print(str(exc))
+            raise typer.Exit(1)
     else:
         try:
             stack = detect.stack_for(Path.cwd())

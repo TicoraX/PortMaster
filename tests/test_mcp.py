@@ -274,3 +274,28 @@ def test_mcp_clean_no_le_ofrece_volumes_al_agente():
     )["result"]["tools"]
     clean = next(t for t in tools if t["name"] == "portmaster_clean")
     assert "volumes" not in clean["inputSchema"].get("properties", {})
+
+
+def test_mcp_no_contesta_ninguna_notificacion():
+    """JSON-RPC 2.0: una notificacion es una peticion sin `id`, y no se contesta.
+
+    Se reconocia una sola por nombre (`notifications/initialized`), asi que las
+    demas caian al final y se llevaban una respuesta de error con `id: null`,
+    que es justo lo que el protocolo prohibe. Un cliente que espera silencio
+    puede tratar esa respuesta huerfana como un error de sesion.
+    """
+    for method in (
+        "notifications/initialized",
+        "notifications/cancelled",
+        "notifications/progress",
+        "notifications/lo/que/venga",
+    ):
+        req = {"jsonrpc": "2.0", "method": method, "params": {}}
+        assert mcp.handle_request(req) is None, method
+
+
+def test_mcp_una_peticion_con_id_si_se_contesta():
+    """La otra mitad: sin esto, `if "id" not in req` podria callar todo."""
+    res = mcp.handle_request({"jsonrpc": "2.0", "id": 7, "method": "tools/list"})
+    assert res is not None
+    assert res["id"] == 7

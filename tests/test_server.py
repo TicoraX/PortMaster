@@ -1533,3 +1533,16 @@ def test_un_servicio_sin_url_declarada_la_trae_en_none(client, proyecto):
 
     servicio = client.get("/api/state").json()["projects"][0]["services"][0]
     assert servicio["url"] is None
+
+
+def test_share_rechaza_un_puerto_fuera_de_rango(client):
+    """`kill` validaba gratis porque llama a `ports.scan`; `share` no tiene scan.
+
+    Sin la validacion propia, el 0, el -5 y el 99999 contestaban 200 y llegaban
+    hasta el cliente de tuneles. Y la reserva en `_active_tunnels` se hacia antes,
+    asi que un puerto imposible dejaba una entrada a medias.
+    """
+    for port in (0, -5, 70000, 99999):
+        res = client.post(f"/api/share?port={port}")
+        assert res.status_code == 400, port
+        assert "rango" in res.json()["detail"]

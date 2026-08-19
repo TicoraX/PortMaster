@@ -776,3 +776,15 @@ def test_open_sin_puerto_no_tapa_al_servicio_que_si_contesta(
     resultado = runner.invoke(cli.app, ["open"])
     assert resultado.exit_code == 0
     assert abierto == [f"http://localhost:{servidor_http}"]
+
+
+def test_share_rechaza_un_puerto_fuera_de_rango(tmp_path, monkeypatch):
+    """`target` es texto porque tambien acepta el nombre de un servicio, asi que
+    se pierde el min/max que traen los demas comandos. Sin la validacion a mano,
+    `portmaster share 0` levantaba el cliente de tuneles contra 127.0.0.1:0.
+    """
+    monkeypatch.chdir(tmp_path)
+    for target in ("0", "70000", "99999"):
+        resultado = runner.invoke(cli.app, ["share", target])
+        assert resultado.exit_code == 1, target
+        assert "rango" in resultado.output

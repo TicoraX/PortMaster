@@ -17,6 +17,14 @@ def handle_request(req: dict[str, Any]) -> dict[str, Any] | None:
     method = req.get("method")
     params = req.get("params", {})
 
+    # JSON-RPC 2.0: una notificacion es una peticion SIN `id`, y a una
+    # notificacion no se contesta nunca. Reconocer solo
+    # `notifications/initialized` por nombre dejaba que `notifications/cancelled`
+    # y `notifications/progress` cayeran al final y se llevaran una respuesta de
+    # error con `id: null`, que es justo lo que el protocolo prohibe.
+    if "id" not in req:
+        return None
+
     if method == "initialize":
         return {
             "jsonrpc": "2.0",

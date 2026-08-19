@@ -971,6 +971,16 @@ def create_app(token: str | None = None) -> FastAPI:
     )
     def share_port(port: int, provider: str | None = None) -> dict:
         """Inicia un tunel efimero para compartir un puerto."""
+        # Antes del candado y de la reserva: un puerto que no existe no puede
+        # dejar una entrada a medias en `_active_tunnels`. `kill` valida gratis
+        # porque llama a `ports.scan`; aca no hay ningun scan que lo traiga, y
+        # sin esto el 0, el -5 y el 99999 contestaban 200.
+        try:
+            ports.check_port(port)
+        except ValueError as exc:
+            log.info("puerto rechazado: %s", exc)
+            raise HTTPException(400, str(exc))
+
         with _tunnels_lock:
             # Un tunel que se murio solo no puede bloquear el puerto hasta que
             # pase el sondeo de estado: la limpieza vivia en `tunnels_view`, o

@@ -744,3 +744,38 @@ def test_sin_url_declarada_no_hay_url(tmp_path):
     """
     service = _stack_con_url(tmp_path, None)
     assert runner.service_url(service) is None
+
+
+def test_un_pre_start_colgado_falla_como_arranque_y_no_como_traceback(tmp_path, monkeypatch):
+    """`subprocess.run(timeout=...)` levanta TimeoutExpired, que nadie atrapaba.
+
+    Un `npm run build` colgado rompia el arranque con un traceback crudo en vez
+    de decir que servicio y que hook se quedaron esperando, que es lo unico que
+    hace falta para saber donde mirar.
+
+    ponytail: el timeout avisa, no acota. Con `shell=True` y la salida por un
+    pipe, `subprocess.run` mata al shell al vencer y vuelve a esperar la salida
+    SIN timeout; el nieto todavia tiene el pipe heredado, asi que la espera dura
+    lo que dure el comando colgado. Medido: `timeout=1` sobre un `sleep(20)`
+    tarda 20.1s en levantar. No deja huerfanos, pero el numero no limita nada.
+    Acotarlo de verdad es Popen + `_terminate_tree`, como el resto del modulo.
+    Por eso este test usa un sleep corto: mide el mensaje, no el limite.
+    """
+    monkeypatch.setattr(runner, "DETACHED_TIMEOUT", 1)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          web:
+            command: echo arriba
+            pre_start: {sys.executable} -c "import time; time.sleep(3)"
+        """,
+    )
+    engine = make_runner(stack)
+    try:
+        with pytest.raises(runner.StartupError) as exc:
+            engine.up()
+        assert "web" in str(exc.value)
+        assert "pre_start" in str(exc.value)
+    finally:
+        engine.down()

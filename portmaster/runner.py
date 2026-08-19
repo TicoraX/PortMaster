@@ -302,17 +302,26 @@ class Runner:
         # arriba cae aca y es el caso legitimo. Por eso avisa y no cancela.
         if service.pre_start:
             self._say_raw(service.name, color, f"$ pre_start: {service.pre_start}")
-            res = subprocess.run(
-                service.pre_start,
-                shell=True,
-                cwd=service.cwd,
-                env=build_env(service),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                errors="replace",
-                timeout=DETACHED_TIMEOUT,
-            )
+            try:
+                res = subprocess.run(
+                    service.pre_start,
+                    shell=True,
+                    cwd=service.cwd,
+                    env=build_env(service),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    errors="replace",
+                    timeout=DETACHED_TIMEOUT,
+                )
+            except subprocess.TimeoutExpired:
+                # Sin esto el timeout salia crudo. Un `npm run build` colgado
+                # rompia el arranque con un traceback en vez de decir que
+                # servicio y que hook se quedaron esperando, que es lo unico que
+                # hace falta para saber donde mirar.
+                raise StartupError(
+                    f"{service.name} pre_start no termino en {DETACHED_TIMEOUT:.0f}s"
+                ) from None
             for line in (res.stdout or "").splitlines():
                 self._write_raw(service.name, color, line)
             if res.returncode != 0:
@@ -371,17 +380,22 @@ class Runner:
 
                 if service.post_start:
                     self._say(proc, f"$ post_start: {service.post_start}")
-                    res = subprocess.run(
-                        service.post_start,
-                        shell=True,
-                        cwd=service.cwd,
-                        env=build_env(service),
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        errors="replace",
-                        timeout=DETACHED_TIMEOUT,
-                    )
+                    try:
+                        res = subprocess.run(
+                            service.post_start,
+                            shell=True,
+                            cwd=service.cwd,
+                            env=build_env(service),
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                            errors="replace",
+                            timeout=DETACHED_TIMEOUT,
+                        )
+                    except subprocess.TimeoutExpired:
+                        raise StartupError(
+                            f"{service.name} post_start no termino en {DETACHED_TIMEOUT:.0f}s"
+                        ) from None
                     for line in (res.stdout or "").splitlines():
                         self._write(proc, line)
                     if res.returncode != 0:
