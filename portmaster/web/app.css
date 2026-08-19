@@ -347,13 +347,21 @@ body {
 .project__details {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows 250ms cubic-bezier(0.23, 1, 0.32, 1), opacity 200ms ease;
+  transition: grid-template-rows 250ms cubic-bezier(0.23, 1, 0.32, 1), opacity 200ms ease,
+    visibility 250ms;
   opacity: 0;
+  /* `opacity: 0` no saca nada del orden de tabulacion ni del arbol de
+     accesibilidad: con la ficha cerrada se tabulaba a ciegas hasta "Quitar
+     proyecto". `visibility` si, y transiciona en discreto, asi que al abrir
+     aparece en el instante 0 y al cerrar aguanta hasta el final de la
+     animacion. */
+  visibility: hidden;
 }
 
 .project[data-expanded="true"] .project__details {
   grid-template-rows: 1fr;
   opacity: 1;
+  visibility: visible;
   margin-top: var(--space-md);
   padding-top: var(--space-md);
   border-top: var(--rule) solid var(--color-rule);
