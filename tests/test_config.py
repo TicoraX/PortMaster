@@ -370,3 +370,31 @@ def test_una_url_sin_esquema_no_carga(tmp_path):
 def test_una_url_vacia_no_carga(tmp_path):
     with pytest.raises(config.ConfigError, match="texto no vacio"):
         _con_url(tmp_path, "'   '")
+
+
+def test_env_file_desentrecomilla_aunque_haya_comentario_detras(tmp_path):
+    """Se intentaba quitar las comillas antes de sacar el comentario.
+
+    Con un comentario detras, el valor ya no TERMINA en comilla, asi que la rama
+    de desentrecomillado no corria y `TOKEN="abc" # el de prod` entregaba el
+    token con las comillas pegadas. Un token asi no falla al arrancar: falla en
+    la primera peticion autenticada, que es donde cuesta encontrarlo.
+    """
+    archivo = tmp_path / ".env"
+    archivo.write_text(
+        'A="valor con espacio"  # comentario\n'
+        "B='comilla simple' # otro\n"
+        'C="tiene # adentro"\n'
+        "D=pelado # comentario\n"
+        'E="sin cerrar\n',
+        encoding="utf-8",
+    )
+
+    valores = config.parse_env_file(archivo)
+    assert valores["A"] == "valor con espacio"
+    assert valores["B"] == "comilla simple"
+    # El `#` de adentro es parte del valor: sacar el comentario primero lo rompe.
+    assert valores["C"] == "tiene # adentro"
+    assert valores["D"] == "pelado"
+    # Un .env roto se deja como esta: no hay nada que adivinar.
+    assert valores["E"] == '"sin cerrar'

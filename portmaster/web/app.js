@@ -517,6 +517,10 @@ function cleanPicks() {
 
 function refreshCleanButton() {
   const elegidos = cleanPicks();
+  // Desarmar junto con la etiqueta. Sin esto, armar el boton y cerrar el
+  // dialogo antes de que venzan los 6s dejaba el `armed` puesto: al reabrirlo,
+  // el primer click borraba sin el paso de confirmacion que el boton promete.
+  delete ui.cleanRun.dataset.armed;
   ui.cleanRun.disabled = elegidos.length === 0;
   ui.cleanRun.textContent = elegidos.length ? `Limpiar ${elegidos.length}` : "Elegí algo";
   ui.cleanWarn.textContent = elegidos.includes("volumes")

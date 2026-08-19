@@ -210,3 +210,19 @@ def test_start_tunnel_no_espera_a_un_cliente_que_ya_murio(proveedor_falso):
     tardo = time.monotonic() - inicio
 
     assert tardo < 5, f"espero {tardo:.1f}s a un proceso que ya estaba muerto"
+
+
+def test_tailscale_no_confunde_un_enlace_del_log_con_el_tunel():
+    """Los otros proveedores matchean su propio dominio; este tomaba el primer
+    token que empezara con https. Una linea del log con el enlace a la
+    documentacion o a la pantalla de login se reportaba como la URL del tunel,
+    y esa es la URL que el usuario copia y comparte.
+    """
+    _, extract = tunnel._provider_config("tailscale", 3000)
+
+    assert extract("Available on the internet: https://maquina.tail1234.ts.net/") == (
+        "https://maquina.tail1234.ts.net/"
+    )
+    assert extract("To use funnel, see https://tailscale.com/kb/1223/funnel") is None
+    assert extract("Log in at https://login.tailscale.com/a/abc123") is None
+    assert extract("una linea sin ninguna url") is None

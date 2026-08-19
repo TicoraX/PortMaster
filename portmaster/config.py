@@ -402,14 +402,15 @@ def parse_env_file(path: Path) -> dict[str, str]:
         val = val.strip()
         if not key:
             continue
-        if len(val) >= 2 and (
-            (val.startswith('"') and val.endswith('"'))
-            or (val.startswith("'") and val.endswith("'"))
-        ):
-            val = val[1:-1]
-        else:
-            if " #" in val:
-                val = val.split(" #", 1)[0].rstrip()
+        # El valor entrecomillado se corta en su comilla de cierre, no en el
+        # final de la linea: exigir que TERMINE en comilla fallaba en cuanto
+        # habia un comentario detras, y `TOKEN="abc" # el de prod` entregaba el
+        # token con las comillas pegadas. Y como lo de adentro se toma tal cual,
+        # un `#` dentro de las comillas sigue siendo parte del valor.
+        if len(val) >= 2 and val[0] in "\"'" and val.find(val[0], 1) != -1:
+            val = val[1 : val.find(val[0], 1)]
+        elif " #" in val:
+            val = val.split(" #", 1)[0].rstrip()
         env[key] = val
     return env
 

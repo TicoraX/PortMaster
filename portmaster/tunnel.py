@@ -15,6 +15,7 @@ from typing import Callable
 from . import runner
 
 PROVIDERS = ("cloudflared", "ngrok", "lt", "tailscale")
+TAILSCALE_URL = re.compile(r"https://[a-zA-Z0-9.-]+\.ts\.net(?:/\S*)?")
 
 CLOUDFLARE_REGEX = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
 NGROK_REGEX = re.compile(r"https://[a-zA-Z0-9-]+\.ngrok(?:-free)?\.app")
@@ -160,11 +161,12 @@ def _provider_config(
     if provider == "tailscale":
         cmd = f"tailscale funnel {port}"
         def extract(line: str) -> str | None:
-            if "https://" in line:
-                for part in line.split():
-                    if part.startswith("https://"):
-                        return part.strip()
-            return None
+            # Contra el host de tailscale y no contra "cualquier https": los
+            # otros proveedores matchean su propio dominio, y aca un enlace a la
+            # documentacion o a la pantalla de login en una linea del log se
+            # reportaba como la URL del tunel.
+            match = TAILSCALE_URL.search(line)
+            return match.group(0) if match else None
         return cmd, extract
 
     raise TunnelError(f"configuracion no implementada para: {provider}")
