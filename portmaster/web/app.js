@@ -290,8 +290,20 @@ function renderService(service, projectId) {
               copiado = false;
             }
           }
-          flash(`Túnel activo: ${res.url}${copiado ? " (copiado al portapapeles)" : ""}`, "good");
-          window.open(res.url, "_blank");
+          // El `open` va despues de un `await`, asi que el navegador ya no lo
+          // cuenta como gesto del usuario y el bloqueador de popups se lo come
+          // sin avisar. Mismo criterio que el portapapeles de arriba: no decir
+          // que paso algo que no paso. La URL viaja en el mensaje igual, que es
+          // lo unico que no puede fallar.
+          const pestaña = window.open(res.url, "_blank");
+          const detalle = [
+            copiado ? "copiado al portapapeles" : null,
+            pestaña ? null : "el navegador bloqueó la pestaña nueva",
+          ].filter(Boolean);
+          flash(
+            `Túnel activo: ${res.url}${detalle.length ? ` (${detalle.join("; ")})` : ""}`,
+            "good",
+          );
         } else {
           flash(res.detail || "Error al iniciar túnel", "bad");
         }
@@ -1417,7 +1429,11 @@ async function refreshPortsModal() {
     for (const orphan of orphansData.orphans || []) {
       items.push({
         port: orphan.port,
-        label: `${orphan.name} ocupa el puerto de ${(orphan.projects || []).join(" y ")}`,
+        // El mismo fallback que la lista de intrusos: sin esto, un intruso cuyo
+        // puerto no reclama nadie quedaba en "ocupa el puerto de " y se cortaba.
+        label: `${orphan.name} ocupa el puerto de ${
+          (orphan.projects || []).join(" y ") || "un proyecto registrado"
+        }`,
         kind: "intruso",
         isOrphan: true,
       });

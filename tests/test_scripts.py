@@ -125,21 +125,30 @@ def _stack_con_scripts(tmp_path, bloque):
     return config.load(tmp_path / "stack.yaml")
 
 
-def test_un_pipeline_encadena_los_scripts_que_nombra(tmp_path, capsys):
+def test_un_pipeline_encadena_los_scripts_que_nombra(tmp_path):
     """`check: [lint, test]` es lo que documenta docs/stack-yaml.md.
 
     Corria `lint` como si fuera un binario del PATH y moria en el paso 1 con
     "no se reconoce como comando": cada item se trataba como comando literal y
     ninguno se resolvia contra los demas scripts.
+
+    Se afirma sobre archivos y no sobre la salida capturada. `run_script`
+    imprime el comando antes de correrlo (`$ echo LINT`), asi que buscar "LINT"
+    en `capsys` daba verde con el eco del comando y sin que el subproceso
+    hubiera corrido nunca. Y `capsys` ni siquiera ve la salida de un subproceso,
+    que sale por el descriptor del sistema. Un archivo que aparece solo puede
+    haberlo creado el proceso.
     """
     stack = _stack_con_scripts(
         tmp_path,
-        "  lint: echo LINT\n  test: echo TEST\n  check: [lint, test]",
+        "  lint: echo x > hizo_lint.txt\n"
+        "  test: echo x > hizo_test.txt\n"
+        "  check: [lint, test]",
     )
-    assert scripts.resolve(stack, "check") == ["echo LINT", "echo TEST"]
+    assert scripts.resolve(stack, "check") == ["echo x > hizo_lint.txt", "echo x > hizo_test.txt"]
     assert scripts.run_script(stack, "check") == 0
-    salida = capsys.readouterr().out
-    assert "LINT" in salida and "TEST" in salida
+    assert (tmp_path / "hizo_lint.txt").is_file(), "el paso 1 del pipeline no corrio"
+    assert (tmp_path / "hizo_test.txt").is_file(), "el paso 2 del pipeline no corrio"
 
 
 def test_un_pipeline_anidado_se_aplana(tmp_path):
