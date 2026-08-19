@@ -32,6 +32,7 @@ services:
     command: npm run dev
     cwd: frontend
     ready: listen      # el puerto lo elige el, se descubre al arrancar
+    url: http://localhost:3000/admin   # adonde lleva "Abrir". Admite ${VAR}
     needs: [api]
 
 profiles:
@@ -58,4 +59,10 @@ scripts:
 #   Es incompatible con `port`.
 # - `stop` es el apagado del servicio. Sin el, se mata el arbol de procesos, que
 #   no alcanza para un contenedor: vive fuera de ese arbol.
+# - `url` es adonde lleva el boton "Abrir", para cuando la raiz del puerto no es
+#   la entrada: una app montada en /admin, o una que pide un token en la query.
+#   Sin `url`, es `http://localhost:<port>`. Solo http y https. Admite `${VAR}` y
+#   `${VAR:-default}`, resueltos con el mismo entorno con el que corre el
+#   servicio (`env`, `env_file`, y el del shell). Una variable sin valor deja el
+#   servicio sin URL en vez de abrir una con el `${VAR}` literal adentro.
 # - Sin `--profile`, arrancan todos los servicios.

@@ -679,3 +679,68 @@ def test_pre_start_fallo_aborta_arranque(tmp_path, free_ports):
     with pytest.raises(runner.StartupError, match="pre_start fallo con codigo 42"):
         engine.up()
 
+
+
+def _stack_con_url(tmp_path, url, env=None, env_file=()):
+    return config.Service(
+        name="studio",
+        command="echo hola",
+        cwd=tmp_path,
+        port=8765,
+        ready="port",
+        needs=(),
+        env=env or {},
+        detached=False,
+        env_file=env_file,
+        url=url,
+    )
+
+
+def test_la_url_expande_la_variable_desde_un_env_de_verdad(tmp_path):
+    """El caso que motivo el campo: un Studio que sirve la cascara sin token y
+    exige `?token=` en toda su API. La variable sale del mismo entorno con el
+    que corre el servicio, no de uno paralelo.
+    """
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("ORQUESTER_TOKEN=abc123\n", encoding="utf-8")
+
+    service = _stack_con_url(
+        tmp_path,
+        "http://127.0.0.1:8765/?token=${ORQUESTER_TOKEN}",
+        env_file=(dotenv,),
+    )
+    assert runner.service_url(service) == "http://127.0.0.1:8765/?token=abc123"
+
+
+def test_el_env_declarado_le_gana_al_env_file(tmp_path):
+    """La precedencia es la que documenta `build_env`, no una segunda inventada
+    para las URLs: si hubiera dos ordenes distintos, uno de los dos seria el bug.
+    """
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("TOK=delarchivo\n", encoding="utf-8")
+
+    service = _stack_con_url(
+        tmp_path, "http://h/?t=${TOK}", env={"TOK": "declarado"}, env_file=(dotenv,)
+    )
+    assert runner.service_url(service) == "http://h/?t=declarado"
+
+
+def test_una_variable_sin_valor_deja_el_servicio_sin_url(tmp_path):
+    """Abrir `?token=${TOK}` con el literal adentro es peor que no ofrecer el
+    boton: la pagina carga, falla por dentro, y parece que funciono.
+    """
+    service = _stack_con_url(tmp_path, "http://h/?t=${NO_EXISTE_EN_NINGUN_LADO}")
+    assert runner.service_url(service) is None
+
+
+def test_una_variable_sin_valor_pero_con_default_si_expande(tmp_path):
+    service = _stack_con_url(tmp_path, "http://h/?t=${NO_EXISTE_TAMPOCO:-vacio}")
+    assert runner.service_url(service) == "http://h/?t=vacio"
+
+
+def test_sin_url_declarada_no_hay_url(tmp_path):
+    """El que llama arma el default con el puerto. Que `service_url` invente
+    `http://localhost:<port>` seria un tercer lugar donde vive ese literal.
+    """
+    service = _stack_con_url(tmp_path, None)
+    assert runner.service_url(service) is None

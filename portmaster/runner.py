@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import subprocess
 import threading
 import time
@@ -24,7 +25,7 @@ from pathlib import Path
 import psutil
 from rich.console import Console
 
-from . import config, ports
+from . import config, detect, ports
 from .config import Service, Stack
 
 
@@ -46,6 +47,41 @@ def build_env(service: Service) -> dict[str, str]:
     env["PYTHONUNBUFFERED"] = "1"
     env["FORCE_COLOR"] = "1"
     return env
+
+
+def service_url(service: Service) -> str | None:
+    """Adonde lleva "Abrir" para este servicio, o None si no se puede saber.
+
+    Sin `url:` devuelve None y el que llama arma el default de siempre con el
+    puerto. Con `url:`, expande `${VAR}` y `${VAR:-default}` desde el entorno
+    que `build_env` ya compone, que es el mismo con el que corre el servicio: si
+    la URL necesita un token, es el token que el proceso recibio.
+
+    Una variable sin valor tambien devuelve None. Abrir el navegador en una URL
+    con un `${TOKEN}` literal adentro es peor que no ofrecer el boton: parece
+    que funciono.
+
+    Toca disco (`build_env` lee `env.global` y cada `env_file`), asi que no se
+    llama en el sondeo de la interfaz salvo para servicios ya abribles.
+    """
+    if not service.url:
+        return None
+
+    env = build_env(service)
+    faltante = False
+
+    def resolve(match: re.Match) -> str:
+        nonlocal faltante
+        valor = env.get(match.group(1))
+        if valor:
+            return valor
+        if match.group(2) is not None:
+            return match.group(2)
+        faltante = True
+        return match.group(0)
+
+    expandida = detect.VARIABLE.sub(resolve, service.url)
+    return None if faltante else expandida
 
 
 COLORS = ("cyan", "magenta", "green", "yellow", "blue", "bright_red")

@@ -240,12 +240,13 @@ function renderService(service, projectId) {
   // El boton de abrir sale solo cuando el puerto contesto HTTP. Un postgres
   // listo tiene puerto y abrirlo en el navegador no lleva a ningun lado.
   if (service.openable && service.port) {
+    const destino = abrirUrl(service);
     const link = document.createElement("a");
-    link.href = `http://localhost:${service.port}`;
+    link.href = destino;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.className = "btn btn--open";
-    link.title = `Abrir http://localhost:${service.port}`;
+    link.title = `Abrir ${destino}`;
     link.textContent = "Abrir ↗";
     node.querySelector(".service__act").append(link);
 
@@ -649,8 +650,8 @@ function updateCard(entry, project) {
   const open = root.querySelector(".project__open");
   open.hidden = !abrible;
   if (abrible) {
-    open.href = `http://localhost:${abrible.port}`;
-    open.title = `Abrir ${abrible.name} en http://localhost:${abrible.port}`;
+    open.href = abrirUrl(abrible);
+    open.title = `Abrir ${abrible.name} en ${abrirUrl(abrible)}`;
   }
 
   // Solo lo detectado se puede congelar: lo que ya tiene archivo, no.
@@ -1363,6 +1364,14 @@ ui.enroll.addEventListener("submit", (event) => {
   });
 });
 
+/* Adonde lleva "Abrir". El `url:` del stack.yaml gana cuando existe: la raiz
+   del puerto no siempre es la entrada, y hay apps que piden un token en la
+   query o viven en un path. El servidor solo lo manda para servicios ya
+   abribles, asi que aca no hay que chequear estado otra vez. */
+function abrirUrl(service) {
+  return service.url || `http://localhost:${service.port}`;
+}
+
 /* mapa de puertos modal --------------------------------------------------- */
 
 if (ui.btnPortsModal && ui.portsModal) {
@@ -1395,6 +1404,7 @@ async function refreshPortsModal() {
             label: `${project.name} · ${service.name}`,
             kind: service.state === "ready" ? "corriendo" : "detenido",
             openable: service.openable,
+            url: service.url,
           });
         }
       }
@@ -1446,7 +1456,7 @@ async function refreshPortsModal() {
           actLink.className = "btn btn--open";
           actLink.target = "_blank";
           actLink.rel = "noopener noreferrer";
-          actLink.href = `http://localhost:${item.port}`;
+          actLink.href = abrirUrl(item);
           actLink.textContent = "Abrir ↗";
           li.append(portTag, info, actLink);
         } else if (item.isOrphan) {

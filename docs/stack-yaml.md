@@ -85,6 +85,40 @@ Con una excepción: después de aplicar todo lo anterior, `build_env` fija
 porque de ellas depende que los logs del servicio lleguen a la terminal y a
 la interfaz en vivo en lugar de quedarse en un buffer.
 
+## url
+
+Adónde lleva el botón `Abrir`, en la interfaz y en `portmaster open`. Sin él es
+`http://localhost:<port>`, que es lo correcto para la mayoría de los servicios y
+no alcanza para los que no viven en la raíz del puerto:
+
+```yaml
+services:
+  studio:
+    command: uv run python ui/server.py 8765
+    port: 8765
+    env_file: [.env]
+    url: http://127.0.0.1:8765/?token=${ORQUESTER_TOKEN}
+```
+
+Reglas:
+
+- Solo `http://` y `https://`. Otro esquema es error al cargar el archivo. No es
+  una barrera de seguridad —un `stack.yaml` ya ejecuta comandos arbitrarios, y
+  eso está en el modelo de confianza del README— sino que convierte el error de
+  tipeo más probable, escribir `127.0.0.1:8765` sin esquema, en un mensaje claro
+  en vez de una ruta relativa que el navegador interpreta como puede.
+- Admite `${VAR}` y `${VAR:-default}`, resueltos con **el mismo entorno con el
+  que corre el servicio**: la precedencia es la de `env_file`, de arriba. Si la
+  URL necesita un token, es el token que recibió el proceso.
+- Una variable sin valor y sin default deja el servicio **sin URL**, y el botón
+  vuelve al `http://localhost:<port>` de siempre. Abrir una URL con un
+  `${TOKEN}` literal adentro sería peor: la página carga, falla por dentro, y
+  parece que funcionó.
+- En la interfaz, el botón sigue apareciendo solo cuando el puerto contestó
+  HTTP. Un servicio sin `port:` nunca se puede saber si está arriba, así que ahí
+  no se dibuja; ese caso lo abre `portmaster open` desde la terminal, que no
+  sondea nada.
+
 ## pre_start y post_start
 
 Hooks síncronos de ciclo de vida:

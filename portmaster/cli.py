@@ -450,6 +450,13 @@ def _bajar(root: Path) -> None:
         err.print(f"{stack.name}: quedo algo sin bajar, el puerto puede seguir ocupado.")
 
 
+def _abrir(url: str) -> None:
+    console.print(f"Abriendo [bold]{url}[/]")
+    import webbrowser
+
+    webbrowser.open(url)
+
+
 @app.command("open")
 def open_cmd(
     port: int = typer.Argument(None, min=1, max=65535, help="Puerto, si ya lo sabes."),
@@ -463,17 +470,24 @@ def open_cmd(
             raise typer.Exit(1)
         # En orden de arranque: los contenedores primero, el frontend al final.
         # Se recorre al reves porque lo que uno quiere abrir suele ser lo ultimo.
-        candidates = [s.port for s in reversed(stack.resolve()) if s.port]
+        candidates = [s for s in reversed(stack.resolve()) if s.port or s.url]
     else:
-        candidates = [port]
+        candidates = [config.Service(
+            name=str(port), command="", cwd=Path.cwd(), port=port,
+            ready="port", needs=(), env={}, detached=False,
+        )]
 
-    for candidate in candidates:
-        if runner.speaks_http(candidate):
-            url = f"http://localhost:{candidate}"
-            console.print(f"Abriendo [bold]{url}[/]")
-            import webbrowser
-
-            webbrowser.open(url)
+    for service in candidates:
+        declarada = runner.service_url(service)
+        # Un servicio con `url:` y sin `port:` no tiene que sondear: no hay
+        # puerto que preguntar. Puede abrir una pestaña muerta si el stack no
+        # esta arriba, que es exactamente lo que pasa hoy escribiendo la URL a
+        # mano, y es preferible a no poder abrirla nunca.
+        if declarada and service.port is None:
+            _abrir(declarada)
+            return
+        if service.port and runner.speaks_http(service.port):
+            _abrir(declarada or f"http://localhost:{service.port}")
             return
 
     err.print(

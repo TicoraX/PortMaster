@@ -321,3 +321,52 @@ def test_un_env_con_bytes_invalidos_no_tumba_el_arranque(tmp_path):
     archivo = tmp_path / ".env"
     archivo.write_bytes(b"CLAVE=valor\nACENTO=caf\xe9\n")
     assert config.parse_env_file(archivo) == {}
+
+
+def _con_url(tmp_path, valor):
+    (tmp_path / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+            name: demo
+            services:
+              web:
+                command: echo hola
+                port: 3000
+                url: {valor}
+            """),
+        encoding="utf-8",
+    )
+    return config.load(tmp_path / "stack.yaml")
+
+
+def test_url_se_carga_y_llega_al_servicio(tmp_path):
+    stack = _con_url(tmp_path, "http://localhost:3000/admin")
+    assert stack.services["web"].url == "http://localhost:3000/admin"
+
+
+def test_sin_url_el_servicio_queda_en_none(tmp_path):
+    (tmp_path / "stack.yaml").write_text(
+        "name: d\nservices:\n  web:\n    command: echo\n    port: 3000\n", encoding="utf-8"
+    )
+    assert config.load(tmp_path / "stack.yaml").services["web"].url is None
+
+
+def test_una_url_con_esquema_javascript_no_carga(tmp_path):
+    """El `href` termina en el origen de la interfaz, que tiene el token en una
+    cookie. No es la barrera principal —un stack.yaml ya ejecuta comandos— pero
+    un esquema que no sea http no tiene ningun uso legitimo aca.
+    """
+    with pytest.raises(config.ConfigError, match="http://"):
+        _con_url(tmp_path, "'javascript:fetch(1)'")
+
+
+def test_una_url_sin_esquema_no_carga(tmp_path):
+    """`127.0.0.1:8765` es el error de tipeo mas probable y el navegador lo
+    interpreta como ruta relativa: falla lejos de la causa. Que falle al cargar.
+    """
+    with pytest.raises(config.ConfigError, match="http://"):
+        _con_url(tmp_path, "127.0.0.1:8765")
+
+
+def test_una_url_vacia_no_carga(tmp_path):
+    with pytest.raises(config.ConfigError, match="texto no vacio"):
+        _con_url(tmp_path, "'   '")

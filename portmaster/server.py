@@ -1114,6 +1114,9 @@ def _project_view(path: Path) -> dict:
         # esto se sondea cada 2.5s.
         if state == "stopped" and service.detached and _published(status):
             state = "ready"
+        # Solo lo que contesta HTTP se ofrece para abrir: un postgres listo tiene
+        # puerto y no es algo que mandar al navegador.
+        abrible = state != "stopped" and service.name in openable
         services.append(
             {
                 "name": service.name,
@@ -1121,9 +1124,15 @@ def _project_view(path: Path) -> dict:
                 # del rol de un servicio. Adivinar "backend" por el nombre no.
                 "kind": "container" if service.detached else "local",
                 "port": service.port or discovered.get(service.name),
-                # Solo lo que contesta HTTP se ofrece para abrir: un postgres
-                # listo tiene puerto y no es algo que mandar al navegador.
-                "openable": state != "stopped" and service.name in openable,
+                "openable": abrible,
+                # Adonde lleva "Abrir", si el stack.yaml lo declara. None deja
+                # que la interfaz arme el default con el puerto.
+                #
+                # Se pregunta SOLO si ya es abrible: `runner.service_url` lee
+                # `env.global` y cada `env_file` de disco, y esto corre cada 2.5s
+                # para cada servicio de cada proyecto. Con los stacks apagados,
+                # que es el caso normal, el boton ni se dibuja y no se toca disco.
+                "url": runner.service_url(service) if abrible else None,
                 "needs": list(service.needs),
                 "state": state,
                 "occupant": _occupant(status, state != "stopped"),

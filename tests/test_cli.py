@@ -33,7 +33,12 @@ def servidor_http(free_ports):
     server = HTTPServer(("127.0.0.1", port), BaseHTTPRequestHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield port
+    # Las dos, y en este orden: `shutdown` corta el bucle de atencion y deja el
+    # socket bindeado. Sin `server_close`, cada test que usa este fixture se
+    # queda con un puerto de la banda hasta que termina la sesion entera, y
+    # `free_ports` los busca al azar ahi y se rinde a los 200 intentos.
     server.shutdown()
+    server.server_close()
 
 
 @pytest.fixture
@@ -646,3 +651,72 @@ def test_docker_running_sin_motor_no_revienta(monkeypatch):
 
     monkeypatch.setattr(cli.docker.subprocess, "run", falso)
     assert cli.docker.running() == []
+
+
+def test_open_usa_la_url_declarada_en_vez_de_la_raiz_del_puerto(
+    tmp_path, monkeypatch, servidor_http, abierto
+):
+    """El caso de ORQUESTER: la raiz del puerto carga una cascara que despues
+    falla en cada llamada, y el `?token=` es lo que hace que sirva.
+    """
+    (tmp_path / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        services:
+          web:
+            command: echo web
+            port: {servidor_http}
+            url: http://127.0.0.1:{servidor_http}/?token=${{TOK}}
+            env:
+              TOK: abc123
+        """),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["open"])
+    assert resultado.exit_code == 0
+    assert abierto == [f"http://127.0.0.1:{servidor_http}/?token=abc123"]
+
+
+def test_open_con_url_y_sin_puerto_abre_sin_sondear(tmp_path, monkeypatch, abierto):
+    """Sin `port:` no hay que sondear: no hay puerto que preguntar. Una pestaña
+    muerta es lo mismo que pasa hoy escribiendo la URL a mano, y es preferible a
+    no poder abrirla nunca.
+    """
+    (tmp_path / "stack.yaml").write_text(
+        textwrap.dedent("""
+        services:
+          studio:
+            command: echo studio
+            url: http://127.0.0.1:8765/estudio
+        """),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["open"])
+    assert resultado.exit_code == 0
+    assert abierto == ["http://127.0.0.1:8765/estudio"]
+
+
+def test_open_ignora_una_url_con_una_variable_sin_valor(
+    tmp_path, monkeypatch, servidor_http, abierto
+):
+    """Cae al default del puerto. Abrir la URL con el `${TOK}` literal adentro
+    seria peor: la pagina carga y falla por dentro.
+    """
+    (tmp_path / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        services:
+          web:
+            command: echo web
+            port: {servidor_http}
+            url: http://127.0.0.1:{servidor_http}/?token=${{NO_EXISTE_EN_NINGUN_LADO}}
+        """),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["open"])
+    assert resultado.exit_code == 0
+    assert abierto == [f"http://localhost:{servidor_http}"]
