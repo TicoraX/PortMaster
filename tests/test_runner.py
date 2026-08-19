@@ -5,6 +5,7 @@ import socket
 import sys
 import textwrap
 import time
+from pathlib import Path
 
 import psutil
 import pytest
@@ -681,7 +682,22 @@ def test_pre_start_fallo_aborta_arranque(tmp_path, free_ports):
 
 
 
-def _stack_con_url(tmp_path, url, env=None, env_file=()):
+@pytest.fixture
+def sin_env_global(tmp_path, monkeypatch):
+    """`build_env` lee `~/.portmaster/env.global`, o sea el disco de quien corre.
+
+    Las reglas de precedencia dejan las aserciones de abajo a salvo hoy, pero un
+    env.global que defina una de las variables que estos tests dan por ausentes
+    las vuelve rojas en una maquina y verdes en otra. La suite no puede depender
+    de que nadie haya usado la boveda global.
+    """
+    hogar = tmp_path / "hogar-de-prueba"
+    hogar.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: hogar))
+    return hogar
+
+
+def _servicio_con_url(tmp_path, url, env=None, env_file=()):
     return config.Service(
         name="studio",
         command="echo hola",
@@ -696,7 +712,7 @@ def _stack_con_url(tmp_path, url, env=None, env_file=()):
     )
 
 
-def test_la_url_expande_la_variable_desde_un_env_de_verdad(tmp_path):
+def test_la_url_expande_la_variable_desde_un_env_de_verdad(tmp_path, sin_env_global):
     """El caso que motivo el campo: un Studio que sirve la cascara sin token y
     exige `?token=` en toda su API. La variable sale del mismo entorno con el
     que corre el servicio, no de uno paralelo.
@@ -704,7 +720,7 @@ def test_la_url_expande_la_variable_desde_un_env_de_verdad(tmp_path):
     dotenv = tmp_path / ".env"
     dotenv.write_text("ORQUESTER_TOKEN=abc123\n", encoding="utf-8")
 
-    service = _stack_con_url(
+    service = _servicio_con_url(
         tmp_path,
         "http://127.0.0.1:8765/?token=${ORQUESTER_TOKEN}",
         env_file=(dotenv,),
@@ -719,30 +735,30 @@ def test_el_env_declarado_le_gana_al_env_file(tmp_path):
     dotenv = tmp_path / ".env"
     dotenv.write_text("TOK=delarchivo\n", encoding="utf-8")
 
-    service = _stack_con_url(
+    service = _servicio_con_url(
         tmp_path, "http://h/?t=${TOK}", env={"TOK": "declarado"}, env_file=(dotenv,)
     )
     assert runner.service_url(service) == "http://h/?t=declarado"
 
 
-def test_una_variable_sin_valor_deja_el_servicio_sin_url(tmp_path):
+def test_una_variable_sin_valor_deja_el_servicio_sin_url(tmp_path, sin_env_global):
     """Abrir `?token=${TOK}` con el literal adentro es peor que no ofrecer el
     boton: la pagina carga, falla por dentro, y parece que funciono.
     """
-    service = _stack_con_url(tmp_path, "http://h/?t=${NO_EXISTE_EN_NINGUN_LADO}")
+    service = _servicio_con_url(tmp_path, "http://h/?t=${NO_EXISTE_EN_NINGUN_LADO}")
     assert runner.service_url(service) is None
 
 
 def test_una_variable_sin_valor_pero_con_default_si_expande(tmp_path):
-    service = _stack_con_url(tmp_path, "http://h/?t=${NO_EXISTE_TAMPOCO:-vacio}")
+    service = _servicio_con_url(tmp_path, "http://h/?t=${NO_EXISTE_TAMPOCO:-vacio}")
     assert runner.service_url(service) == "http://h/?t=vacio"
 
 
-def test_sin_url_declarada_no_hay_url(tmp_path):
+def test_sin_url_declarada_no_hay_url(tmp_path, sin_env_global):
     """El que llama arma el default con el puerto. Que `service_url` invente
     `http://localhost:<port>` seria un tercer lugar donde vive ese literal.
     """
-    service = _stack_con_url(tmp_path, None)
+    service = _servicio_con_url(tmp_path, None)
     assert runner.service_url(service) is None
 
 

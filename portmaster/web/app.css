@@ -1082,6 +1082,12 @@ body {
   flex: none;
   inline-size: 1rem;
   block-size: 1rem;
+  /* El cuadro sigue midiendo 1rem; el area sensible llega a 24px, que es lo que
+     pide WCAG 2.5.8. La casilla se agrega directo a la fila desde el JS, sin
+     `<label>` alrededor, asi que el cuadro ES todo el blanco del puntero. Las de
+     `.clean__row` no tienen el problema porque su label extiende el area. */
+  padding: 0.25rem;
+  box-sizing: content-box;
   margin: 0;
   accent-color: var(--color-accent);
   cursor: pointer;
@@ -1195,7 +1201,11 @@ body {
 }
 
 .tunnels .orphan__port {
+  /* El fondo tambien: `.orphan__port` trae texto Y fondo rojos, asi que cambiar
+     solo el color dejaba un puerto ambar sobre un chip rojo dentro de una
+     seccion ambar. Un tunel abierto y un intruso no significan lo mismo. */
   color: oklch(52% 0.13 75);
+  background: oklch(70% 0.15 75 / 0.15);
 }
 
 /* `.orphan__name` viene con `white-space: nowrap` y elipsis, que para un nombre

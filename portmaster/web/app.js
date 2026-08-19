@@ -914,8 +914,10 @@ function renderTunnels(list) {
       cerrar.addEventListener("click", () => {
         act(cerrar, async () => {
           await api(`/api/share/${tun.port}`, { method: "DELETE" });
+          // Sin `refresh()` propio: `act` ya lo llama al terminar el trabajo.
+          // Borrar la firma antes alcanza para forzar el repintado, y el que
+          // habia aca duplicaba /api/state y refreshHealth en cada cierre.
           delete ui.tunnelsList.dataset.firma;
-          await refresh();
         });
       });
 
