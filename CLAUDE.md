@@ -122,3 +122,43 @@ por un nombre exacto es fragil justo contra las variantes de lo malo: con un
 entrecomillado a medias, la redireccion inyectada creaba el archivo con una
 comilla pegada al nombre y preguntar por `inyectado.txt` daba verde con la
 inyeccion hecha. Preguntar si aparecio **cualquier** archivo nuevo, no.
+
+## Probar la interfaz: contra el repo, no contra lo instalado
+
+`portmaster serve` desde el PATH **no corre este repo**. Se instala con `pipx` o
+`uv tool`, asi que el binario apunta a la copia de
+`~/.local/bin` (o `AppData/Roaming/uv/tools/portmaster` en Windows). Editas
+`portmaster/web/app.css`, recargas el navegador, y ves el build viejo.
+
+El sintoma es peor que un error: el arreglo **parece no hacer nada**. Costo dos
+correcciones dadas por invalidas y descartadas antes de mirar quien servia el
+archivo. La segunda hipotesis ya iba camino a la tercera.
+
+Para probar cambios de interfaz:
+
+```bash
+.venv/Scripts/python -m portmaster serve --port 7667 --no-open   # el del repo
+curl -s http://127.0.0.1:7667/static/app.css | grep lo-que-acabas-de-escribir
+```
+
+El `grep` es el paso que importa: confirma que el navegador va a recibir tu
+edicion antes de que interpretes lo que ves en pantalla. Un `--port` distinto
+ademas deja vivo el `serve` que el usuario ya tenia abierto.
+
+La regla general: **antes de dudar del arreglo, confirmar que el arreglo llego.**
+Vale para cualquier capa servida desde disco.
+
+## La documentacion tambien se verifica ejecutando
+
+`README.md` y `docs/comandos.md` describieron `clean` como `docker system prune`
+durante varias versiones despues de que pasara a limpiar por categorias, con los
+volumenes aparte. El CHANGELOG estaba bien; los otros dos no. Nadie lo nota
+porque no hay test que lea prosa.
+
+Cuando un cambio toca el comportamiento de un comando, la lista de archivos a
+mirar es `README.md`, `docs/`, `stack.example.yaml` y `CHANGELOG.md`, y lo que se
+escribe ahi se comprueba corriendo el comando, no recordandolo. Tres ejemplos que
+salieron de correrlos: `env_file` fuera de la raiz es `ConfigError` (verificado
+con `../../.env` y con una ruta absoluta), `url:` y `ready: listen` no se
+combinan porque `url` le gana al puerto descubierto, y sin `port:` no existe el
+`http://localhost:<port>` "de siempre" que la doc prometia.
