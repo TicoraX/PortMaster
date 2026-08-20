@@ -30,6 +30,13 @@
   --color-warn: oklch(62% 0.115 75);
   --color-bad: oklch(51% 0.155 28);
   --color-bad-soft: oklch(94% 0.028 28);
+  /* Tinta de las pastillas de estado. El color base esta calibrado para pintar
+     un punto sobre el papel, y sobre su propia pastilla al 14% no llega a 4.5:1
+     (medido: ok 3.97, warn 2.90, bad 4.56). Estas tres bajan la luminosidad lo
+     justo. En oscuro no hacen falta: ahi el base ya da entre 4.9 y 6.9. */
+  --color-ok-ink: oklch(46% 0.095 155);
+  --color-warn-ink: oklch(50% 0.115 75);
+  --color-bad-ink: oklch(48% 0.155 28);
   --color-bad-rule: oklch(78% 0.07 28);
 
   /* tipografia: tres roles, cero descargas. Ver la nota en app.css. */
@@ -89,6 +96,9 @@
     --color-warn: oklch(78% 0.12 78);
     --color-bad: oklch(68% 0.15 28);
     --color-bad-soft: oklch(30% 0.05 28);
+    --color-ok-ink: var(--color-ok);
+    --color-warn-ink: var(--color-warn);
+    --color-bad-ink: var(--color-bad);
     --color-bad-rule: oklch(44% 0.09 28);
   }
 }
