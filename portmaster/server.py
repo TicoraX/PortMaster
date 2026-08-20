@@ -1118,6 +1118,8 @@ def _project_view(path: Path) -> dict:
     # "corriendo" con los servicios todavia "arrancando".
     estado = session.state if session else "stopped"
     running = session.service_states() if session else {}
+    # Los que ademas tienen un `Proc` vivo detras. None cuando no hay de donde.
+    manejados = running if session and session.engine else None
     discovered = session.service_ports() if session else {}
     openable = session.service_http() if session else set()
     tomados = session.service_taken() if session else set()
@@ -1177,8 +1179,11 @@ def _project_view(path: Path) -> dict:
                 "port_taken": state != "stopped" and service.name in tomados,
                 # Lo arranco esta interfaz y hay un proceso del que colgarse.
                 # Sin esto la tarjeta ofrecia "Reiniciar" sobre un contenedor
-                # ajeno, y el boton contestaba 404.
-                "managed": service.name in running,
+                # ajeno, y el boton contestaba 404. El engine hace falta aparte
+                # de la sesion: una que sobrevivio a un reinicio del servidor
+                # deriva sus estados del puerto y no tiene procesos, y ahi
+                # `restart` contesta 409.
+                "managed": manejados is not None and service.name in manejados,
             }
         )
 
