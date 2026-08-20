@@ -430,6 +430,10 @@ body {
     transform: scale(0.85);
   }
 }
+[data-tone="warn"] .dot,
+.dot[data-tone="warn"] {
+  background: var(--color-warn);
+}
 [data-tone="bad"] .dot,
 .dot[data-tone="bad"] {
   background: var(--color-bad);
@@ -537,17 +541,24 @@ body {
 }
 
 .service__state[data-tone="ready"] {
-  color: var(--color-ok);
+  color: var(--color-ok-ink);
   background: color-mix(in oklch, var(--color-ok) 14%, transparent);
 }
 
 .service__state[data-tone="starting"] {
-  color: var(--color-warn);
+  color: var(--color-warn-ink);
   background: color-mix(in oklch, var(--color-warn) 16%, transparent);
 }
 
+/* Ni verde ni alarma: el puerto esta tomado, y por algo que no es un problema.
+   No reusa "starting" porque ese pulsa, y aca no hay nada en transicion. */
+.service__state[data-tone="warn"] {
+  color: var(--color-warn-ink);
+  background: color-mix(in oklch, var(--color-warn) 14%, transparent);
+}
+
 .service__state[data-tone="bad"] {
-  color: var(--color-bad);
+  color: var(--color-bad-ink);
   background: var(--color-bad-soft);
 }
 

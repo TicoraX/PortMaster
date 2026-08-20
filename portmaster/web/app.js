@@ -317,7 +317,13 @@ function renderService(service, projectId) {
   const stateCell = node.querySelector(".service__state");
   const text = stateCell.querySelector("span:last-child");
 
-  if (service.occupant) {
+  if (service.occupant && service.occupant.proxy) {
+    // Detras del proxy hay un contenedor, no un proceso que cerrar: el pid es
+    // el del motor. Quien lo publica sale en la lista de proyectos que comparten
+    // el puerto, que ya esta al lado.
+    text.textContent = `contenedor publicado por ${service.occupant.proxy}`;
+    stateCell.dataset.tone = "warn";
+  } else if (service.occupant) {
     const who = service.occupant;
     text.textContent = `ocupado por ${who.name}${who.pid ? ` (${who.pid})` : ""}`;
     stateCell.dataset.tone = "bad";
@@ -336,9 +342,10 @@ function renderService(service, projectId) {
     stateCell.dataset.tone = tone;
   }
 
-  // Solo hay algo que reiniciar si el stack lo arranco esta interfaz, y eso es
-  // justo lo que dice que el servicio tenga estado propio.
-  if (service.state === "ready" || service.state === "starting") {
+  // Solo hay algo que reiniciar si el stack lo arranco esta interfaz. El estado
+  // no alcanza para saberlo: un contenedor levantado por afuera tambien se ve
+  // "listo", y el boton contestaba 404. `managed` es lo que lo dice.
+  if (service.managed && (service.state === "ready" || service.state === "starting")) {
     const again = document.createElement("button");
     again.type = "button";
     again.className = "btn btn--quiet";
@@ -701,12 +708,14 @@ function updateCard(entry, project) {
   );
 
   const select = root.querySelector(".profile__select");
-  const wanted = ["", ...project.profiles].join("|");
+  const wanted = [project.default.join(","), ...project.profiles].join("|");
   if (select.dataset.options !== wanted) {
     select.dataset.options = wanted;
     const all = document.createElement("option");
     all.value = "";
-    all.textContent = "todo";
+    // "todo" mentia cuando el stack declara `default:`: Arrancar levantaba solo
+    // esos, y el resto de la lista quedaba abajo en gris sin explicacion.
+    all.textContent = project.default.length ? `por defecto (${project.default.join(", ")})` : "todo";
     select.replaceChildren(
       all,
       ...project.profiles.map((name) => {
@@ -721,9 +730,12 @@ function updateCard(entry, project) {
 
   const live = project.state === "starting" || project.state === "running";
   const stopping = project.state === "stopping";
+  // Hay algo que apagar aunque no lo hayamos arrancado nosotros: un contenedor
+  // levantado desde la terminal publica su puerto y se ve "listo".
+  const algoVivo = live || project.services.some((s) => s.state !== "stopped");
   root.querySelector('[data-act="up"]').disabled =
     live || stopping || project.state === "invalid";
-  root.querySelector('[data-act="down"]').disabled = !live;
+  root.querySelector('[data-act="down"]').disabled = !algoVivo || stopping;
 
   if (entry.logsOpen) pullLogs(project.id, entry);
 }
@@ -964,7 +976,10 @@ async function refreshOrphans() {
       ui.orphansHeading.textContent = "Procesos intrusos";
       const limpio = document.createElement("li");
       limpio.className = "orphan orphan--empty";
-      limpio.textContent = "Ninguno. Los puertos de tus proyectos están libres.";
+      // "estan libres" era mentira con un contenedor publicando el puerto: la
+      // tarjeta lo mostraba ocupado y este cartel decia lo contrario.
+      limpio.textContent =
+        "Ninguno. Lo que ocupa tus puertos lo arrancaste vos o es un contenedor de Docker.";
       ui.orphansList.replaceChildren(limpio);
       return;
     }

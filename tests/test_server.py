@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from portmaster import config, docker, ports, registry, server
+from portmaster import config, detect, docker, ports, registry, server
 
 TOKEN = "token-de-prueba-suficientemente-largo"
 SERVER = (
@@ -558,10 +558,50 @@ def test_reiniciar_con_el_stack_apagado(client, proyecto):
     assert client.post(f"/api/projects/{pid}/services/srv/restart").status_code == 404
 
 
-def test_apagar_lo_que_no_arrancamos(client, proyecto):
-    path, _ = proyecto
+def test_una_sesion_sin_procesos_no_ofrece_reiniciar(client, proyecto):
+    """La sesion que sobrevive a un reinicio del servidor deriva sus estados del
+    puerto y no tiene procesos: `restart` contesta 409, asi que la tarjeta no
+    tiene que dibujar el boton. Es la forma exacta que arma `_load_sessions_state`."""
+    path, port = proyecto
     pid = registry.project_id(path)
-    assert client.post(f"/api/projects/{pid}/down").status_code == 404
+    with socket.socket() as ocupado:
+        ocupado.bind(("127.0.0.1", port))
+        ocupado.listen()
+        recuperada = server.Session(detect.stack_for(path), None)
+        recuperada.state = "running"
+        server.sessions[pid] = recuperada
+        try:
+            vista = client.get("/api/state").json()["projects"]
+            servicios = next(p for p in vista if p["id"] == pid)["services"]
+            assert [s["state"] for s in servicios] == ["ready"]
+            assert [s["managed"] for s in servicios] == [False]
+            assert client.post(f"/api/projects/{pid}/services/srv/restart").status_code == 409
+        finally:
+            server.sessions.pop(pid, None)
+
+
+def test_apagar_lo_que_no_arrancamos(client, tmp_path):
+    """Un contenedor levantado por afuera se ve listo en la tarjeta: Apagar
+    tiene que poder bajarlo. Sin sesion no hay proceso del que colgarse, asi que
+    lo unico que lo apaga es el `stop:` del servicio."""
+    root = tmp_path / "ajeno"
+    root.mkdir()
+    testigo = root / "apagado.txt"
+    (root / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        name: ajeno
+        services:
+          db:
+            command: {sys.executable} -c "pass"
+            detached: true
+            stop: echo ok > "{testigo}"
+        """),
+        encoding="utf-8",
+    )
+    pid = registry.project_id(registry.add(root))
+
+    assert client.post(f"/api/projects/{pid}/down").status_code == 200
+    assert esperar(testigo.exists)
 
 
 # puertos ------------------------------------------------------------------
