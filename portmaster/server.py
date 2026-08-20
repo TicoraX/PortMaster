@@ -208,7 +208,19 @@ class Session:
                 self.thread.join(runner.STOP_TIMEOUT)
             self.engine.down()
         else:
-            scanned = ports.scan_many([s.port for s in self.stack.services.values() if s.port])
+            # Sin engine: la sesion sobrevivio a un reinicio del servidor, o
+            # nadie arranco esto desde aca y solo hay que bajar lo que este vivo.
+            # Un contenedor no es hijo nuestro y no se apaga matando el pid del
+            # puerto: ese pid es el proxy de Docker, y matarlo deja el
+            # contenedor corriendo sin publicar. El `stop:` del servicio es lo
+            # unico que lo baja de verdad.
+            sueltos = []
+            for service in reversed(list(self.stack.services.values())):
+                if service.stop:
+                    runner.run_stop(service)
+                elif service.port:
+                    sueltos.append(service.port)
+            scanned = ports.scan_many(sueltos)
             for status in scanned.values():
                 if not status.free and status.pid is not None:
                     try:
@@ -699,10 +711,19 @@ def create_app(token: str | None = None) -> FastAPI:
         dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)],
     )
     def down(pid: str) -> dict:
+        path = _lookup(pid)
         with sessions_lock:
             session = sessions.get(pid)
-        if session is None:
-            raise HTTPException(404, "ese stack no fue arrancado desde aca")
+            if session is None:
+                # Los contenedores de un `docker compose up -d` desde la
+                # terminal se ven "listos" en la tarjeta, y Apagar contestaba
+                # 404: la interfaz mostraba algo vivo que no podia bajar.
+                try:
+                    stack = detect.stack_for(path)
+                except config.ConfigError as exc:
+                    raise HTTPException(400, str(exc))
+                session = Session(stack, None)
+                sessions[pid] = session
         if session.state != "stopping":
             session.stop_async()
         return {"ok": True}
@@ -1083,6 +1104,7 @@ def _project_view(path: Path) -> dict:
             "error": str(exc),
             "services": [],
             "profiles": [],
+            "default": [],
             "detected": False,
             "needs_docker": False,
             "docker_down": False,
@@ -1153,6 +1175,10 @@ def _project_view(path: Path) -> dict:
                 # El puerto ya estaba ocupado cuando arrancamos: el verde puede
                 # ser de otro proceso. Solo mientras corra la sesion que lo vio.
                 "port_taken": state != "stopped" and service.name in tomados,
+                # Lo arranco esta interfaz y hay un proceso del que colgarse.
+                # Sin esto la tarjeta ofrecia "Reiniciar" sobre un contenedor
+                # ajeno, y el boton contestaba 404.
+                "managed": service.name in running,
             }
         )
 
@@ -1166,6 +1192,8 @@ def _project_view(path: Path) -> dict:
         "error": session.error if session else None,
         "detected": stack.detected,
         "profiles": sorted(stack.profiles),
+        # Que levanta Arrancar sin perfil. Vacio = todos.
+        "default": list(stack.default or ()),
         "services": services,
         # Los dos: `docker_down` en False quiere decir "el daemon contesta" y
         # tambien "este proyecto no usa Docker", y la interfaz necesita
@@ -1191,4 +1219,13 @@ def _occupant(status: ports.PortStatus | None, ours: bool) -> dict | None:
     """Quien ocupa el puerto, solo cuando no somos nosotros."""
     if status is None or status.free or ours:
         return None
-    return {"pid": status.pid, "name": status.name or "desconocido"}
+    # El dueno del puerto puede ser el proxy de Docker, y entonces lo que escucha
+    # ahi es un contenedor: matar ese pid apaga el backend de Docker Desktop
+    # entero y deja el contenedor corriendo sin publicar. `find_orphans` ya lo
+    # sabe y lo saltea, por eso la tarjeta decia "ocupado" mientras el panel de
+    # intrusos decia "ninguno".
+    return {
+        "pid": status.pid,
+        "name": status.name or "desconocido",
+        "proxy": ports.proxy_owner(status),
+    }

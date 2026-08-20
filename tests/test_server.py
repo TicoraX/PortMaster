@@ -558,10 +558,28 @@ def test_reiniciar_con_el_stack_apagado(client, proyecto):
     assert client.post(f"/api/projects/{pid}/services/srv/restart").status_code == 404
 
 
-def test_apagar_lo_que_no_arrancamos(client, proyecto):
-    path, _ = proyecto
-    pid = registry.project_id(path)
-    assert client.post(f"/api/projects/{pid}/down").status_code == 404
+def test_apagar_lo_que_no_arrancamos(client, tmp_path):
+    """Un contenedor levantado por afuera se ve listo en la tarjeta: Apagar
+    tiene que poder bajarlo. Sin sesion no hay proceso del que colgarse, asi que
+    lo unico que lo apaga es el `stop:` del servicio."""
+    root = tmp_path / "ajeno"
+    root.mkdir()
+    testigo = root / "apagado.txt"
+    (root / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        name: ajeno
+        services:
+          db:
+            command: {sys.executable} -c "pass"
+            detached: true
+            stop: echo ok > "{testigo}"
+        """),
+        encoding="utf-8",
+    )
+    pid = registry.project_id(registry.add(root))
+
+    assert client.post(f"/api/projects/{pid}/down").status_code == 200
+    assert esperar(testigo.exists)
 
 
 # puertos ------------------------------------------------------------------
