@@ -703,10 +703,22 @@ function updateCard(entry, project) {
     dockerWarn.hidden = !project.docker_down;
   }
 
+  // Solo reconstruir la lista de servicios si algo cambio. La huella
+  // serializa todo lo que afecta al render: estado, puerto, occupant,
+  // botones, marcas. En estado estable (90% del polling) esto evita
+  // destruir y reconstruir el DOM cada 2.5s, preservando la seleccion de
+  // texto, el foco del teclado y reduciendo GC.
   const services = root.querySelector(".services");
-  services.replaceChildren(
-    ...project.services.map((service) => renderService(service, project.id)),
+  const fingerprint = JSON.stringify(
+    project.services.map((s) => [s.name, s.state, s.port, s.openable, s.managed,
+      s.port_taken, s.shared_with, s.occupant, tunnelPorts.has(s.port)]),
   );
+  if (services.dataset.fingerprint !== fingerprint) {
+    services.dataset.fingerprint = fingerprint;
+    services.replaceChildren(
+      ...project.services.map((service) => renderService(service, project.id)),
+    );
+  }
 
   const select = root.querySelector(".profile__select");
   const wanted = [project.default.join(","), ...project.profiles].join("|");
