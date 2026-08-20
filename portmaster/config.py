@@ -11,7 +11,6 @@ proyecto.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
 
 import yaml
@@ -83,20 +82,23 @@ class Stack:
 
 
 def _topological(services: dict[str, Service], wanted: list[str]) -> list[str]:
-    # Recolectar nodos necesarios (wanted + dependencias transitivas).
-    needed: set[str] = set()
-    stack = list(wanted)
-    while stack:
-        name = stack.pop()
-        if name not in needed:
-            needed.add(name)
-            stack.extend(services[name].needs)
+    order: list[str] = []
+    done: set[str] = set()
 
-    ts = TopologicalSorter({n: services[n].needs for n in needed})
-    try:
-        return list(ts.static_order())
-    except CycleError as exc:
-        raise ConfigError(f"dependencia circular: {exc.args[1]}") from None
+    def visit(name: str, path: list[str]) -> None:
+        if name in done:
+            return
+        if name in path:
+            chain = " -> ".join(path[path.index(name):] + [name])
+            raise ConfigError(f"dependencia circular: {chain}")
+        for dep in services[name].needs:
+            visit(dep, path + [name])
+        done.add(name)
+        order.append(name)
+
+    for name in wanted:
+        visit(name, [])
+    return order
 
 
 def find(start: Path | None = None) -> Path:
