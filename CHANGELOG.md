@@ -4,6 +4,34 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
+## [1.2.1] - 2026-08-19
+
+### Arreglado
+
+- **Apagar un stack que arrancó otro proceso.** Los contenedores de un
+  `docker compose up -d` desde la terminal publican su puerto, así que la
+  tarjeta los pinta "listo". Pero sin sesión el proyecto quedaba "detenido",
+  `Apagar` en gris y `/down` contestando 404: la interfaz mostraba algo vivo que
+  no podía bajar. Ahora `/down` arma la sesión y apaga igual.
+- **El apagado sin sesión mataba el proxy de Docker.** Corría `kill` sobre el
+  proceso dueño de cada puerto, y para un contenedor ese proceso es el motor:
+  lo mataba y dejaba el contenedor corriendo sin publicar. Ahora corre el
+  `stop:` del servicio y solo mata por pid lo que no tiene uno. Alcanza también
+  al caso de la sesión que sobrevive a un reinicio del servidor.
+- **`Reiniciar` sobre un servicio ajeno daba 404.** El botón se dibujaba
+  mirando el estado del puerto, que no dice quién arrancó el proceso.
+- **La tarjeta y el panel de intrusos se contradecían.** El panel saltea los
+  proxies de Docker a propósito; la tarjeta no los distinguía, y ofrecía un
+  `Liberar` que iba a matar el backend de Docker Desktop entero. Ahora dice que
+  es un contenedor y no ofrece cerrarlo.
+- **El selector de perfil decía "todo" y arrancaba el `default:`.** Ahora
+  nombra los servicios que va a levantar.
+- **Contraste de las pastillas de estado en modo claro.** El color de cada tono
+  está calibrado para pintar el punto sobre el papel, y se reusaba como tinta
+  del texto sobre una versión tenue de sí mismo: `listo` daba 3.97:1 y
+  `arrancando` 2.83:1, los dos por debajo del 4.5:1 de WCAG AA. En modo oscuro
+  ya cumplían y no cambian.
+
 ## [1.2.0] - 2026-08-19
 
 ### Agregado
