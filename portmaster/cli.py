@@ -16,6 +16,7 @@ from . import (
     detect,
     docker,
     doctor,
+    history,
     mcp,
     ports,
     registry,
@@ -892,6 +893,47 @@ def mcp_cmd(
 def version_cmd() -> None:
     """Muestra la version instalada."""
     console.print(__version__)
+
+
+@app.command("history")
+def history_cmd(
+    target: str = typer.Argument(None),
+    limit: int = typer.Option(5, "--limit", "-n", help="Cantidad de arranques a mostrar"),
+) -> None:
+    """Muestra el historial de arranques del proyecto."""
+    try:
+        path = (Path.cwd() / (target or "")).resolve()
+        stack = detect.stack_for(path)
+        pid = registry.project_id(stack.root)
+    except config.ConfigError as exc:
+        err.print(f"[red]Error:[/] {exc}")
+        raise typer.Exit(1)
+        
+    runs = history.read(pid, limit=limit)
+    if not runs:
+        console.print(f"No hay historial para el proyecto [bold]{stack.name}[/]")
+        return
+        
+    table = Table(title=f"Historial de arranques: {stack.name}")
+    table.add_column("Fecha")
+    table.add_column("Perfil")
+    table.add_column("Duración")
+    table.add_column("Resultado")
+    
+    for r in reversed(runs):
+        fecha = r.get("timestamp", "").split("T")[0] + " " + r.get("timestamp", "T")[:16].split("T")[-1]
+        perfil = r.get("profile") or "-"
+        dur = f"{r.get('duration_s', 0)}s"
+        res = r.get("result", "unknown")
+        
+        color = "green" if res == "running" else "red" if res == "error" else "yellow"
+        res_format = f"[{color}]{res}[/]"
+        if res == "error" and "error" in r:
+            res_format += f"\n[dim]{r['error']}[/]"
+            
+        table.add_row(fecha, perfil, dur, res_format)
+        
+    console.print(table)
 
 
 if __name__ == "__main__":

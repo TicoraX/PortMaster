@@ -749,8 +749,34 @@ body {
   max-block-size: 22rem;
   overflow: auto;
   overscroll-behavior: contain;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.history__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+  text-align: left;
+}
+
+.history__table th,
+.history__table td {
+  padding: var(--space-xs) var(--space-sm);
+  border-bottom: var(--rule) solid var(--color-rule-strong);
+}
+
+.history__table th {
+  font-weight: 500;
+  color: var(--color-ink-2);
+}
+
+.history__table td {
+  color: var(--color-ink);
+  white-space: pre-line;
+}
+
+.history__table tr:last-child td {
+  border-bottom: 0;
 }
 
 .chip--ports {

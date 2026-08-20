@@ -246,6 +246,9 @@
               <button class="btn btn--quiet" type="button" data-act="logs" aria-expanded="false">
                 Logs
               </button>
+              <button class="btn btn--quiet" type="button" data-act="history" aria-expanded="false">
+                Historial
+              </button>
               <button class="btn btn--quiet project__freeze" type="button" data-act="freeze" hidden>
                 Congelar a stack.yaml
               </button>
@@ -256,6 +259,19 @@
             <div class="logs__box" hidden>
               <input class="logs__filter" type="search" placeholder="Filtrar logs..." aria-label="Filtrar logs" />
               <pre class="logs" tabindex="0"></pre>
+            </div>
+            <div class="history__box" hidden>
+              <table class="history__table">
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Perfil</th>
+                    <th>Duración</th>
+                    <th>Resultado</th>
+                  </tr>
+                </thead>
+                <tbody class="history__tbody"></tbody>
+              </table>
             </div>
           </div>
         </div>

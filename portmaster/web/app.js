@@ -434,9 +434,27 @@ function buildCard(project) {
   logsButton.addEventListener("click", () => {
     entry.logsOpen = !entry.logsOpen;
     if (logsBox) logsBox.hidden = !entry.logsOpen;
-    else logs.hidden = !entry.logsOpen;
     logsButton.setAttribute("aria-expanded", String(entry.logsOpen));
-    if (entry.logsOpen) pullLogs(project.id, entry);
+    if (entry.logsOpen) {
+      entry.historyOpen = false;
+      root.querySelector(".history__box").hidden = true;
+      root.querySelector('[data-act="history"]').setAttribute("aria-expanded", "false");
+      pullLogs(project.id, entry);
+    }
+  });
+
+  const historyBox = root.querySelector(".history__box");
+  const historyButton = root.querySelector('[data-act="history"]');
+  historyButton.addEventListener("click", () => {
+    entry.historyOpen = !entry.historyOpen;
+    if (historyBox) historyBox.hidden = !entry.historyOpen;
+    historyButton.setAttribute("aria-expanded", String(entry.historyOpen));
+    if (entry.historyOpen) {
+      entry.logsOpen = false;
+      if (logsBox) logsBox.hidden = true;
+      logsButton.setAttribute("aria-expanded", "false");
+      pullHistory(project.id, entry);
+    }
   });
 
   cards.set(project.id, entry);
@@ -794,6 +812,61 @@ function renderLogsText(entry) {
       : `Ningún renglón contiene "${filter}".`;
   }
   if (atBottom) logsEl.scrollTop = logsEl.scrollHeight;
+}
+
+async function pullHistory(id, entry) {
+  try {
+    const data = await api(`/api/projects/${id}/history`);
+    renderHistoryTable(entry, data.history || []);
+  } catch {
+    /* error al cargar historial */
+  }
+}
+
+function renderHistoryTable(entry, runs) {
+  const tbody = entry.root.querySelector(".history__tbody");
+  if (!tbody) return;
+  
+  if (runs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4">No hay historial de arranques todavía.</td></tr>';
+    return;
+  }
+  
+  tbody.replaceChildren(
+    ...[...runs].reverse().map((r) => {
+      const tr = document.createElement("tr");
+      
+      const tdFecha = document.createElement("td");
+      const parts = (r.timestamp || "").split("T");
+      const day = parts[0];
+      const time = parts.length > 1 ? parts[1].substring(0, 5) : "";
+      tdFecha.textContent = `${day} ${time}`;
+      tr.appendChild(tdFecha);
+      
+      const tdPerfil = document.createElement("td");
+      tdPerfil.textContent = r.profile || "-";
+      tr.appendChild(tdPerfil);
+      
+      const tdDur = document.createElement("td");
+      tdDur.textContent = r.duration_s ? `${r.duration_s}s` : "-";
+      tr.appendChild(tdDur);
+      
+      const tdRes = document.createElement("td");
+      let resText = r.result || "unknown";
+      if (resText === "error" && r.error) {
+        resText += `\n${r.error}`;
+      }
+      tdRes.textContent = resText;
+      if (r.result === "running") {
+        tdRes.style.color = "var(--color-good)";
+      } else if (r.result === "error") {
+        tdRes.style.color = "var(--color-bad)";
+      }
+      tr.appendChild(tdRes);
+      
+      return tr;
+    })
+  );
 }
 
 function render(projects, data) {
