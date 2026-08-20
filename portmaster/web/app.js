@@ -146,7 +146,8 @@ function flash(message, tone) {
 }
 
 async function act(button, work) {
-  button.disabled = true;
+  if (button.dataset.busy === "true") return;
+  button.setAttribute("aria-disabled", "true");
   button.dataset.busy = "true";
   try {
     await work();
@@ -154,7 +155,7 @@ async function act(button, work) {
   } catch (error) {
     flash(error.message, "bad");
   } finally {
-    button.disabled = false;
+    button.removeAttribute("aria-disabled");
     delete button.dataset.busy;
   }
 }
