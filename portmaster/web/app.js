@@ -453,6 +453,7 @@ function buildCard(project) {
       entry.logsOpen = false;
       if (logsBox) logsBox.hidden = true;
       logsButton.setAttribute("aria-expanded", "false");
+      entry.lastHistoryState = project.state;
       pullHistory(project.id, entry);
     }
   });
@@ -769,6 +770,11 @@ function updateCard(entry, project) {
   root.querySelector('[data-act="down"]').disabled = !algoVivo || stopping;
 
   if (entry.logsOpen) pullLogs(project.id, entry);
+  
+  if (entry.historyOpen && entry.lastHistoryState !== project.state) {
+    entry.lastHistoryState = project.state;
+    pullHistory(project.id, entry);
+  }
 }
 
 async function pullLogs(id, entry) {
@@ -814,12 +820,14 @@ function renderLogsText(entry) {
   if (atBottom) logsEl.scrollTop = logsEl.scrollHeight;
 }
 
-async function pullHistory(id, entry) {
+async function pullHistory(id, entry, retries = 3) {
   try {
     const data = await api(`/api/projects/${id}/history`);
     renderHistoryTable(entry, data.history || []);
   } catch {
-    /* error al cargar historial */
+    if (retries > 0) {
+      setTimeout(() => pullHistory(id, entry, retries - 1), 1000);
+    }
   }
 }
 
@@ -848,7 +856,7 @@ function renderHistoryTable(entry, runs) {
       tr.appendChild(tdPerfil);
       
       const tdDur = document.createElement("td");
-      tdDur.textContent = r.duration_s ? `${r.duration_s}s` : "-";
+      tdDur.textContent = r.duration_s != null ? `${r.duration_s}s` : "-";
       tr.appendChild(tdDur);
       
       const tdRes = document.createElement("td");

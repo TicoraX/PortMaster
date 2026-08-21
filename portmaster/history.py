@@ -4,9 +4,13 @@ from pathlib import Path
 from typing import Any
 
 
+from portmaster import registry
+
+MAX_LIMIT = 50
+
+
 def _history_file(pid: str) -> Path:
-    base = Path("~/.portmaster").expanduser()
-    return base / "history" / f"{pid}.jsonl"
+    return registry.HOME / "history" / f"{pid}.jsonl"
 
 
 def append(pid: str, data: dict[str, Any]) -> None:
@@ -24,6 +28,7 @@ def append(pid: str, data: dict[str, Any]) -> None:
 
 
 def read(pid: str, limit: int = 5) -> list[dict[str, Any]]:
+    limit = max(1, min(limit, MAX_LIMIT))
     path = _history_file(pid)
     if not path.is_file():
         return []
@@ -34,7 +39,9 @@ def read(pid: str, limit: int = 5) -> list[dict[str, Any]]:
             for line in f:
                 if line.strip():
                     try:
-                        lines.append(json.loads(line))
+                        record = json.loads(line)
+                        if isinstance(record, dict):
+                            lines.append(record)
                     except json.JSONDecodeError:
                         continue
     except OSError:

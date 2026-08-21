@@ -901,6 +901,10 @@ def history_cmd(
     limit: int = typer.Option(5, "--limit", "-n", help="Cantidad de arranques a mostrar"),
 ) -> None:
     """Muestra el historial de arranques del proyecto."""
+    if limit < 1 or limit > history.MAX_LIMIT:
+        err.print(f"[red]Error:[/] --limit debe ser entre 1 y {history.MAX_LIMIT}")
+        raise typer.Exit(1)
+        
     try:
         path = (Path.cwd() / (target or "")).resolve()
         stack = detect.stack_for(path)
