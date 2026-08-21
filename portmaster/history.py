@@ -10,17 +10,16 @@ MAX_LIMIT = 50
 
 
 def _history_file(pid: str) -> Path:
-    return registry.HOME / "history" / f"{pid}.jsonl"
+    return (registry.HOME / "history" / f"{pid}.jsonl").resolve()
 
 
 def append(pid: str, data: dict[str, Any]) -> None:
-    path = _history_file(pid)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    
     if "timestamp" not in data:
         data["timestamp"] = datetime.now(timezone.utc).isoformat()
     
     try:
+        path = _history_file(pid)
+        path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(data) + "\n")
     except OSError:
