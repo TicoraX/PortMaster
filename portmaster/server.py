@@ -16,13 +16,12 @@ from __future__ import annotations
 import contextlib
 import logging
 import secrets
-import sys
 import threading
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 import psutil
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
