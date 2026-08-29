@@ -93,6 +93,10 @@ POLL = 0.15
 # imagen y eso tarda minutos sin que nada este mal.
 DETACHED_TIMEOUT = 900
 
+# Lo que se espera entre fijar la linea base de CPU de un proceso nuevo y leerla.
+# Solo se paga la primera vez que un servicio aparece, y una vez por lote.
+CPU_MUESTRA = 0.1
+
 # `docker compose stop` le da su gracia a cada contenedor antes de matarlo, y con
 # varios no entra en los 5s del apagado del arbol.
 STOP_TIMEOUT = 90
@@ -134,6 +138,9 @@ class Runner:
     _down: bool = False
     restarting: bool = False
     _retries: dict[str, int] = field(default_factory=dict)
+    # psutil.Process por pid. Vive entre llamadas porque cpu_percent mide
+    # el delta contra la lectura anterior del mismo objeto.
+    _ps_cache: dict[int, psutil.Process] = field(default_factory=dict)
     # Protege `procs` y `_down` entre los hilos de un mismo nivel y el apagado.
     _procs_lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -282,36 +289,75 @@ class Runner:
 
     def resource_stats(self) -> dict[str, dict[str, float]]:
         """Calcula el uso de recursos (CPU % y Memoria RSS en MB) de cada servicio activo."""
+        # `cpu_percent(interval=None)` mide contra la lectura anterior del
+        # *mismo* objeto Process. Recrearlo en cada llamada devolvia 0.0 para
+        # siempre: no habia lectura anterior contra la cual restar. Por eso el
+        # cache, y por eso el respiro de abajo.
+        arboles: dict[str, list[psutil.Process]] = {}
+        estrenados = False
+        for p in list(self.procs):
+            if p.popen.poll() is not None:
+                continue
+            arbol = []
+            for pid in self._pids_del_arbol(p.popen.pid):
+                proc = self._ps_cache.get(pid)
+                if proc is None:
+                    try:
+                        proc = psutil.Process(pid)
+                        # Fija la linea base y descarta el 0.0 obligado.
+                        proc.cpu_percent(interval=None)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+                    self._ps_cache[pid] = proc
+                    estrenados = True
+                arbol.append(proc)
+            arboles[p.service.name] = arbol
+
+        if estrenados:
+            # Un solo respiro para todo el lote, no uno por proceso: sin esto,
+            # la primera lectura de un servicio recien arrancado seria 0.0 y
+            # `portmaster stats`, que hace una sola consulta, nunca mediria nada.
+            time.sleep(CPU_MUESTRA)
+
+        vivos = {proc.pid for arbol in arboles.values() for proc in arbol}
+        for pid in list(self._ps_cache):
+            if pid not in vivos:
+                # pop y no del: /api/state y /metrics pueden podar a la vez.
+                self._ps_cache.pop(pid, None)
+
         stats: dict[str, dict[str, float]] = {}
         for p in list(self.procs):
-            if p.popen.poll() is None:
+            total_cpu = 0.0
+            total_rss = 0
+            for proc in arboles.get(p.service.name, ()):
                 try:
-                    parent = psutil.Process(p.popen.pid)
-                    all_procs = [parent]
-                    try:
-                        all_procs.extend(parent.children(recursive=True))
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
-
-                    total_rss_bytes = 0
-                    total_cpu = 0.0
-                    for proc in all_procs:
-                        try:
-                            total_cpu += proc.cpu_percent(interval=None)
-                            total_rss_bytes += proc.memory_info().rss
-                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                            continue
-
-                    stats[p.service.name] = {
-                        "cpu_percent": round(total_cpu, 1),
-                        "memory_mb": round(total_rss_bytes / (1024 * 1024), 1),
-                        "pid": p.popen.pid,
-                    }
+                    total_cpu += proc.cpu_percent(interval=None)
+                    total_rss += proc.memory_info().rss
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    stats[p.service.name] = {"cpu_percent": 0.0, "memory_mb": 0.0, "pid": p.popen.pid}
-            else:
-                stats[p.service.name] = {"cpu_percent": 0.0, "memory_mb": 0.0, "pid": p.popen.pid}
+                    continue
+            stats[p.service.name] = {
+                "cpu_percent": round(total_cpu, 1),
+                "memory_mb": round(total_rss / (1024 * 1024), 1),
+                "pid": p.popen.pid,
+            }
         return stats
+
+    def _pids_del_arbol(self, pid: int) -> list[int]:
+        """El pid del servicio y los de su descendencia.
+
+        Con `shell=True` el hijo directo es el shell y el servidor de verdad es
+        un nieto, asi que sumar solo el padre daria una memoria de juguete.
+        """
+        try:
+            parent = psutil.Process(pid)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return []
+        pids = [pid]
+        try:
+            pids.extend(hijo.pid for hijo in parent.children(recursive=True))
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+        return pids
 
     def down(self) -> None:
         """Apaga en orden inverso al de arranque. Correrlo dos veces no hace nada."""

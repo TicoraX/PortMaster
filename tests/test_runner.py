@@ -841,14 +841,22 @@ def test_service_auto_restart_on_failure(tmp_path, free_ports):
         engine.down()
 
 
-def test_runner_resource_stats(tmp_path, free_ports):
+def test_runner_resource_stats(tmp_path, free_ports, monkeypatch):
+    """Mide, no solo devuelve las claves.
+
+    El test de antes preguntaba `"cpu_percent" in stats["srv"]`, o sea la forma.
+    Estaba verde mientras el numero era 0.0 para siempre, porque `cpu_percent`
+    resta contra la lectura anterior del mismo objeto Process y el codigo lo
+    recreaba en cada llamada. El servicio de abajo quema CPU a proposito: si la
+    linea base se pierde, esto se pone en 0.0 y el test falla.
+    """
     (port,) = free_ports(1)
     stack = stack_from(
         tmp_path,
         f"""
         services:
           srv:
-            command: {sys.executable} -c "import socket, time; s = socket.socket(); s.bind(('127.0.0.1', {port})); s.listen(); time.sleep(60)"
+            command: {sys.executable} -c "import socket, itertools; s = socket.socket(); s.bind(('127.0.0.1', {port})); s.listen(); any(False for _ in itertools.count())"
             port: {port}
         """,
     )
@@ -857,10 +865,23 @@ def test_runner_resource_stats(tmp_path, free_ports):
         engine.up()
         stats = engine.resource_stats()
         assert "srv" in stats
-        assert "memory_mb" in stats["srv"]
-        assert "cpu_percent" in stats["srv"]
         assert stats["srv"]["memory_mb"] > 0
         assert stats["srv"]["pid"] is not None
+        assert stats["srv"]["cpu_percent"] > 0, (
+            f"un bucle ocupado tiene que consumir CPU, y midio {stats['srv']['cpu_percent']}"
+        )
+
+        # Segunda lectura: el camino que recorre el sondeo de la interfaz cada
+        # 2.5s. Tiene que seguir midiendo y ademas no pagar el respiro, que es
+        # para lo unico que sirve conservar los Process entre llamadas. Sin
+        # contar los sleep, quitar el cache dejaba este test en verde.
+        # El delta se toma contra la lectura anterior, asi que hay que dejar
+        # pasar tiempo de verdad, como hace el sondeo cada 2.5s.
+        time.sleep(0.3)
+        dormidas = []
+        monkeypatch.setattr(runner.time, "sleep", lambda s: dormidas.append(s))
+        assert engine.resource_stats()["srv"]["cpu_percent"] > 0
+        assert dormidas == [], f"la segunda lectura no deberia esperar, y espero {dormidas}"
     finally:
         engine.down()
 

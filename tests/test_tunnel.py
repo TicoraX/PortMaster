@@ -228,7 +228,7 @@ def test_tailscale_no_confunde_un_enlace_del_log_con_el_tunel():
     assert extract("una linea sin ninguna url") is None
 
 
-def test_el_mcp_cierra_sus_tuneles_al_terminar_la_sesion(proveedor_falso):
+def test_el_mcp_cierra_sus_tuneles_al_terminar_la_sesion(tmp_path, proveedor_falso):
     """`portmaster_share` abria el tunel y nadie lo cerraba nunca.
 
     Es el mismo agujero que `server._ciclo_de_vida` ya documenta para la
@@ -242,7 +242,18 @@ def test_el_mcp_cierra_sus_tuneles_al_terminar_la_sesion(proveedor_falso):
     proveedor_falso("cloudflared", lineas)
     mcp.cerrar_tuneles()  # arrancar de cero: el registro es de modulo
 
-    salida = mcp._execute_tool("portmaster_share", {"port": 3000, "provider": "cloudflared"})
+    # `portmaster_share` solo publica puertos que el proyecto declara, asi que
+    # el test necesita un proyecto. Antes corria contra el cwd, que es este
+    # repo, que no tiene stack.yaml: la validacion nueva lo dejo en rojo y con
+    # el se cayo la unica prueba de que la sesion no deja el cliente vivo.
+    (tmp_path / "stack.yaml").write_text(
+        "services:\n  web:\n    command: echo web\n    port: 3000\n", encoding="utf-8"
+    )
+
+    salida = mcp._execute_tool(
+        "portmaster_share",
+        {"port": 3000, "provider": "cloudflared", "path": str(tmp_path)},
+    )
     assert esperada in salida
     assert len(mcp._tuneles) == 1
 
