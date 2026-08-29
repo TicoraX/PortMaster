@@ -163,7 +163,10 @@ worker | proceso terminado con codigo 3. Reiniciando automaticamente (intento 1/
 worker | proceso terminado con codigo 3. Reiniciando automaticamente (intento 2/2)...
 ```
 
-Al tercero deja de intentar y el stack se da por terminado.
+Agotados los reintentos, ese servicio queda abajo y no se vuelve a levantar. El
+resto del stack sigue como si nada: el seguimiento de logs continúa y el stack
+se da por terminado solo cuando no queda ningún servicio vivo. Con un solo
+servicio declarado son la misma cosa, con varios no.
 
 Dos límites que conviene saber antes de apoyarse en esto. El primero es que el
 vigilante vive en el seguimiento de logs, o sea que `restart` actúa mientras

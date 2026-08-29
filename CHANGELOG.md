@@ -50,6 +50,14 @@ esquema de `stack.yaml` y las rutas de la API local.
   `r.kind`, cuando el campo se llama `level`. La herramienta `portmaster_doctor`
   no podía funcionar.
 - **`portmaster_free_port` no validaba el rango del puerto** antes de escanear.
+- **Un `pre_start` o un `post_start` en curso sobrevivía al apagado.** Corrían
+  con `subprocess.run`, que no deja handle, así que `down` no tenía a quién
+  matar: volvía en el acto y el hook seguía hasta su presupuesto de 900s. Ahora
+  quedan registrados y el apagado los baja con `_terminate_tree`, como el
+  `CLAUDE.md` pide para todo lo que se lance con `shell=True`.
+- **El `stop:` de un servicio podía correr dos veces a la vez.** `restart` baja
+  el proceso viejo con el lock suelto, y en esa ventana `down` copiaba la lista
+  y lo encontraba todavía ahí. Ahora hay un solo responsable por proceso.
 
 ### Cambiado
 

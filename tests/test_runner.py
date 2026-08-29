@@ -1025,3 +1025,103 @@ def test_un_stop_que_limpia_su_cache_no_queda_bloqueado(tmp_path, free_ports):
         "el stop no llego a ejecutarse: lo bloquearon por parecerse a un "
         "comando destructivo"
     )
+
+
+def test_apagar_mata_el_pre_start_que_estaba_corriendo(tmp_path, free_ports):
+    """Un hook en curso sobrevivia al apagado.
+
+    `pre_start` corria con `subprocess.run` y nadie guardaba el proceso, asi que
+    `down` no tenia a quien matar: volvia en el acto y el hook seguia hasta su
+    presupuesto de DETACHED_TIMEOUT, o sea 900s. Es el mismo agujero que ya
+    costo caro con los tuneles, y va contra lo que el CLAUDE.md fija: cualquier
+    cosa lanzada con `shell=True` se baja con `_terminate_tree`.
+
+    El hook de abajo reescribe un contador cada 0.5s. Si sigue vivo despues del
+    apagado, el archivo cambia; si murio, se queda quieto. Se afirma el efecto y
+    no que se haya llamado a nadie.
+    """
+    (port,) = free_ports(1)
+    marca = tmp_path / "contador"
+    hook = (
+        f'{sys.executable} -c "import pathlib,time; p=pathlib.Path(r\'{marca}\'); '
+        "[(p.write_text(str(i)), time.sleep(0.5)) for i in range(60)]\""
+    )
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "{SERVER.format(port=port)}"
+            port: {port}
+            pre_start: {hook}
+        """,
+    )
+    engine = make_runner(stack)
+    arranque = threading.Thread(target=lambda: _tragar(engine.up), daemon=True)
+    arranque.start()
+
+    limite = time.monotonic() + 20
+    while not marca.exists() and time.monotonic() < limite:
+        time.sleep(0.05)
+    assert marca.exists(), "el pre_start nunca arranco"
+
+    engine.down()
+
+    antes = marca.read_text()
+    time.sleep(2)
+    assert marca.read_text() == antes, (
+        "el pre_start siguio corriendo despues del apagado: quedo un proceso "
+        "huerfano que nadie va a bajar"
+    )
+    arranque.join(timeout=30)
+
+
+def _tragar(fn):
+    """`up` aborta con StartupError cuando el apagado lo corta, y esta bien."""
+    try:
+        fn()
+    except Exception:
+        pass
+
+
+def test_el_stop_de_un_servicio_no_corre_dos_veces(tmp_path, free_ports):
+    """`restart` y `down` podian apagar el mismo proceso a la vez.
+
+    `restart` baja el viejo con el lock suelto, y en esa ventana `down` copia la
+    lista y lo encuentra todavia ahi: los dos corrian el `stop:` del servicio.
+    Con un `docker compose stop` de por medio es ruido, pero el comando lo
+    escribe el usuario y no tiene por que ser idempotente.
+
+    El `stop` de abajo cuenta sus corridas agregando una linea al archivo.
+    """
+    (port,) = free_ports(1)
+    cuenta = tmp_path / "veces"
+    contar = (
+        f"{sys.executable} -c \"import pathlib; p=pathlib.Path(r'{cuenta}'); "
+        "p.write_text(p.read_text() + 'x' if p.exists() else 'x')\""
+    )
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "{SERVER.format(port=port)}"
+            port: {port}
+            stop: {contar}
+        """,
+    )
+    engine = make_runner(stack)
+    engine.up()
+    viejo = engine.procs[0]
+
+    # Los dos apagados del mismo proceso, a la vez, que es la carrera real.
+    hilos = [threading.Thread(target=lambda: engine._stop_one(viejo)) for _ in range(4)]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join(timeout=30)
+
+    assert cuenta.read_text() == "x", (
+        f"el stop corrio {len(cuenta.read_text())} veces en vez de una"
+    )
+    engine.down()
