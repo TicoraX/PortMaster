@@ -40,7 +40,14 @@ Requiere Python 3.10 o superior. Funciona en Windows, macOS y Linux.
 | `portmaster share [target]` | Expone un servicio local a internet mediante un túnel seguro |
 | `portmaster clean` | Limpia Docker por categorías: contenedores parados, imágenes sin tag, redes sin usar y caché de build. Los volúmenes van aparte, con `--volumes`. Pregunta antes |
 | `portmaster mcp` | Inicia el servidor Model Context Protocol (MCP) sobre stdio para IA |
+| `portmaster test-stack` | Valida el `stack.yaml` sin arrancar nada: orden, dependencias y puertos |
+| `portmaster history` | Últimos arranques del proyecto, con duración y resultado |
+| `portmaster logs` | Logs del proyecto que corre en `serve`, con `--follow` para seguirlos |
+| `portmaster stats` | CPU y memoria de los servicios que corren en `serve` (alias: `top`) |
 | `portmaster version` | Versión instalada (también `--version`) |
+
+`logs` y `stats` consultan al `portmaster serve` que ya tengas abierto, así que
+necesitan que esté corriendo. `history` y `test-stack` leen del disco y no.
 
 Cada uno con `--help`.
 
@@ -50,7 +57,15 @@ Cada uno con `--help`.
 portmaster up
 portmaster up --profile backend    # solo un subconjunto
 portmaster up --no-free            # no tocar los puertos ocupados
+portmaster up --env-file .env.qa   # carga ese .env antes de arrancar
 ```
+
+`--env-file` no reemplaza al `env_file:` de `stack.yaml`, se suma: carga el
+archivo en el entorno del proceso antes de resolver el stack, así que lo ven
+todos los servicios. Es para la corrida puntual contra otro entorno, sin editar
+el archivo. A diferencia de `env_file:`, acepta rutas fuera de la raíz del
+proyecto, porque acá la ruta la escribiste vos en la terminal y no viene de un
+archivo de un repo ajeno.
 
 Antes de arrancar libera los puertos declarados que tenga otro proceso, y
 pregunta antes de cerrar cada uno. Los que ya publica Docker los saltea: ahí

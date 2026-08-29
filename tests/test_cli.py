@@ -898,3 +898,29 @@ def test_up_env_file_unwraps_quotes(tmp_path, monkeypatch):
 
 
 
+
+
+def test_test_stack_no_revienta_en_una_consola_cp1252(tmp_path, monkeypatch):
+    """El comando terminaba en traceback despues de validar bien.
+
+    Imprimia un `✓`, que no existe en cp1252, o sea la pagina de codigos
+    con la que sale la consola de Windows. `CliRunner` captura a un buffer
+    UTF-8 y no lo hubiera visto nunca: hace falta un proceso de verdad con la
+    codificacion de salida forzada, que es donde el usuario lo encontro.
+    """
+    (tmp_path / "stack.yaml").write_text(
+        "services:\n  api:\n    command: echo hola\n    ready: none\n", encoding="utf-8"
+    )
+    entorno = dict(os.environ, PYTHONIOENCODING="cp1252")
+    res = subprocess.run(
+        [sys.executable, "-m", "portmaster", "test-stack"],
+        cwd=tmp_path,
+        env=entorno,
+        capture_output=True,
+        text=True,
+        encoding="cp1252",
+        errors="replace",
+        timeout=60,
+    )
+    assert "UnicodeEncodeError" not in (res.stdout + res.stderr), res.stdout + res.stderr
+    assert res.returncode == 0, res.stdout + res.stderr

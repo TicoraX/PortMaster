@@ -1,5 +1,6 @@
 """Procesos reales. Un orquestador probado con mocks no prueba nada."""
 
+import dataclasses
 import io
 import socket
 import sys
@@ -12,7 +13,7 @@ import psutil
 import pytest
 from rich.console import Console
 
-from portmaster import config, runner
+from portmaster import config, ports, runner
 
 # Servidor minimo que anuncia su arranque y se queda escuchando.
 SERVER = (
@@ -884,6 +885,70 @@ def test_runner_resource_stats(tmp_path, free_ports, monkeypatch):
         assert dormidas == [], f"la segunda lectura no deberia esperar, y espero {dormidas}"
     finally:
         engine.down()
+
+
+def test_apagar_no_espera_al_pre_start_de_un_reinicio(tmp_path, free_ports):
+    """`restart` corria `_spawn_proc` con `_procs_lock` tomado.
+
+    `_spawn_proc` ejecuta `pre_start`, y su presupuesto es DETACHED_TIMEOUT:
+    900s. `down` necesita ese mismo lock para copiar la lista de procesos, asi
+    que apagar mientras un reinicio automatico estaba en su hook se quedaba
+    esperando el hook entero. Aca el `pre_start` dura mas que el margen que se
+    le da al apagado: si el lock vuelve, esto se cuelga y falla.
+    """
+    (port,) = free_ports(1)
+    marca = tmp_path / "pre_start_arranco"
+    lento = (
+        f"{sys.executable} -c \"import pathlib, time; "
+        f"pathlib.Path(r'{marca}').write_text('x'); time.sleep(20)\""
+    )
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "{SERVER.format(port=port)}"
+            port: {port}
+        """,
+    )
+    engine = make_runner(stack)
+    try:
+        engine.up()
+        # El hook se agrega despues del arranque: interesa el reinicio, no el
+        # `up`, y asi el test no paga los 20s dos veces.
+        original = engine.procs[0].service
+        engine.procs[0].service = dataclasses.replace(original, pre_start=lento)
+
+        fallos = []
+
+        def reiniciar():
+            try:
+                engine.restart("srv")
+            except Exception as exc:  # el apagado lo aborta, y eso es correcto
+                fallos.append(exc)
+
+        hilo = threading.Thread(target=reiniciar, daemon=True)
+        hilo.start()
+
+        limite = time.monotonic() + 15
+        while not marca.exists() and time.monotonic() < limite:
+            time.sleep(0.05)
+        assert marca.exists(), "el pre_start del reinicio nunca arranco"
+
+        t0 = time.monotonic()
+        engine.down()
+        tardanza = time.monotonic() - t0
+        assert tardanza < 8, (
+            f"apagar espero {tardanza:.1f}s al pre_start del reinicio, "
+            "o sea que el lock volvio a cubrir el hook"
+        )
+    finally:
+        engine.down()
+        hilo.join(timeout=30)
+
+    # El proceso que el reinicio alcanzo a levantar no puede quedar vivo: si
+    # `down` ya paso por la lista, lo baja el que lo arranco.
+    assert ports.is_free(port), "el reinicio dejo el servicio publicando el puerto"
 
 
 def test_runner_follow_down_clean_shutdown(tmp_path, free_ports):

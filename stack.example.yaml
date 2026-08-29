@@ -26,6 +26,8 @@ services:
     pre_start: npm run build      # comando síncrono previo al arranque
     post_start: npm run seed      # comando síncrono posterior a la confirmación de salud
     url: http://localhost:8080/docs   # adonde lleva "Abrir". Admite ${VAR}
+    restart: on-failure  # no | on-failure | always. Solo mientras se siguen los logs
+    max_retries: 3       # tope de reintentos. La cuenta no se reinicia sola
     env:
       DATABASE_URL: postgres://localhost:5432/app
 

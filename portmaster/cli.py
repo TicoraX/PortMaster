@@ -970,22 +970,26 @@ def test_stack_cmd(
 
     console.print(f"Validando stack [bold]{stack.name}[/] en [dim]{stack.root}[/]...")
     services = stack.resolve()
-    console.print(f"  • [green]OK:[/] {len(services)} servicio(s) resueltos en orden topológico:")
+    console.print(f"[green]OK:[/] {len(services)} servicio(s) resueltos en orden topológico:")
     for s in services:
         deps = f" (espera a: {', '.join(s.needs)})" if s.needs else ""
         port_info = f" -> puerto {s.port}" if s.port else f" ({s.ready})"
-        console.print(f"    - [cyan]{s.name}[/]: [dim]{s.command}[/]{port_info}{deps}")
+        console.print(f"  - [cyan]{s.name}[/]: [dim]{s.command}[/]{port_info}{deps}")
 
     # Verificar estado de puertos
     declared_ports = stack.ports()
     if declared_ports:
         occupied = [p for p in declared_ports if not ports.is_free(p)]
         if occupied:
-            console.print(f"  • [yellow]Aviso:[/] Puertos actualmente en uso: {', '.join(map(str, occupied))}")
+            console.print(f"[yellow]Aviso:[/] Puertos actualmente en uso: {', '.join(map(str, occupied))}")
         else:
-            console.print("  • [green]OK:[/] Todos los puertos declarados están libres")
+            console.print("[green]OK:[/] Todos los puertos declarados están libres")
 
-    console.print("\n[bold green]✓ Stack validado con éxito.[/]")
+    # Sin el `✓` que habia aca: no existe en cp1252, o sea la pagina de
+    # codigos con la que sale la consola de Windows, y el comando entero
+    # terminaba en UnicodeEncodeError despues de haber validado bien. Los
+    # acentos si entran en cp1252, por eso se quedan.
+    console.print("\n[bold green]Stack validado con éxito.[/]")
 
 
 @app.command("logs")

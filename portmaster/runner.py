@@ -278,11 +278,21 @@ class Runner:
 
         try:
             self._stop_one(old)
+            # `_spawn_proc` corre `pre_start`, y su presupuesto es
+            # DETACHED_TIMEOUT: 900s. Con el lock tomado, un apagado pedido
+            # mientras tanto se quedaba esperando ese comando, porque `down`
+            # necesita el mismo lock para copiar la lista.
+            proc = self._spawn_proc(old.service, old.color)
             with self._procs_lock:
-                if self._down or self._cancel.is_set():
-                    raise StartupError("apagado en curso, no se puede reiniciar")
-                proc = self._spawn_proc(old.service, old.color)
-                self.procs[index] = proc
+                tarde = self._down or self._cancel.is_set()
+                if not tarde:
+                    self.procs[index] = proc
+            if tarde:
+                # El apagado ya paso por la lista: a este proceso no lo va a ver
+                # nadie mas, asi que lo baja quien lo arranco. Mismo trato que
+                # en `_launch` cuando `_register` devuelve False.
+                self._stop_one(proc)
+                raise StartupError("apagado en curso, no se puede reiniciar")
         finally:
             self.restarting = False
         self._wait_ready(proc)
