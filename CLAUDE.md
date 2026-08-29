@@ -85,6 +85,36 @@ roles tipograficos salen de stacks del sistema.
 probar un modulo cuyo trabajo es hablar con el sistema operativo. La CI corre en
 Linux, macOS y Windows porque los tres divergen justo ahi.
 
+### Correrla sin esperar seis minutos
+
+Casi todo el costo esta en tres archivos, que son justo los que arrancan
+procesos y esperan healthchecks:
+
+| Que corro | Tests | Serial |
+|---|---|---|
+| Todo | 388 | 6m 30s |
+| `test_runner` + `test_server` + `test_cli` | 188 | 6m 12s |
+| Todo lo demas | 200 | 17s |
+
+O sea que la mitad de la suite cuesta el 4% del tiempo. Durante el ciclo,
+nombrar el archivo (`pytest tests/test_runner.py`) alcanza casi siempre.
+
+Antes de commitear va entera, y va **en paralelo**: `pytest -q -n auto`, que
+baja de 6m30s a poco mas de un minuto. El tiempo es espera, no CPU, asi que
+escala casi lineal con los workers.
+
+Lo que hace seguro el paralelo es `banda()` en `tests/conftest.py`. `free_ports`
+bindea un puerto al azar para ver si esta libre y lo suelta antes de
+devolverlo, y esa ventana entre soltar y usar la disputa cualquiera. De a uno
+la disputan los tests entre si, que es lo que el propio conftest ya
+documentaba despues de tres rojos de CI; con `-n`, cada worker es un proceso
+aparte y la disputan todos a la vez. Darle a cada worker su franja de la banda
+hace que la carrera **no exista**, en vez de hacerla menos probable. Sin xdist,
+o con un `PYTEST_XDIST_WORKER` que no se pueda leer, se usa la banda entera.
+
+No aflojar eso para "simplificar". Un intermitente que aparece una vez cada
+veinte corridas cuesta mas caro que uno que aparece siempre.
+
 ### Un test verde no prueba nada por si solo
 
 Prueba que el test corrio. Que ademas pruebe el codigo hay que ganarselo, y en

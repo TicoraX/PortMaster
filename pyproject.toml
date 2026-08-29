@@ -45,7 +45,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6"]
+# pytest-xdist no es un lujo: la suite arranca procesos y espera
+# healthchecks, o sea que casi todo su tiempo es espera y no CPU. En
+# paralelo baja de 6m30s a poco mas de un minuto. La reserva de puertos de
+# `tests/conftest.py` reparte una franja por worker para que eso sea seguro.
+dev = ["pytest>=8", "pytest-xdist>=3", "httpx>=0.27", "ruff>=0.6"]
 
 [project.urls]
 Homepage = "https://github.com/TicoraX/PortMaster"
