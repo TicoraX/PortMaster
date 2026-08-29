@@ -91,7 +91,8 @@ def test_mcp_free_port_con_el_puerto_libre_no_mata_nada(free_ports, monkeypatch)
     assert llamadas == []
 
 
-def test_mcp_tool_call_share(monkeypatch):
+def test_mcp_tool_call_share(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text("services:\n  web:\n    command: echo web\n    port: 3000\n", encoding="utf-8")
     monkeypatch.setattr(
         mcp.tunnel,
         "start_tunnel",
@@ -108,7 +109,7 @@ def test_mcp_tool_call_share(monkeypatch):
         "method": "tools/call",
         "params": {
             "name": "portmaster_share",
-            "arguments": {"port": 3000},
+            "arguments": {"port": 3000, "path": str(tmp_path)},
         },
     }
     res = mcp.handle_request(req)
@@ -352,4 +353,42 @@ def test_mcp_tool_call_ports(free_ports):
     assert len(data) == 1
     assert data[0]["port"] == port
     assert data[0]["free"] is True
+
+
+def test_mcp_share_rechaza_puerto_ajeno(tmp_path):
+    (tmp_path / "stack.yaml").write_text("services:\n  web:\n    command: echo web\n    port: 3000\n", encoding="utf-8")
+    req = {
+        "jsonrpc": "2.0",
+        "id": 33,
+        "method": "tools/call",
+        "params": {"name": "portmaster_share", "arguments": {"port": 5432, "path": str(tmp_path)}},
+    }
+    res = mcp.handle_request(req)
+    assert res["result"].get("isError") is True
+    assert "no pertenece a los puertos declarados" in res["result"]["content"][0]["text"]
+
+
+def test_mcp_action_budget_limit(monkeypatch):
+    with mcp._action_lock:
+        mcp._action_timestamps.clear()
+
+    # Simular que se consumieron todas las acciones de la ventana
+    now = time.monotonic()
+    with mcp._action_lock:
+        mcp._action_timestamps.extend([now] * mcp._MAX_ACTIONS_PER_WINDOW)
+
+    req = {
+        "jsonrpc": "2.0",
+        "id": 34,
+        "method": "tools/call",
+        "params": {"name": "portmaster_ports", "arguments": {"ports": [8080]}},
+    }
+    res = mcp.handle_request(req)
+    assert res["result"].get("isError") is True
+    assert "Límite de acciones MCP excedido" in res["result"]["content"][0]["text"]
+
+    # Limpiar estado
+    with mcp._action_lock:
+        mcp._action_timestamps.clear()
+
 

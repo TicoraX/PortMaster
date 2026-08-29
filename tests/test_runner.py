@@ -840,4 +840,29 @@ def test_service_auto_restart_on_failure(tmp_path, free_ports):
         engine.down()
 
 
+def test_runner_resource_stats(tmp_path, free_ports):
+    (port,) = free_ports(1)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "import socket, time; s = socket.socket(); s.bind(('127.0.0.1', {port})); s.listen(); time.sleep(60)"
+            port: {port}
+        """,
+    )
+    engine = make_runner(stack)
+    try:
+        engine.up()
+        stats = engine.resource_stats()
+        assert "srv" in stats
+        assert "memory_mb" in stats["srv"]
+        assert "cpu_percent" in stats["srv"]
+        assert stats["srv"]["memory_mb"] > 0
+        assert stats["srv"]["pid"] is not None
+    finally:
+        engine.down()
+
+
+
 

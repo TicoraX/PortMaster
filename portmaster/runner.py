@@ -269,6 +269,39 @@ class Runner:
             self.restarting = False
         self._wait_ready(proc)
 
+    def resource_stats(self) -> dict[str, dict[str, float]]:
+        """Calcula el uso de recursos (CPU % y Memoria RSS en MB) de cada servicio activo."""
+        stats: dict[str, dict[str, float]] = {}
+        for p in list(self.procs):
+            if p.popen.poll() is None:
+                try:
+                    parent = psutil.Process(p.popen.pid)
+                    all_procs = [parent]
+                    try:
+                        all_procs.extend(parent.children(recursive=True))
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+
+                    total_rss_bytes = 0
+                    total_cpu = 0.0
+                    for proc in all_procs:
+                        try:
+                            total_cpu += proc.cpu_percent(interval=None)
+                            total_rss_bytes += proc.memory_info().rss
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            continue
+
+                    stats[p.service.name] = {
+                        "cpu_percent": round(total_cpu, 1),
+                        "memory_mb": round(total_rss_bytes / (1024 * 1024), 1),
+                        "pid": p.popen.pid,
+                    }
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    stats[p.service.name] = {"cpu_percent": 0.0, "memory_mb": 0.0, "pid": p.popen.pid}
+            else:
+                stats[p.service.name] = {"cpu_percent": 0.0, "memory_mb": 0.0, "pid": p.popen.pid}
+        return stats
+
     def down(self) -> None:
         """Apaga en orden inverso al de arranque. Correrlo dos veces no hace nada."""
         with self._procs_lock:

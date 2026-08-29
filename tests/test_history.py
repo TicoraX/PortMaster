@@ -38,3 +38,30 @@ def test_history_concurrent_writes(tmp_path, monkeypatch):
 
     entries = history.read(pid, limit=100)
     assert len(entries) == 50
+
+
+def test_history_tail_reading_order(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "HOME", tmp_path)
+    pid = "orderedproj"
+    for i in range(20):
+        history.append(pid, {"index": i})
+
+    last_5 = history.read(pid, limit=5)
+    assert len(last_5) == 5
+    assert [x["index"] for x in last_5] == [15, 16, 17, 18, 19]
+
+
+def test_history_rotation(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "HOME", tmp_path)
+    pid = "rotateproj"
+    # Escribir payload pesado para activar la rotación
+    payload = "x" * 1000
+    for i in range(150):
+        history.append(pid, {"index": i, "payload": payload})
+
+    file_path = history._history_file(pid)
+    assert file_path.is_file()
+    entries = history.read(pid, limit=10)
+    assert len(entries) == 10
+    assert entries[-1]["index"] == 149
+

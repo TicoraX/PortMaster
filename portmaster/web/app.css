@@ -451,7 +451,7 @@ body {
    "api 8080 listo" como una unidad y no como tres datos sueltos. */
 .service {
   display: grid;
-  grid-template-columns: minmax(0, 8rem) 4rem minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 8rem) 4rem minmax(0, 1fr) auto auto;
   align-items: center;
   gap: var(--space-sm) var(--space-md);
   padding: var(--space-xs) var(--space-sm);
@@ -566,6 +566,17 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.service__metrics {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-ink-2);
+  padding: 0.15rem 0.4rem;
+  background: var(--color-paper-3);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  align-self: center;
 }
 
 .service__act {
@@ -1238,6 +1249,11 @@ body {
 
   .service__state {
     grid-column: 1 / -1;
+  }
+
+  .service__metrics {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 
   .service__act {

@@ -765,6 +765,34 @@ function updateCard(entry, project) {
     );
   }
 
+  if (project.state === "running") {
+    api(`/api/projects/${project.id}/metrics`).then((res) => {
+      const metrics = res?.metrics || {};
+      const items = services.querySelectorAll(".service");
+      project.services.forEach((s, idx) => {
+        const item = items[idx];
+        if (!item) return;
+        const badge = item.querySelector(".service__metrics");
+        if (badge && metrics[s.name]) {
+          const m = metrics[s.name];
+          if (m.memory_mb > 0 || m.cpu_percent > 0) {
+            badge.textContent = `${m.cpu_percent}% · ${m.memory_mb} MB`;
+            badge.setAttribute("aria-label", `CPU: ${m.cpu_percent}%, Memoria: ${m.memory_mb} MB`);
+            badge.hidden = false;
+          } else {
+            badge.hidden = true;
+          }
+        } else if (badge) {
+          badge.hidden = true;
+        }
+      });
+    }).catch(() => {
+      services.querySelectorAll(".service__metrics").forEach((b) => {
+        b.hidden = true;
+      });
+    });
+  }
+
   const select = root.querySelector(".profile__select");
   const wanted = [project.default.join(","), ...project.profiles].join("|");
   if (select.dataset.options !== wanted) {
@@ -1222,6 +1250,10 @@ async function refreshHealth() {
 
   const puedePedirse = "Notification" in window && Notification.permission === "default";
   ui.notify.hidden = !ahora.size || !puedePedirse;
+  if (!ui.notify.hidden) {
+    ui.notify.textContent = "Avisarme al caer";
+    ui.notify.title = "Activar notificaciones de escritorio para servicios caídos";
+  }
 
   if (healthKnown && nuevos.length && window.Notification?.permission === "granted") {
     for (const caido of nuevos) {
@@ -1239,9 +1271,18 @@ ui.notify.addEventListener("click", async () => {
   // El permiso se pide con un click y nunca al cargar: un pedido de
   // notificaciones que aparece solo es lo que hace que la gente lo deniegue
   // para siempre.
-  if (!("Notification" in window)) return;
-  await Notification.requestPermission();
-  ui.notify.hidden = true;
+  if (!("Notification" in window)) {
+    flash("Tu navegador no soporta notificaciones de escritorio");
+    return;
+  }
+  const perm = await Notification.requestPermission();
+  if (perm === "granted") {
+    flash("Notificaciones de escritorio activadas");
+    ui.notify.hidden = true;
+  } else if (perm === "denied") {
+    flash("Permiso de notificaciones denegado en el navegador");
+    ui.notify.hidden = true;
+  }
 });
 
 const ORPHAN_EVERY = 4; // cada N ciclos de POLL_MS

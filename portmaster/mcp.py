@@ -6,11 +6,14 @@ import io
 import json
 import os
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
 from . import (
     __version__,
+    config,
     detect,
     docker,
     doctor,
@@ -210,7 +213,26 @@ def handle_request(req: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+_ACTION_BUDGET_WINDOW = 60.0
+_MAX_ACTIONS_PER_WINDOW = 30
+_action_timestamps: list[float] = []
+_action_lock = threading.Lock()
+
+
+def _check_action_budget() -> None:
+    now = time.monotonic()
+    with _action_lock:
+        while _action_timestamps and _action_timestamps[0] < now - _ACTION_BUDGET_WINDOW:
+            _action_timestamps.pop(0)
+        if len(_action_timestamps) >= _MAX_ACTIONS_PER_WINDOW:
+            raise RuntimeError(
+                f"Límite de acciones MCP excedido ({_MAX_ACTIONS_PER_WINDOW} llamadas/min). Espera unos momentos."
+            )
+        _action_timestamps.append(now)
+
+
 def _execute_tool(name: str, args: dict[str, Any]) -> str:
+    _check_action_budget()
     cwd = Path(args.get("path") or Path.cwd())
 
     if name == "portmaster_status":
@@ -262,7 +284,7 @@ def _execute_tool(name: str, args: dict[str, Any]) -> str:
         return json.dumps(data, indent=2)
 
     if name == "portmaster_free_port":
-        port = int(args["port"])
+        port = ports.check_port(int(args["port"]))
         status = ports.scan(port)
         if status.free:
             return f"El puerto {port} ya esta libre."
@@ -281,6 +303,18 @@ def _execute_tool(name: str, args: dict[str, Any]) -> str:
 
     if name == "portmaster_share":
         port = ports.check_port(int(args["port"]))
+        if port == doctor.UI_PORT:
+            raise ValueError(f"No se permite compartir el puerto de gestión de PortMaster ({port}).")
+        try:
+            stack = detect.stack_for(cwd)
+            allowed = set(stack.ports())
+            if not allowed or port not in allowed:
+                raise ValueError(
+                    f"El puerto {port} no pertenece a los puertos declarados de {stack.name} ({sorted(allowed)}). "
+                    "Por seguridad, solo se pueden compartir puertos válidos del proyecto."
+                )
+        except config.ConfigError as exc:
+            raise ValueError(f"No se puede compartir el puerto sin un stack.yaml válido: {exc}")
         provider = args.get("provider")
         tun = tunnel.start_tunnel(port, provider=provider)
         _tuneles.append(tun)

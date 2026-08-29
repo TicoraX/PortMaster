@@ -1601,3 +1601,26 @@ def test_get_history_endpoint(client, tmp_path, monkeypatch):
     assert len(data["history"]) >= 1
     assert data["history"][0]["duration_s"] == 2.5
 
+
+def test_get_metrics_endpoint(client, proyecto):
+    path, _ = proyecto
+    pid = registry.project_id(path)
+    # Sin arrancar, retorna métricas vacías
+    res = client.get(f"/api/projects/{pid}/metrics")
+    assert res.status_code == 200
+    assert res.json() == {"metrics": {}}
+
+    # Arrancado, retorna métricas del stack
+    client.post(f"/api/projects/{pid}/up", json={})
+    esperar_listo(client)
+    try:
+        res = client.get(f"/api/projects/{pid}/metrics")
+        assert res.status_code == 200
+        metrics = res.json().get("metrics", {})
+        assert "srv" in metrics
+        assert "memory_mb" in metrics["srv"]
+        assert "cpu_percent" in metrics["srv"]
+    finally:
+        client.post(f"/api/projects/{pid}/down")
+
+

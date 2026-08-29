@@ -180,6 +180,16 @@ def test_doctor_no_muestra_valores_del_dotenv(tmp_path, monkeypatch):
     assert "el .env no tiene: OTRA" in _sin_saltos(resultado.output)
 
 
+def test_doctor_detecta_placeholders_en_dotenv(tmp_path, monkeypatch):
+    _proyecto_con_env(tmp_path, "API_KEY=x\n", "API_KEY=CHANGEME\n")
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["doctor"])
+    assert "valores de ejemplo/inseguros en .env: API_KEY" in _sin_saltos(resultado.output)
+    assert resultado.exit_code == 0
+
+
+
 def test_doctor_desde_subcarpeta_no_reporta_colision_consigo_mismo(tmp_path, monkeypatch):
     root = tmp_path / "mi_proyecto"
     root.mkdir()
@@ -290,6 +300,15 @@ def test_down_con_un_stop_que_falla_sale_1(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     assert runner.invoke(cli.app, ["down"]).exit_code == 1
+
+
+def test_up_env_file_inexistente(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text("services:\n  web:\n    command: echo web\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    resultado = runner.invoke(cli.app, ["up", "--env-file", "no_existe.env"])
+    assert resultado.exit_code == 1
+    assert "No se encontró el archivo env" in resultado.output
+
 
 
 def _stack_con_puerto(tmp_path, port):
@@ -841,5 +860,14 @@ def test_cli_logs_sin_servidor(tmp_path, monkeypatch):
     resultado = runner.invoke(cli.app, ["logs", "--port", "59999"])
     assert resultado.exit_code == 1
     assert "No se pudo conectar" in resultado.output
+
+
+def test_cli_stats_sin_servidor(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text("services:\n  web:\n    command: echo web\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    resultado = runner.invoke(cli.app, ["stats", "--port", "59999"])
+    assert resultado.exit_code == 1
+    assert "No se pudo conectar" in resultado.output
+
 
 

@@ -647,6 +647,14 @@ def create_app(token: str | None = None) -> FastAPI:
     def get_history(pid: str) -> dict:
         return {"history": history.read(pid)}
 
+    @app.get("/api/projects/{pid}/metrics", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
+    def get_metrics(pid: str) -> dict:
+        with sessions_lock:
+            session = sessions.get(pid)
+        if session is None or session.engine is None:
+            return {"metrics": {}}
+        return {"metrics": session.engine.resource_stats()}
+
     @app.post("/api/projects", dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)])
     def add_project(body: AddProject) -> dict:
         try:

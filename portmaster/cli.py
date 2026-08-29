@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import psutil
@@ -242,6 +243,7 @@ def _free_ports(services: list[config.Service], yes: bool, force: bool) -> None:
 @app.command("up")
 def up_cmd(
     profile: str = typer.Option(None, "--profile", "-p", help="Perfil de stack.yaml."),
+    env_file: str = typer.Option(None, "--env-file", "-e", help="Ruta al archivo .env personalizado."),
     yes: bool = typer.Option(False, "--yes", "-y", help="No preguntar nada, arrancar."),
     force: bool = typer.Option(False, "--force", help="kill() si ignora terminate()."),
     free: bool = typer.Option(
@@ -250,13 +252,27 @@ def up_cmd(
     timeout: float = typer.Option(60.0, help="Segundos de espera por servicio."),
 ) -> None:
     """Levanta el stack: libera puertos, arranca en orden y sigue los logs."""
-    _levantar(Path.cwd(), profile, yes, force, free, timeout)
+    _levantar(Path.cwd(), profile, yes, force, free, timeout, env_file=env_file)
 
 
 def _levantar(
-    root: Path, profile: str | None, yes: bool, force: bool, free: bool, timeout: float
+    root: Path,
+    profile: str | None,
+    yes: bool,
+    force: bool,
+    free: bool,
+    timeout: float,
+    env_file: str | None = None,
 ) -> None:
     """El cuerpo de `up`, por raiz explicita. `switch` levanta otro directorio."""
+    if env_file:
+        custom_env = (root / env_file).resolve()
+        if not custom_env.is_file():
+            err.print(f"No se encontró el archivo env: {env_file}")
+            raise typer.Exit(1)
+        extra_vars = doctor._parse_env_keys(custom_env)
+        os.environ.update(extra_vars)
+
     try:
         stack = detect.stack_for(root)
         services = stack.resolve(profile)
@@ -1022,6 +1038,57 @@ def logs_cmd(
             break
 
         time.sleep(0.5)
+
+
+@app.command("stats")
+@app.command("top")
+def stats_cmd(
+    target: str = typer.Argument(None, help="Ruta al proyecto"),
+    server_port: int = typer.Option(7666, "--port", "-p", help="Puerto del servidor de PortMaster"),
+) -> None:
+    """Muestra el uso de CPU y memoria de los servicios en ejecución."""
+    import urllib.request
+
+    path = (Path.cwd() / (target or "")).resolve()
+    try:
+        stack = detect.stack_for(path)
+        pid = registry.project_id(stack.root)
+    except config.ConfigError as exc:
+        err.print(f"[red]Error:[/] {exc}")
+        raise typer.Exit(1)
+
+    token = registry.token()
+    base_url = f"http://127.0.0.1:{server_port}"
+    req = urllib.request.Request(
+        f"{base_url}/api/projects/{pid}/metrics",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        err.print(
+            f"[yellow]No se pudo conectar con PortMaster en {base_url}. Asegúrate de que `portmaster serve` está corriendo.[/]"
+        )
+        raise typer.Exit(1)
+
+    metrics = data.get("metrics", {})
+    if not metrics:
+        console.print(f"[dim]No hay servicios activos en {stack.name}.[/]")
+        return
+
+    table = Table(title=f"Métricas en tiempo real: {stack.name}")
+    table.add_column("Servicio", style="cyan")
+    table.add_column("PID", style="dim")
+    table.add_column("CPU %", justify="right")
+    table.add_column("Memoria (MB)", justify="right")
+
+    for name, s in metrics.items():
+        cpu = f"{s.get('cpu_percent', 0.0)}%"
+        mem = f"{s.get('memory_mb', 0.0)} MB"
+        table.add_row(name, str(s.get("pid", "-")), cpu, mem)
+
+    console.print(table)
 
 
 if __name__ == "__main__":
