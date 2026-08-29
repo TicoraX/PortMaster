@@ -4,7 +4,7 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
-## [Sin publicar]
+## [1.3.0] - 2026-08-29
 
 ### Agregado
 
