@@ -146,7 +146,8 @@ function flash(message, tone) {
 }
 
 async function act(button, work) {
-  button.disabled = true;
+  if (button.dataset.busy === "true") return;
+  button.setAttribute("aria-disabled", "true");
   button.dataset.busy = "true";
   try {
     await work();
@@ -154,7 +155,7 @@ async function act(button, work) {
   } catch (error) {
     flash(error.message, "bad");
   } finally {
-    button.disabled = false;
+    button.removeAttribute("aria-disabled");
     delete button.dataset.busy;
   }
 }
@@ -429,13 +430,58 @@ function buildCard(project) {
     });
   }
 
+  const copyLogsBtn = root.querySelector('[data-act="copy-logs"]');
+  if (copyLogsBtn) {
+    copyLogsBtn.setAttribute("aria-label", `Copiar logs de ${project.name}`);
+    copyLogsBtn.addEventListener("click", async () => {
+      if (!entry.rawLogs) {
+        flash("No hay logs disponibles para copiar", "neutral");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(entry.rawLogs);
+        flash("Logs copiados al portapapeles", "good");
+      } catch {
+        flash("No se pudo acceder al portapapeles", "bad");
+      }
+    });
+  }
+
+  const clearLogsBtn = root.querySelector('[data-act="clear-logs"]');
+  if (clearLogsBtn) {
+    clearLogsBtn.setAttribute("aria-label", `Limpiar logs de ${project.name}`);
+    clearLogsBtn.addEventListener("click", () => {
+      entry.rawLogs = "";
+      renderLogsText(entry);
+    });
+  }
+
   const logsButton = root.querySelector('[data-act="logs"]');
   logsButton.addEventListener("click", () => {
     entry.logsOpen = !entry.logsOpen;
     if (logsBox) logsBox.hidden = !entry.logsOpen;
-    else logs.hidden = !entry.logsOpen;
     logsButton.setAttribute("aria-expanded", String(entry.logsOpen));
-    if (entry.logsOpen) pullLogs(project.id, entry);
+    if (entry.logsOpen) {
+      entry.historyOpen = false;
+      root.querySelector(".history__box").hidden = true;
+      root.querySelector('[data-act="history"]').setAttribute("aria-expanded", "false");
+      pullLogs(project.id, entry);
+    }
+  });
+
+  const historyBox = root.querySelector(".history__box");
+  const historyButton = root.querySelector('[data-act="history"]');
+  historyButton.addEventListener("click", () => {
+    entry.historyOpen = !entry.historyOpen;
+    if (historyBox) historyBox.hidden = !entry.historyOpen;
+    historyButton.setAttribute("aria-expanded", String(entry.historyOpen));
+    if (entry.historyOpen) {
+      entry.logsOpen = false;
+      if (logsBox) logsBox.hidden = true;
+      logsButton.setAttribute("aria-expanded", "false");
+      entry.lastHistoryState = project.state;
+      pullHistory(project.id, entry);
+    }
   });
 
   cards.set(project.id, entry);
@@ -702,10 +748,42 @@ function updateCard(entry, project) {
     dockerWarn.hidden = !project.docker_down;
   }
 
+  // Solo reconstruir la lista de servicios si algo cambio. La huella
+  // serializa todo lo que afecta al render: estado, puerto, occupant,
+  // botones, marcas. En estado estable (90% del polling) esto evita
+  // destruir y reconstruir el DOM cada 2.5s, preservando la seleccion de
+  // texto, el foco del teclado y reduciendo GC.
   const services = root.querySelector(".services");
-  services.replaceChildren(
-    ...project.services.map((service) => renderService(service, project.id)),
+  const fingerprint = JSON.stringify(
+    project.services.map((s) => [s.name, s.state, s.port, s.openable, s.managed,
+      s.port_taken, s.shared_with, s.occupant, tunnelPorts.has(s.port)]),
   );
+  if (services.dataset.fingerprint !== fingerprint) {
+    services.dataset.fingerprint = fingerprint;
+    services.replaceChildren(
+      ...project.services.map((service) => renderService(service, project.id)),
+    );
+  }
+
+  const metrics = project.metrics || {};
+  const items = services.querySelectorAll(".service");
+  project.services.forEach((s, idx) => {
+    const item = items[idx];
+    if (!item) return;
+    const badge = item.querySelector(".service__metrics");
+    if (badge && metrics[s.name]) {
+      const m = metrics[s.name];
+      if (m.memory_mb > 0 || m.cpu_percent > 0) {
+        badge.textContent = `${m.cpu_percent}% · ${m.memory_mb} MB`;
+        badge.setAttribute("aria-label", `CPU: ${m.cpu_percent}%, Memoria: ${m.memory_mb} MB`);
+        badge.hidden = false;
+      } else {
+        badge.hidden = true;
+      }
+    } else if (badge) {
+      badge.hidden = true;
+    }
+  });
 
   const select = root.querySelector(".profile__select");
   const wanted = [project.default.join(","), ...project.profiles].join("|");
@@ -738,6 +816,11 @@ function updateCard(entry, project) {
   root.querySelector('[data-act="down"]').disabled = !algoVivo || stopping;
 
   if (entry.logsOpen) pullLogs(project.id, entry);
+  
+  if (entry.historyOpen && entry.lastHistoryState !== project.state) {
+    entry.lastHistoryState = project.state;
+    pullHistory(project.id, entry);
+  }
 }
 
 async function pullLogs(id, entry) {
@@ -781,6 +864,79 @@ function renderLogsText(entry) {
       : `Ningún renglón contiene "${filter}".`;
   }
   if (atBottom) logsEl.scrollTop = logsEl.scrollHeight;
+}
+
+async function pullHistory(id, entry, retries = 3) {
+  try {
+    const data = await api(`/api/projects/${id}/history`);
+    renderHistoryTable(entry, data.history || []);
+  } catch {
+    if (retries > 0) {
+      setTimeout(() => pullHistory(id, entry, retries - 1), 1000);
+    }
+  }
+}
+
+function renderHistoryTable(entry, runs) {
+  const tbody = entry.root.querySelector(".history__tbody");
+  if (!tbody) return;
+  
+  if (runs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4">No hay historial de arranques todavía.</td></tr>';
+    return;
+  }
+  
+  tbody.replaceChildren(
+    ...[...runs].reverse().map((r) => {
+      const tr = document.createElement("tr");
+      
+      const tdFecha = document.createElement("td");
+      let fechaTexto = "";
+      if (r.timestamp) {
+        try {
+          const d = new Date(r.timestamp);
+          if (!isNaN(d.getTime())) {
+            const pad = (n) => String(n).padStart(2, "0");
+            const yyyy = d.getFullYear();
+            const mm = pad(d.getMonth() + 1);
+            const dd = pad(d.getDate());
+            const hh = pad(d.getHours());
+            const min = pad(d.getMinutes());
+            fechaTexto = `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+          } else {
+            fechaTexto = r.timestamp.replace("T", " ").substring(0, 16);
+          }
+        } catch (_) {
+          fechaTexto = r.timestamp.replace("T", " ").substring(0, 16);
+        }
+      }
+      tdFecha.textContent = fechaTexto;
+      tr.appendChild(tdFecha);
+      
+      const tdPerfil = document.createElement("td");
+      tdPerfil.textContent = r.profile || "-";
+      tr.appendChild(tdPerfil);
+      
+      const tdDur = document.createElement("td");
+      tdDur.textContent = r.duration_s != null ? `${r.duration_s}s` : "-";
+      tr.appendChild(tdDur);
+      
+      const tdRes = document.createElement("td");
+      let resText = r.result || "unknown";
+      if (resText === "error" && r.error) {
+        resText += `\n${r.error}`;
+      }
+      tdRes.textContent = resText;
+      if (r.result === "running") {
+        tdRes.style.color = "var(--color-good)";
+      } else if (r.result === "error") {
+        tdRes.style.color = "var(--color-bad)";
+      }
+      tr.appendChild(tdRes);
+      
+      return tr;
+    })
+  );
 }
 
 function render(projects, data) {
@@ -1102,6 +1258,10 @@ async function refreshHealth() {
 
   const puedePedirse = "Notification" in window && Notification.permission === "default";
   ui.notify.hidden = !ahora.size || !puedePedirse;
+  if (!ui.notify.hidden) {
+    ui.notify.textContent = "Avisarme al caer";
+    ui.notify.title = "Activar notificaciones de escritorio para servicios caídos";
+  }
 
   if (healthKnown && nuevos.length && window.Notification?.permission === "granted") {
     for (const caido of nuevos) {
@@ -1119,9 +1279,18 @@ ui.notify.addEventListener("click", async () => {
   // El permiso se pide con un click y nunca al cargar: un pedido de
   // notificaciones que aparece solo es lo que hace que la gente lo deniegue
   // para siempre.
-  if (!("Notification" in window)) return;
-  await Notification.requestPermission();
-  ui.notify.hidden = true;
+  if (!("Notification" in window)) {
+    flash("Tu navegador no soporta notificaciones de escritorio");
+    return;
+  }
+  const perm = await Notification.requestPermission();
+  if (perm === "granted") {
+    flash("Notificaciones de escritorio activadas");
+    ui.notify.hidden = true;
+  } else if (perm === "denied") {
+    flash("Permiso de notificaciones denegado en el navegador");
+    ui.notify.hidden = true;
+  }
 });
 
 const ORPHAN_EVERY = 4; // cada N ciclos de POLL_MS

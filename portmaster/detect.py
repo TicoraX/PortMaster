@@ -126,7 +126,7 @@ def detect(root: Path) -> Stack | None:
 
     opcionales = _compose_profiles(root)
 
-    for detector in (_compose, _python, _go, _rust, _ruby, _php, _dotnet, _node):
+    for detector in (_compose, _python, _go, _rust, _ruby, _php, _dotnet, _deno, _node):
         group = []
         for service in detector(root):
             if service.name in services:
@@ -567,6 +567,37 @@ def _backend_at(root: Path, detector) -> list[Service]:
         if service is not None:
             found.append(service)
     return found
+
+
+def _deno(root: Path) -> list[Service]:
+    at_root = _deno_at(root, "web")
+    if at_root is not None:
+        return [at_root]
+    found = []
+    for path in _subprojects(root, (*NODE_DIRS, *BACKEND_DIRS)):
+        service = _deno_at(path, path.name)
+        if service is not None:
+            found.append(service)
+    return found
+
+
+def _deno_at(path: Path, name: str) -> Service | None:
+    for f in ("deno.json", "deno.jsonc"):
+        deno_file = path / f
+        if deno_file.is_file():
+            try:
+                data = json.loads(_read(deno_file) or "{}")
+                tasks = data.get("tasks", {})
+                if isinstance(tasks, dict):
+                    for task_name in ("dev", "start", "serve"):
+                        if task_name in tasks:
+                            return _served(name, f"deno task {task_name}", path)
+            except json.JSONDecodeError:
+                pass
+            for entry in ("main.ts", "server.ts", "main.js", "server.js", "app.ts"):
+                if (path / entry).is_file():
+                    return _served(name, f"deno run --allow-net {entry}", path)
+    return None
 
 
 def _node(root: Path) -> list[Service]:

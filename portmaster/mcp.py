@@ -6,10 +6,23 @@ import io
 import json
 import os
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
-from . import __version__, detect, docker, doctor, ports, registry, scripts, tunnel
+from . import (
+    __version__,
+    config,
+    detect,
+    docker,
+    doctor,
+    history,
+    ports,
+    registry,
+    scripts,
+    tunnel,
+)
 
 # Los tuneles que abrio esta sesion de MCP. `serve_stdio` los cierra al salir:
 # un tunel es lo unico que este servidor deja fuera de su propio proceso, y del
@@ -147,6 +160,27 @@ def handle_request(req: dict[str, Any]) -> dict[str, Any] | None:
                         # esquema es una sugerencia y el campo puede llegar igual.
                         "inputSchema": {"type": "object", "properties": {}},
                     },
+                    {
+                        "name": "portmaster_history",
+                        "description": "Obtiene el historial de arranques y telemetría de un proyecto.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string", "description": "Ruta opcional al proyecto"},
+                                "limit": {"type": "integer", "description": "Cantidad máxima de entradas (default: 5)"},
+                            },
+                        },
+                    },
+                    {
+                        "name": "portmaster_init",
+                        "description": "Genera o congela la configuración de stack.yaml detectada para el proyecto.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string", "description": "Ruta opcional al proyecto"},
+                            },
+                        },
+                    },
                 ]
             },
         }
@@ -179,7 +213,26 @@ def handle_request(req: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+_ACTION_BUDGET_WINDOW = 60.0
+_MAX_ACTIONS_PER_WINDOW = 30
+_action_timestamps: list[float] = []
+_action_lock = threading.Lock()
+
+
+def _check_action_budget() -> None:
+    now = time.monotonic()
+    with _action_lock:
+        while _action_timestamps and _action_timestamps[0] < now - _ACTION_BUDGET_WINDOW:
+            _action_timestamps.pop(0)
+        if len(_action_timestamps) >= _MAX_ACTIONS_PER_WINDOW:
+            raise RuntimeError(
+                f"Límite de acciones MCP excedido ({_MAX_ACTIONS_PER_WINDOW} llamadas/min). Espera unos momentos."
+            )
+        _action_timestamps.append(now)
+
+
 def _execute_tool(name: str, args: dict[str, Any]) -> str:
+    _check_action_budget()
     cwd = Path(args.get("path") or Path.cwd())
 
     if name == "portmaster_status":
@@ -204,8 +257,12 @@ def _execute_tool(name: str, args: dict[str, Any]) -> str:
         return json.dumps(data, indent=2)
 
     if name == "portmaster_doctor":
-        results = doctor.check(cwd)
-        lines = [f"[{r.kind.upper()}] {r.name}: {r.detail or 'ok'}" for r in results]
+        results = doctor.run(cwd)
+        lines = [
+            f"[{r.level.upper()}] {r.name}: {r.detail or 'ok'}"
+            + (f" -> Solución: {r.fix}" if r.fix else "")
+            for r in results
+        ]
         return "\n".join(lines)
 
     if name == "portmaster_ports":
@@ -227,7 +284,7 @@ def _execute_tool(name: str, args: dict[str, Any]) -> str:
         return json.dumps(data, indent=2)
 
     if name == "portmaster_free_port":
-        port = int(args["port"])
+        port = ports.check_port(int(args["port"]))
         status = ports.scan(port)
         if status.free:
             return f"El puerto {port} ya esta libre."
@@ -246,6 +303,18 @@ def _execute_tool(name: str, args: dict[str, Any]) -> str:
 
     if name == "portmaster_share":
         port = ports.check_port(int(args["port"]))
+        if port == doctor.UI_PORT:
+            raise ValueError(f"No se permite compartir el puerto de gestión de PortMaster ({port}).")
+        try:
+            stack = detect.stack_for(cwd)
+            allowed = set(stack.ports())
+            if not allowed or port not in allowed:
+                raise ValueError(
+                    f"El puerto {port} no pertenece a los puertos declarados de {stack.name} ({sorted(allowed)}). "
+                    "Por seguridad, solo se pueden compartir puertos válidos del proyecto."
+                )
+        except config.ConfigError as exc:
+            raise ValueError(f"No se puede compartir el puerto sin un stack.yaml válido: {exc}")
         provider = args.get("provider")
         tun = tunnel.start_tunnel(port, provider=provider)
         _tuneles.append(tun)
@@ -272,6 +341,16 @@ def _execute_tool(name: str, args: dict[str, Any]) -> str:
             )
         ok, msg = docker.prune(docker.DEFAULT_TARGETS)
         return f"Docker prune: {'éxito' if ok else 'fallo'} - {msg}"
+
+    if name == "portmaster_history":
+        pid = registry.project_id(cwd)
+        limit = int(args.get("limit", 5))
+        entries = history.read(pid, limit=limit)
+        return json.dumps({"project_id": pid, "entries": entries}, indent=2)
+
+    if name == "portmaster_init":
+        target = detect.freeze(cwd)
+        return f"Stack congelado exitosamente en: {target}"
 
     raise ValueError(f"Herramienta desconocida: {name}")
 

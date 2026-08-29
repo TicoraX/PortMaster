@@ -93,6 +93,10 @@ POLL = 0.15
 # imagen y eso tarda minutos sin que nada este mal.
 DETACHED_TIMEOUT = 900
 
+# Lo que se espera entre fijar la linea base de CPU de un proceso nuevo y leerla.
+# Solo se paga la primera vez que un servicio aparece, y una vez por lote.
+CPU_MUESTRA = 0.1
+
 # `docker compose stop` le da su gracia a cada contenedor antes de matarlo, y con
 # varios no entra en los 5s del apagado del arbol.
 STOP_TIMEOUT = 90
@@ -116,6 +120,8 @@ class Proc:
     # Ultimas lineas de salida, para que el error diga la causa y no solo el
     # codigo: "fallo con codigo 1" sin el motivo obliga a abrir los logs.
     tail: deque[str] = field(default_factory=lambda: deque(maxlen=5))
+    # Ya lo reclamo alguien para apagarlo. Ver Runner._stop_one.
+    claimed: bool = False
 
     @property
     def known_port(self) -> int | None:
@@ -133,7 +139,15 @@ class Runner:
     _cancel: threading.Event = field(default_factory=threading.Event)
     _down: bool = False
     restarting: bool = False
-    # Protege `procs` y `_down` entre los hilos de un mismo nivel y el apagado.
+    _retries: dict[str, int] = field(default_factory=dict)
+    # psutil.Process por pid. Vive entre llamadas porque cpu_percent mide
+    # el delta contra la lectura anterior del mismo objeto.
+    _ps_cache: dict[int, psutil.Process] = field(default_factory=dict)
+    # Los hooks sincronos (pre_start, post_start) que estan corriendo ahora.
+    # Sin esto, `down` no tenia a quien matar y el hook sobrevivia al apagado.
+    _hooks: set[subprocess.Popen] = field(default_factory=set)
+    # Protege `procs`, `_down` y `_hooks` entre los hilos de un mismo nivel y el
+    # apagado.
     _procs_lock: threading.Lock = field(default_factory=threading.Lock)
 
     def up(self, profile: str | None = None) -> None:
@@ -216,6 +230,9 @@ class Runner:
         sin importar en que fase estaba.
         """
         self._cancel.set()
+        # `_abort_if_cancelled` solo mira entre niveles y en la espera, asi que
+        # un hook en curso no se enteraria hasta terminar.
+        self._matar_hooks()
 
     def _abort_if_cancelled(self) -> None:
         if self._cancel.is_set():
@@ -223,32 +240,143 @@ class Runner:
 
     def follow(self) -> None:
         """Sigue imprimiendo logs hasta Ctrl-C o hasta que no quede nada vivo."""
-        while not self._cancel.is_set() and (
-            # Durante un reinicio no queda nadie vivo por un instante, y sin esto
-            # el stack se daria por terminado justo ahi.
-            self.restarting
-            # Copia: un nivel todavia arrancando puede appendear mientras iteramos.
-            or any(p.popen.poll() is None for p in list(self.procs))
-        ):
+        while not self._cancel.is_set():
+            # Watchdog de reinicio para servicios caidos
+            restarted_any = False
+            for p in list(self.procs):
+                with self._procs_lock:
+                    if self._down or self._cancel.is_set():
+                        break
+                if p.popen.poll() is not None and not p.service.detached:
+                    retries = self._retries.get(p.service.name, 0)
+                    if p.service.restart in ("on-failure", "always") and retries < p.service.max_retries:
+                        exit_code = p.popen.poll()
+                        if p.service.restart == "always" or exit_code != 0:
+                            self._retries[p.service.name] = retries + 1
+                            self._say(
+                                p,
+                                f"proceso terminado con codigo {exit_code}. Reiniciando automaticamente (intento {retries + 1}/{p.service.max_retries})...",
+                            )
+                            with self._procs_lock:
+                                if self._down or self._cancel.is_set():
+                                    break
+                            try:
+                                self.restart(p.service.name)
+                                restarted_any = True
+                            except Exception as exc:
+                                self._say(p, f"reintento fallo: {exc}")
+
+            # Si nadie esta vivo, no estamos reiniciando y no se disparo ningun reinicio, salimos
+            if not self.restarting and not restarted_any and not any(p.popen.poll() is None for p in list(self.procs)):
+                break
+
             if not self._drain():
                 time.sleep(POLL)
         self._drain()
 
     def restart(self, name: str) -> None:
         """Reinicia un servicio sin tocar el resto del stack."""
-        index = next((i for i, p in enumerate(self.procs) if p.service.name == name), None)
-        if index is None:
-            raise StartupError(f"{name} no esta corriendo en este stack")
+        with self._procs_lock:
+            if self._down or self._cancel.is_set():
+                raise StartupError("apagado en curso, no se puede reiniciar")
+            index = next((i for i, p in enumerate(self.procs) if p.service.name == name), None)
+            if index is None:
+                raise StartupError(f"{name} no esta corriendo en este stack")
+            old = self.procs[index]
+            self.restarting = True
 
-        old = self.procs[index]
-        self.restarting = True
         try:
             self._stop_one(old)
+            # `_spawn_proc` corre `pre_start`, y su presupuesto es
+            # DETACHED_TIMEOUT: 900s. Con el lock tomado, un apagado pedido
+            # mientras tanto se quedaba esperando ese comando, porque `down`
+            # necesita el mismo lock para copiar la lista.
             proc = self._spawn_proc(old.service, old.color)
-            self.procs[index] = proc
+            with self._procs_lock:
+                tarde = self._down or self._cancel.is_set()
+                if not tarde:
+                    self.procs[index] = proc
+            if tarde:
+                # El apagado ya paso por la lista: a este proceso no lo va a ver
+                # nadie mas, asi que lo baja quien lo arranco. Mismo trato que
+                # en `_launch` cuando `_register` devuelve False.
+                self._stop_one(proc)
+                raise StartupError("apagado en curso, no se puede reiniciar")
         finally:
             self.restarting = False
         self._wait_ready(proc)
+
+    def resource_stats(self) -> dict[str, dict[str, float]]:
+        """Calcula el uso de recursos (CPU % y Memoria RSS en MB) de cada servicio activo."""
+        # `cpu_percent(interval=None)` mide contra la lectura anterior del
+        # *mismo* objeto Process. Recrearlo en cada llamada devolvia 0.0 para
+        # siempre: no habia lectura anterior contra la cual restar. Por eso el
+        # cache, y por eso el respiro de abajo.
+        arboles: dict[str, list[psutil.Process]] = {}
+        estrenados = False
+        for p in list(self.procs):
+            if p.popen.poll() is not None:
+                continue
+            arbol = []
+            for pid in self._pids_del_arbol(p.popen.pid):
+                proc = self._ps_cache.get(pid)
+                if proc is None:
+                    try:
+                        proc = psutil.Process(pid)
+                        # Fija la linea base y descarta el 0.0 obligado.
+                        proc.cpu_percent(interval=None)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+                    self._ps_cache[pid] = proc
+                    estrenados = True
+                arbol.append(proc)
+            arboles[p.service.name] = arbol
+
+        if estrenados:
+            # Un solo respiro para todo el lote, no uno por proceso: sin esto,
+            # la primera lectura de un servicio recien arrancado seria 0.0 y
+            # `portmaster stats`, que hace una sola consulta, nunca mediria nada.
+            time.sleep(CPU_MUESTRA)
+
+        vivos = {proc.pid for arbol in arboles.values() for proc in arbol}
+        for pid in list(self._ps_cache):
+            if pid not in vivos:
+                # pop y no del: /api/state y /metrics pueden podar a la vez.
+                self._ps_cache.pop(pid, None)
+
+        stats: dict[str, dict[str, float]] = {}
+        for p in list(self.procs):
+            total_cpu = 0.0
+            total_rss = 0
+            for proc in arboles.get(p.service.name, ()):
+                try:
+                    total_cpu += proc.cpu_percent(interval=None)
+                    total_rss += proc.memory_info().rss
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            stats[p.service.name] = {
+                "cpu_percent": round(total_cpu, 1),
+                "memory_mb": round(total_rss / (1024 * 1024), 1),
+                "pid": p.popen.pid,
+            }
+        return stats
+
+    def _pids_del_arbol(self, pid: int) -> list[int]:
+        """El pid del servicio y los de su descendencia.
+
+        Con `shell=True` el hijo directo es el shell y el servidor de verdad es
+        un nieto, asi que sumar solo el padre daria una memoria de juguete.
+        """
+        try:
+            parent = psutil.Process(pid)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return []
+        pids = [pid]
+        try:
+            pids.extend(hijo.pid for hijo in parent.children(recursive=True))
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+        return pids
 
     def down(self) -> None:
         """Apaga en orden inverso al de arranque. Correrlo dos veces no hace nada."""
@@ -260,11 +388,22 @@ class Runner:
             # ese proc queda fuera de la lista y lo baja `_launch`, que ve el
             # `_down` y no lo registra.
             pendientes = list(reversed(self.procs))
+        # Antes que los servicios: un hook en curso puede estar levantando algo
+        # que el apagado ya paso a buscar.
+        self._matar_hooks()
         for proc in pendientes:
             self._stop_one(proc)
         self._drain()
 
     def _stop_one(self, proc: Proc) -> None:
+        # Un solo responsable por proceso. `restart` baja el viejo con el lock
+        # suelto, y en esa ventana `down` puede copiar la lista y encontrarlo
+        # todavia ahi: los dos corrian el `stop:` del servicio a la vez. La
+        # guarda va aca y no en `restart` porque el que llama son cuatro.
+        with self._procs_lock:
+            if proc.claimed:
+                return
+            proc.claimed = True
         if proc.service.stop:
             self._stop_command(proc)
         if proc.popen.poll() is None:
@@ -302,26 +441,7 @@ class Runner:
         # arriba cae aca y es el caso legitimo. Por eso avisa y no cancela.
         if service.pre_start:
             self._say_raw(service.name, color, f"$ pre_start: {service.pre_start}")
-            try:
-                res = subprocess.run(
-                    service.pre_start,
-                    shell=True,
-                    cwd=service.cwd,
-                    env=build_env(service),
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    errors="replace",
-                    timeout=DETACHED_TIMEOUT,
-                )
-            except subprocess.TimeoutExpired:
-                # Sin esto el timeout salia crudo. Un `npm run build` colgado
-                # rompia el arranque con un traceback en vez de decir que
-                # servicio y que hook se quedaron esperando, que es lo unico que
-                # hace falta para saber donde mirar.
-                raise StartupError(
-                    f"{service.name} pre_start no termino en {DETACHED_TIMEOUT:.0f}s"
-                ) from None
+            res = self._run_hook(service, service.pre_start, "pre_start")
             for line in (res.stdout or "").splitlines():
                 self._write_raw(service.name, color, line)
             if res.returncode != 0:
@@ -332,6 +452,61 @@ class Runner:
         self._say(proc, f"$ {service.command}")
         threading.Thread(target=self._pump, args=(proc,), daemon=True).start()
         return proc
+
+    def _run_hook(self, service: Service, comando: str, etiqueta: str) -> subprocess.CompletedProcess:
+        """Corre un hook sincrono sin perderle el rastro.
+
+        Con `subprocess.run` no queda handle, asi que un apagado pedido mientras
+        el hook corria volvia en el acto y lo dejaba vivo hasta su presupuesto
+        de DETACHED_TIMEOUT: 900s de `npm run build` huerfano. Es el mismo
+        agujero que dejaba tuneles publicando el puerto, y por eso `CLAUDE.md`
+        pide que todo lo que se lance con `shell=True` se baje con
+        `_terminate_tree`.
+        """
+        proc = subprocess.Popen(
+            comando,
+            shell=True,
+            cwd=service.cwd,
+            env=build_env(service),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+        )
+        with self._procs_lock:
+            tarde = self._down or self._cancel.is_set()
+            if not tarde:
+                self._hooks.add(proc)
+        if tarde:
+            # El apagado ya paso por la lista de hooks: a este lo baja quien lo
+            # arranco, igual que en `_launch` y en `restart`.
+            _terminate_tree(proc.pid)
+            proc.communicate()
+            raise StartupError("apagado pedido durante el arranque")
+
+        try:
+            salida, _ = proc.communicate(timeout=DETACHED_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            _terminate_tree(proc.pid)
+            salida, _ = proc.communicate()
+            # Sin esto el timeout salia crudo. Un `npm run build` colgado rompia
+            # el arranque con un traceback en vez de decir que servicio y que
+            # hook se quedaron esperando, que es lo unico que hace falta para
+            # saber donde mirar.
+            raise StartupError(
+                f"{service.name} {etiqueta} no termino en {DETACHED_TIMEOUT:.0f}s"
+            ) from None
+        finally:
+            with self._procs_lock:
+                self._hooks.discard(proc)
+        return subprocess.CompletedProcess(comando, proc.returncode, salida, None)
+
+    def _matar_hooks(self) -> None:
+        with self._procs_lock:
+            pendientes = list(self._hooks)
+            self._hooks.clear()
+        for hook in pendientes:
+            _terminate_tree(hook.pid)
 
     def _spawn(self, service: Service) -> subprocess.Popen:
         # shell=True es deliberado: `npm run dev` y `docker compose up -d` no son
@@ -380,22 +555,7 @@ class Runner:
 
                 if service.post_start:
                     self._say(proc, f"$ post_start: {service.post_start}")
-                    try:
-                        res = subprocess.run(
-                            service.post_start,
-                            shell=True,
-                            cwd=service.cwd,
-                            env=build_env(service),
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT,
-                            text=True,
-                            errors="replace",
-                            timeout=DETACHED_TIMEOUT,
-                        )
-                    except subprocess.TimeoutExpired:
-                        raise StartupError(
-                            f"{service.name} post_start no termino en {DETACHED_TIMEOUT:.0f}s"
-                        ) from None
+                    res = self._run_hook(service, service.post_start, "post_start")
                     for line in (res.stdout or "").splitlines():
                         self._write(proc, line)
                     if res.returncode != 0:

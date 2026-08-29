@@ -4,6 +4,74 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
+## [1.3.0] - 2026-08-29
+
+### Agregado
+
+- **Comandos `test-stack`, `history`, `logs` y `stats`.** `test-stack` valida el
+  `stack.yaml` sin arrancar nada. `history` lista los últimos arranques con su
+  duración y su resultado, que registra la interfaz web en
+  `~/.portmaster/history/`. `logs` y `stats` (alias `top`) le consultan al
+  `portmaster serve` abierto.
+- **`restart` y `max_retries` en `stack.yaml`.** `restart` vale `no` (el
+  default), `on-failure` o `always`, y `max_retries` es el tope de reintentos,
+  por default 3. El vigilante vive en el seguimiento de logs, así que actúa
+  mientras `up` corre o mientras la interfaz tiene la sesión viva.
+- **`portmaster up --env-file`.** Carga un `.env` en el entorno antes de
+  resolver el stack, para la corrida puntual contra otro entorno. El `env:` de
+  cada servicio le sigue ganando.
+- **Rutas `/api/projects/{pid}/history` y `/api/projects/{pid}/metrics`.** Las
+  métricas también viajan en `/api/state`, así que la interfaz no pide de más.
+- **Herramientas MCP `portmaster_history` y `portmaster_init`.** Y un tope de 30
+  llamadas por minuto, contra el bucle de un agente trabado.
+- **Detección de proyectos Deno**, por `deno.json` y sus tareas `dev`, `start` o
+  `serve`.
+- **`doctor` avisa de placeholders en el `.env`**, del tipo `changeme` o
+  `your_api_key`.
+
+### Arreglado
+
+- **La CPU de `stats` y de la interfaz medía 0.0 siempre.** `cpu_percent` de
+  psutil calcula el delta contra la lectura anterior del *mismo* objeto
+  `Process`, y el código creaba uno nuevo en cada llamada, así que nunca había
+  lectura anterior. Afectaba a `portmaster stats`, a
+  `/api/projects/{pid}/metrics` y al badge de la tarjeta por igual. El test que
+  debía cubrirlo preguntaba si la clave `cpu_percent` existía, o sea la forma, y
+  estaba en verde con la métrica muerta.
+- **`portmaster test-stack` terminaba en traceback después de validar bien.**
+  Imprimía un `✓`, que no existe en cp1252, la página de códigos con la que sale
+  la consola de Windows. `UnicodeEncodeError` sobre un comando que ya había
+  hecho su trabajo.
+- **Apagar mientras un reinicio automático corría su `pre_start` se colgaba.**
+  `restart` mantenía tomado el lock de la lista de procesos mientras ejecutaba
+  el hook, y `down` necesita ese mismo lock. El presupuesto de un `pre_start`
+  son 900 segundos, así que el apagado podía quedarse esperando ese tiempo.
+- **El servidor MCP llamaba a `doctor.check()`, que no existe**, y leía
+  `r.kind`, cuando el campo se llama `level`. La herramienta `portmaster_doctor`
+  no podía funcionar.
+- **`portmaster_free_port` no validaba el rango del puerto** antes de escanear.
+- **Un `pre_start` o un `post_start` en curso sobrevivía al apagado.** Corrían
+  con `subprocess.run`, que no deja handle, así que `down` no tenía a quién
+  matar: volvía en el acto y el hook seguía hasta su presupuesto de 900s. Ahora
+  quedan registrados y el apagado los baja con `_terminate_tree`, como el
+  `CLAUDE.md` pide para todo lo que se lance con `shell=True`.
+- **El `stop:` de un servicio podía correr dos veces a la vez.** `restart` baja
+  el proceso viejo con el lock suelto, y en esa ventana `down` copiaba la lista
+  y lo encontraba todavía ahí. Ahora hay un solo responsable por proceso.
+
+### Cambiado
+
+- **`portmaster_share` solo publica puertos que el proyecto declara**, y nunca
+  el de la propia interfaz. Del otro lado hay un agente y no una persona
+  mirando la pantalla. El CLI no cambia: ahí el puerto lo escribís vos.
+- **Los comandos de `stack.yaml` no se filtran por contenido.** Una lista de
+  patrones destructivos llegó a revisar cada `command`, `pre_start`,
+  `post_start`, `stop` y script. Se sacó: bloqueaba limpiezas normales como
+  `rm -rf ~/.cache/mi-proyecto` o `drop database test_db`, y dejaba pasar el
+  mismo borrado escrito con una variable de por medio. Quien escribe un
+  `stack.yaml` ya tiene ejecución arbitraria, así que la lista no defendía de
+  nadie y sí le rompía el archivo al dueño del proyecto.
+
 ## [1.2.1] - 2026-08-19
 
 ### Arreglado

@@ -1,9 +1,12 @@
 """Procesos reales. Un orquestador probado con mocks no prueba nada."""
 
+import dataclasses
 import io
+import os
 import socket
 import sys
 import textwrap
+import threading
 import time
 from pathlib import Path
 
@@ -11,7 +14,7 @@ import psutil
 import pytest
 from rich.console import Console
 
-from portmaster import config, runner
+from portmaster import config, ports, runner
 
 # Servidor minimo que anuncia su arranque y se queda escuchando.
 SERVER = (
@@ -795,3 +798,330 @@ def test_un_pre_start_colgado_falla_como_arranque_y_no_como_traceback(tmp_path, 
         assert "pre_start" in str(exc.value)
     finally:
         engine.down()
+
+
+def test_service_auto_restart_on_failure(tmp_path, free_ports):
+    (port,) = free_ports(1)
+    flag = tmp_path / "runs.txt"
+    script = tmp_path / "flaky.py"
+    script.write_text(
+        "import socket, time, sys, pathlib\n"
+        f"p = pathlib.Path(r'{flag}')\n"
+        "count = len(p.read_text().splitlines()) if p.exists() else 0\n"
+        "p.write_text((p.read_text() if p.exists() else '') + f'{count+1}\\n')\n"
+        "s = socket.socket()\n"
+        f"s.bind(('127.0.0.1', {port}))\n"
+        "s.listen()\n"
+        "time.sleep(0.8 if count == 0 else 60)\n"
+        "if count == 0:\n"
+        "    sys.exit(1)\n",
+        encoding="utf-8",
+    )
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          flaky:
+            command: {sys.executable} flaky.py
+            port: {port}
+            restart: on-failure
+            max_retries: 2
+        """,
+    )
+    engine = make_runner(stack)
+    try:
+        engine.up()
+        import threading
+        t = threading.Thread(target=engine.follow, daemon=True)
+        t.start()
+        # Dar tiempo a que termine el primer intento y el watchdog lo reinicie
+        time.sleep(2.0)
+        assert flag.exists()
+        runs = flag.read_text().splitlines()
+        assert len(runs) >= 2
+    finally:
+        engine.down()
+
+
+def test_runner_resource_stats(tmp_path, free_ports, monkeypatch):
+    """Mide, no solo devuelve las claves.
+
+    El test de antes preguntaba `"cpu_percent" in stats["srv"]`, o sea la forma.
+    Estaba verde mientras el numero era 0.0 para siempre, porque `cpu_percent`
+    resta contra la lectura anterior del mismo objeto Process y el codigo lo
+    recreaba en cada llamada. El servicio de abajo quema CPU a proposito: si la
+    linea base se pierde, esto se pone en 0.0 y el test falla.
+    """
+    (port,) = free_ports(1)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "import socket, itertools; s = socket.socket(); s.bind(('127.0.0.1', {port})); s.listen(); any(False for _ in itertools.count())"
+            port: {port}
+        """,
+    )
+    engine = make_runner(stack)
+    try:
+        engine.up()
+        stats = engine.resource_stats()
+        assert "srv" in stats
+        assert stats["srv"]["memory_mb"] > 0
+        assert stats["srv"]["pid"] is not None
+        assert stats["srv"]["cpu_percent"] > 0, (
+            f"un bucle ocupado tiene que consumir CPU, y midio {stats['srv']['cpu_percent']}"
+        )
+
+        # Segunda lectura: el camino que recorre el sondeo de la interfaz cada
+        # 2.5s. Tiene que seguir midiendo y ademas no pagar el respiro, que es
+        # para lo unico que sirve conservar los Process entre llamadas. Sin
+        # contar los sleep, quitar el cache dejaba este test en verde.
+        # El delta se toma contra la lectura anterior, asi que hay que dejar
+        # pasar tiempo de verdad, como hace el sondeo cada 2.5s.
+        time.sleep(0.3)
+        dormidas = []
+        monkeypatch.setattr(runner.time, "sleep", lambda s: dormidas.append(s))
+        assert engine.resource_stats()["srv"]["cpu_percent"] > 0
+        assert dormidas == [], f"la segunda lectura no deberia esperar, y espero {dormidas}"
+    finally:
+        engine.down()
+
+
+def test_apagar_no_espera_al_pre_start_de_un_reinicio(tmp_path, free_ports):
+    """`restart` corria `_spawn_proc` con `_procs_lock` tomado.
+
+    `_spawn_proc` ejecuta `pre_start`, y su presupuesto es DETACHED_TIMEOUT:
+    900s. `down` necesita ese mismo lock para copiar la lista de procesos, asi
+    que apagar mientras un reinicio automatico estaba en su hook se quedaba
+    esperando el hook entero. Aca el `pre_start` dura mas que el margen que se
+    le da al apagado: si el lock vuelve, esto se cuelga y falla.
+    """
+    (port,) = free_ports(1)
+    marca = tmp_path / "pre_start_arranco"
+    lento = (
+        f"{sys.executable} -c \"import pathlib, time; "
+        f"pathlib.Path(r'{marca}').write_text('x'); time.sleep(20)\""
+    )
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "{SERVER.format(port=port)}"
+            port: {port}
+        """,
+    )
+    engine = make_runner(stack)
+    try:
+        engine.up()
+        # El hook se agrega despues del arranque: interesa el reinicio, no el
+        # `up`, y asi el test no paga los 20s dos veces.
+        original = engine.procs[0].service
+        engine.procs[0].service = dataclasses.replace(original, pre_start=lento)
+
+        fallos = []
+
+        def reiniciar():
+            try:
+                engine.restart("srv")
+            except Exception as exc:  # el apagado lo aborta, y eso es correcto
+                fallos.append(exc)
+
+        hilo = threading.Thread(target=reiniciar, daemon=True)
+        hilo.start()
+
+        limite = time.monotonic() + 15
+        while not marca.exists() and time.monotonic() < limite:
+            time.sleep(0.05)
+        assert marca.exists(), "el pre_start del reinicio nunca arranco"
+
+        t0 = time.monotonic()
+        engine.down()
+        tardanza = time.monotonic() - t0
+        assert tardanza < 8, (
+            f"apagar espero {tardanza:.1f}s al pre_start del reinicio, "
+            "o sea que el lock volvio a cubrir el hook"
+        )
+    finally:
+        engine.down()
+        hilo.join(timeout=30)
+
+    # El proceso que el reinicio alcanzo a levantar no puede quedar vivo: si
+    # `down` ya paso por la lista, lo baja el que lo arranco.
+    assert ports.is_free(port), "el reinicio dejo el servicio publicando el puerto"
+
+
+def test_runner_follow_down_clean_shutdown(tmp_path, free_ports):
+    (port,) = free_ports(1)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "import socket, time; s = socket.socket(); s.bind(('127.0.0.1', {port})); s.listen(); time.sleep(60)"
+            port: {port}
+        """,
+    )
+    engine = make_runner(stack)
+    engine.up()
+    t = threading.Thread(target=engine.follow, daemon=True)
+    t.start()
+    time.sleep(0.3)
+    engine.down()
+    t.join(timeout=2.0)
+    assert not t.is_alive()
+    for p in engine.procs:
+        assert p.popen.poll() is not None
+
+
+def test_un_stop_que_limpia_su_cache_no_queda_bloqueado(tmp_path, free_ports):
+    """La lista de patrones destructivos vetaba comandos legitimos.
+
+    `rm -rf ~/.cache/loquesea` y `del /s /q <dir>` son lo que hace media docena
+    de hooks de limpieza reales, y quedaban bloqueados antes de ejecutarse. El
+    modelo de confianza del proyecto dice que `stack.yaml` ya es codigo
+    ejecutable por diseno: quien escribe ese comando ya tiene ejecucion
+    arbitraria, asi que la lista no defendia de nadie y si le rompia el archivo
+    al dueno del proyecto.
+
+    El comando es el real de cada plataforma, no uno equivalente que el patron
+    no mire: con un `python -c shutil.rmtree` este test pasaria en verde con y
+    sin el bloqueo, que es no cubrir nada. En POSIX el `~` sale del HOME que se
+    le declara al servicio, asi que borra dentro de tmp_path y no en el hogar
+    de verdad.
+    """
+    (port,) = free_ports(1)
+    hogar = tmp_path / "hogar"
+    basura = hogar / ".cache" / "mi-proyecto"
+    basura.mkdir(parents=True)
+    rastro = basura / "build.log"
+    rastro.write_text("x", encoding="utf-8")
+
+    if os.name == "nt":
+        limpiar = f"del /s /q {basura}"
+        env = ""
+    else:
+        limpiar = "rm -rf ~/.cache/mi-proyecto"
+        env = f"\n            env:\n              HOME: {hogar}"
+
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "{SERVER.format(port=port)}"
+            port: {port}
+            stop: {limpiar}{env}
+        """,
+    )
+    engine = make_runner(stack)
+    engine.up()
+    assert rastro.is_file(), "el hook todavia no corrio"
+
+    engine.down()
+
+    assert not rastro.exists(), (
+        "el stop no llego a ejecutarse: lo bloquearon por parecerse a un "
+        "comando destructivo"
+    )
+
+
+def test_apagar_mata_el_pre_start_que_estaba_corriendo(tmp_path, free_ports):
+    """Un hook en curso sobrevivia al apagado.
+
+    `pre_start` corria con `subprocess.run` y nadie guardaba el proceso, asi que
+    `down` no tenia a quien matar: volvia en el acto y el hook seguia hasta su
+    presupuesto de DETACHED_TIMEOUT, o sea 900s. Es el mismo agujero que ya
+    costo caro con los tuneles, y va contra lo que el CLAUDE.md fija: cualquier
+    cosa lanzada con `shell=True` se baja con `_terminate_tree`.
+
+    El hook de abajo reescribe un contador cada 0.5s. Si sigue vivo despues del
+    apagado, el archivo cambia; si murio, se queda quieto. Se afirma el efecto y
+    no que se haya llamado a nadie.
+    """
+    (port,) = free_ports(1)
+    marca = tmp_path / "contador"
+    hook = (
+        f'{sys.executable} -c "import pathlib,time; p=pathlib.Path(r\'{marca}\'); '
+        "[(p.write_text(str(i)), time.sleep(0.5)) for i in range(60)]\""
+    )
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "{SERVER.format(port=port)}"
+            port: {port}
+            pre_start: {hook}
+        """,
+    )
+    engine = make_runner(stack)
+    arranque = threading.Thread(target=lambda: _tragar(engine.up), daemon=True)
+    arranque.start()
+
+    limite = time.monotonic() + 20
+    while not marca.exists() and time.monotonic() < limite:
+        time.sleep(0.05)
+    assert marca.exists(), "el pre_start nunca arranco"
+
+    engine.down()
+
+    antes = marca.read_text()
+    time.sleep(2)
+    assert marca.read_text() == antes, (
+        "el pre_start siguio corriendo despues del apagado: quedo un proceso "
+        "huerfano que nadie va a bajar"
+    )
+    arranque.join(timeout=30)
+
+
+def _tragar(fn):
+    """`up` aborta con StartupError cuando el apagado lo corta, y esta bien."""
+    try:
+        fn()
+    except Exception:
+        pass
+
+
+def test_el_stop_de_un_servicio_no_corre_dos_veces(tmp_path, free_ports):
+    """`restart` y `down` podian apagar el mismo proceso a la vez.
+
+    `restart` baja el viejo con el lock suelto, y en esa ventana `down` copia la
+    lista y lo encuentra todavia ahi: los dos corrian el `stop:` del servicio.
+    Con un `docker compose stop` de por medio es ruido, pero el comando lo
+    escribe el usuario y no tiene por que ser idempotente.
+
+    El `stop` de abajo cuenta sus corridas agregando una linea al archivo.
+    """
+    (port,) = free_ports(1)
+    cuenta = tmp_path / "veces"
+    contar = (
+        f"{sys.executable} -c \"import pathlib; p=pathlib.Path(r'{cuenta}'); "
+        "p.write_text(p.read_text() + 'x' if p.exists() else 'x')\""
+    )
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "{SERVER.format(port=port)}"
+            port: {port}
+            stop: {contar}
+        """,
+    )
+    engine = make_runner(stack)
+    engine.up()
+    viejo = engine.procs[0]
+
+    # Los dos apagados del mismo proceso, a la vez, que es la carrera real.
+    hilos = [threading.Thread(target=lambda: engine._stop_one(viejo)) for _ in range(4)]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join(timeout=30)
+
+    assert cuenta.read_text() == "x", (
+        f"el stop corrio {len(cuenta.read_text())} veces en vez de una"
+    )
+    engine.down()

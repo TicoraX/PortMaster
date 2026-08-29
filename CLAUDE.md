@@ -55,6 +55,37 @@ que corra en http. Los otros headers (CSP, nosniff, DENY, no-referrer) si estan.
 En su lugar, contra rebinding de DNS: validacion del header `Host` contra
 `127.0.0.1` y `localhost`, antes de cualquier otra cosa.
 
+### Los comandos de `stack.yaml` no se filtran por contenido
+
+Hubo una lista de patrones destructivos (`rm -rf /`, `format C:`, `DROP
+DATABASE`) que revisaba cada `command`, `pre_start`, `post_start`, `stop` y
+script antes de ejecutarlo. Se saco, y no conviene volver a ponerla.
+
+No protege de nada. El unico que escribe esos comandos es el dueño del
+`stack.yaml`, y `stack.yaml` ya es codigo ejecutable por diseño: quien lo
+escribe tiene ejecucion arbitraria por definicion. Un atacante no necesita
+esquivar la lista, pero igual la esquiva sin esfuerzo:
+
+```
+BLOQ  rm -rf /          PASA  X=/; rm -rf $X
+BLOQ  rm -rf ~          PASA  python -c "shutil.rmtree(os.path.expanduser('~'))"
+```
+
+Y si contra el atacante no hace nada, contra el usuario si:
+
+```
+BLOQ  rm -rf ~/.cache/mi-proyecto      BLOQ  del /s /q <dir>
+BLOQ  rm -rf ~/proyecto/node_modules   BLOQ  psql -c "drop database test_db"
+```
+
+Los cuatro son limpiezas normales de un hook de desarrollo. La lista convertia
+un `stack.yaml` valido en un error, y el mensaje acusaba al usuario de escribir
+algo destructivo.
+
+Lo que si queda es `guardrails.validate_identifier`, que es otra cosa: valida el
+`pid` que viene por la URL antes de que `history` lo use como nombre de archivo.
+Ahi el valor si es de un tercero y la validacion si tiene sentido.
+
 ### `shell=True` en los subprocesos
 
 `npm run dev` y `docker compose up -d` no son ejecutables. `stack.yaml` ya es
@@ -84,6 +115,36 @@ roles tipograficos salen de stacks del sistema.
 `pytest`. Todo con sockets y procesos reales, sin mocks: es la unica forma de
 probar un modulo cuyo trabajo es hablar con el sistema operativo. La CI corre en
 Linux, macOS y Windows porque los tres divergen justo ahi.
+
+### Correrla sin esperar seis minutos
+
+Casi todo el costo esta en tres archivos, que son justo los que arrancan
+procesos y esperan healthchecks:
+
+| Que corro | Tests | Serial |
+|---|---|---|
+| Todo | 388 | 6m 30s |
+| `test_runner` + `test_server` + `test_cli` | 188 | 6m 12s |
+| Todo lo demas | 200 | 17s |
+
+O sea que la mitad de la suite cuesta el 4% del tiempo. Durante el ciclo,
+nombrar el archivo (`pytest tests/test_runner.py`) alcanza casi siempre.
+
+Antes de commitear va entera, y va **en paralelo**: `pytest -q -n auto`, que
+baja de 6m30s a poco mas de un minuto. El tiempo es espera, no CPU, asi que
+escala casi lineal con los workers.
+
+Lo que hace seguro el paralelo es `banda()` en `tests/conftest.py`. `free_ports`
+bindea un puerto al azar para ver si esta libre y lo suelta antes de
+devolverlo, y esa ventana entre soltar y usar la disputa cualquiera. De a uno
+la disputan los tests entre si, que es lo que el propio conftest ya
+documentaba despues de tres rojos de CI; con `-n`, cada worker es un proceso
+aparte y la disputan todos a la vez. Darle a cada worker su franja de la banda
+hace que la carrera **no exista**, en vez de hacerla menos probable. Sin xdist,
+o con un `PYTEST_XDIST_WORKER` que no se pueda leer, se usa la banda entera.
+
+No aflojar eso para "simplificar". Un intermitente que aparece una vez cada
+veinte corridas cuesta mas caro que uno que aparece siempre.
 
 ### Un test verde no prueba nada por si solo
 

@@ -1,6 +1,7 @@
 """Comandos del CLI. Servidores reales, igual que el resto del suite."""
 
 import json
+import os
 import re
 import socket
 import subprocess
@@ -180,6 +181,16 @@ def test_doctor_no_muestra_valores_del_dotenv(tmp_path, monkeypatch):
     assert "el .env no tiene: OTRA" in _sin_saltos(resultado.output)
 
 
+def test_doctor_detecta_placeholders_en_dotenv(tmp_path, monkeypatch):
+    _proyecto_con_env(tmp_path, "API_KEY=x\n", "API_KEY=CHANGEME\n")
+    monkeypatch.chdir(tmp_path)
+
+    resultado = runner.invoke(cli.app, ["doctor"])
+    assert "valores de ejemplo/inseguros en .env: API_KEY" in _sin_saltos(resultado.output)
+    assert resultado.exit_code == 0
+
+
+
 def test_doctor_desde_subcarpeta_no_reporta_colision_consigo_mismo(tmp_path, monkeypatch):
     root = tmp_path / "mi_proyecto"
     root.mkdir()
@@ -290,6 +301,15 @@ def test_down_con_un_stop_que_falla_sale_1(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     assert runner.invoke(cli.app, ["down"]).exit_code == 1
+
+
+def test_up_env_file_inexistente(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text("services:\n  web:\n    command: echo web\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    resultado = runner.invoke(cli.app, ["up", "--env-file", "no_existe.env"])
+    assert resultado.exit_code == 1
+    assert "No se encontró el archivo env" in resultado.output
+
 
 
 def _stack_con_puerto(tmp_path, port):
@@ -788,3 +808,119 @@ def test_share_rechaza_un_puerto_fuera_de_rango(tmp_path, monkeypatch):
         resultado = runner.invoke(cli.app, ["share", target])
         assert resultado.exit_code == 1, target
         assert "rango" in resultado.output
+
+
+def test_test_stack_valido(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text(
+        "services:\n  db:\n    command: echo db\n    port: 5432\n  api:\n    command: echo api\n    port: 8000\n    needs: [db]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    resultado = runner.invoke(cli.app, ["test-stack"])
+    assert resultado.exit_code == 0
+    assert "Stack validado con éxito" in resultado.output
+    assert "db" in resultado.output
+    assert "api" in resultado.output
+
+
+def test_test_stack_invalido(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text(
+        "services:\n  a:\n    command: echo a\n    needs: [b]\n  b:\n    command: echo b\n    needs: [a]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    resultado = runner.invoke(cli.app, ["test-stack"])
+    assert resultado.exit_code == 1
+    assert "circular" in resultado.output
+
+
+def test_cli_history_vacio(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text("services:\n  web:\n    command: echo web\n", encoding="utf-8")
+    monkeypatch.setattr(cli.registry, "HOME", tmp_path)
+    monkeypatch.chdir(tmp_path)
+    resultado = runner.invoke(cli.app, ["history"])
+    assert resultado.exit_code == 0
+    assert "No hay historial" in resultado.output
+
+
+def test_cli_history_con_entradas(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text("services:\n  web:\n    command: echo web\n", encoding="utf-8")
+    monkeypatch.setattr(cli.registry, "HOME", tmp_path)
+    monkeypatch.chdir(tmp_path)
+    pid = cli.registry.project_id(tmp_path)
+    cli.history.append(pid, {"duration_s": 3.4, "result": "running", "profile": "dev"})
+    resultado = runner.invoke(cli.app, ["history"])
+    assert resultado.exit_code == 0
+    assert "Historial de arranques" in resultado.output
+    assert "3.4s" in resultado.output
+
+
+def test_cli_logs_sin_servidor(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text("services:\n  web:\n    command: echo web\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    resultado = runner.invoke(cli.app, ["logs", "--port", "59999"])
+    assert resultado.exit_code == 1
+    assert "No se pudo conectar" in resultado.output
+
+
+def test_cli_stats_sin_servidor(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text("services:\n  web:\n    command: echo web\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    resultado = runner.invoke(cli.app, ["stats", "--port", "59999"])
+    assert resultado.exit_code == 1
+    assert "No se pudo conectar" in resultado.output
+
+
+def test_up_env_file_unwraps_quotes(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text("services:\n  web:\n    command: echo $APP_PORT\n", encoding="utf-8")
+    (tmp_path / ".env.custom").write_text('APP_PORT="8080"\nSECRET=\'my-secret\'\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    llamado = {}
+
+    class FakeRunner:
+        def __init__(self, *args, **kwargs):
+            self.procs = []
+        def up(self, services):
+            llamado["env_port"] = os.environ.get("APP_PORT")
+            llamado["env_secret"] = os.environ.get("SECRET")
+            return self
+        def follow(self):
+            pass
+        def down(self):
+            pass
+
+    monkeypatch.setattr(cli.runner, "Runner", FakeRunner)
+    resultado = runner.invoke(cli.app, ["up", "--env-file", ".env.custom"])
+    assert resultado.exit_code == 0
+    assert llamado.get("env_port") == "8080"
+    assert llamado.get("env_secret") == "my-secret"
+
+
+
+
+
+
+def test_test_stack_no_revienta_en_una_consola_cp1252(tmp_path, monkeypatch):
+    """El comando terminaba en traceback despues de validar bien.
+
+    Imprimia un `✓`, que no existe en cp1252, o sea la pagina de codigos
+    con la que sale la consola de Windows. `CliRunner` captura a un buffer
+    UTF-8 y no lo hubiera visto nunca: hace falta un proceso de verdad con la
+    codificacion de salida forzada, que es donde el usuario lo encontro.
+    """
+    (tmp_path / "stack.yaml").write_text(
+        "services:\n  api:\n    command: echo hola\n    ready: none\n", encoding="utf-8"
+    )
+    entorno = dict(os.environ, PYTHONIOENCODING="cp1252")
+    res = subprocess.run(
+        [sys.executable, "-m", "portmaster", "test-stack"],
+        cwd=tmp_path,
+        env=entorno,
+        capture_output=True,
+        text=True,
+        encoding="cp1252",
+        errors="replace",
+        timeout=60,
+    )
+    assert "UnicodeEncodeError" not in (res.stdout + res.stderr), res.stdout + res.stderr
+    assert res.returncode == 0, res.stdout + res.stderr

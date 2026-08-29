@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import psutil
@@ -16,6 +17,7 @@ from . import (
     detect,
     docker,
     doctor,
+    history,
     mcp,
     ports,
     registry,
@@ -241,6 +243,7 @@ def _free_ports(services: list[config.Service], yes: bool, force: bool) -> None:
 @app.command("up")
 def up_cmd(
     profile: str = typer.Option(None, "--profile", "-p", help="Perfil de stack.yaml."),
+    env_file: str = typer.Option(None, "--env-file", "-e", help="Ruta al archivo .env personalizado."),
     yes: bool = typer.Option(False, "--yes", "-y", help="No preguntar nada, arrancar."),
     force: bool = typer.Option(False, "--force", help="kill() si ignora terminate()."),
     free: bool = typer.Option(
@@ -249,13 +252,27 @@ def up_cmd(
     timeout: float = typer.Option(60.0, help="Segundos de espera por servicio."),
 ) -> None:
     """Levanta el stack: libera puertos, arranca en orden y sigue los logs."""
-    _levantar(Path.cwd(), profile, yes, force, free, timeout)
+    _levantar(Path.cwd(), profile, yes, force, free, timeout, env_file=env_file)
 
 
 def _levantar(
-    root: Path, profile: str | None, yes: bool, force: bool, free: bool, timeout: float
+    root: Path,
+    profile: str | None,
+    yes: bool,
+    force: bool,
+    free: bool,
+    timeout: float,
+    env_file: str | None = None,
 ) -> None:
     """El cuerpo de `up`, por raiz explicita. `switch` levanta otro directorio."""
+    if env_file:
+        custom_env = (root / env_file).resolve()
+        if not custom_env.is_file():
+            err.print(f"No se encontró el archivo env: {env_file}")
+            raise typer.Exit(1)
+        extra_vars = config.parse_env_file(custom_env)
+        os.environ.update(extra_vars)
+
     try:
         stack = detect.stack_for(root)
         services = stack.resolve(profile)
@@ -892,6 +909,190 @@ def mcp_cmd(
 def version_cmd() -> None:
     """Muestra la version instalada."""
     console.print(__version__)
+
+
+@app.command("history")
+def history_cmd(
+    target: str = typer.Argument(None),
+    limit: int = typer.Option(5, "--limit", "-n", help="Cantidad de arranques a mostrar"),
+) -> None:
+    """Muestra el historial de arranques del proyecto."""
+    if limit < 1 or limit > history.MAX_LIMIT:
+        err.print(f"[red]Error:[/] --limit debe ser entre 1 y {history.MAX_LIMIT}")
+        raise typer.Exit(1)
+        
+    try:
+        path = (Path.cwd() / (target or "")).resolve()
+        stack = detect.stack_for(path)
+        pid = registry.project_id(stack.root)
+    except config.ConfigError as exc:
+        err.print(f"[red]Error:[/] {exc}")
+        raise typer.Exit(1)
+        
+    runs = history.read(pid, limit=limit)
+    if not runs:
+        console.print(f"No hay historial para el proyecto [bold]{stack.name}[/]")
+        return
+        
+    table = Table(title=f"Historial de arranques: {stack.name}")
+    table.add_column("Fecha")
+    table.add_column("Perfil")
+    table.add_column("Duración")
+    table.add_column("Resultado")
+    
+    for r in reversed(runs):
+        fecha = r.get("timestamp", "").split("T")[0] + " " + r.get("timestamp", "T")[:16].split("T")[-1]
+        perfil = r.get("profile") or "-"
+        dur = f"{r.get('duration_s', 0)}s"
+        res = r.get("result", "unknown")
+        
+        color = "green" if res == "running" else "red" if res == "error" else "yellow"
+        res_format = f"[{color}]{res}[/]"
+        if res == "error" and "error" in r:
+            res_format += f"\n[dim]{r['error']}[/]"
+            
+        table.add_row(fecha, perfil, dur, res_format)
+
+    console.print(table)
+
+
+@app.command("test-stack")
+def test_stack_cmd(
+    target: str = typer.Argument(None, help="Ruta al proyecto o directorio"),
+) -> None:
+    """Valida la configuración del stack (puertos, dependencias, variables) sin levantar servicios."""
+    path = (Path.cwd() / (target or "")).resolve()
+    try:
+        stack = detect.stack_for(path)
+    except config.ConfigError as exc:
+        err.print(f"[bold red]Configuración inválida:[/] {exc}")
+        raise typer.Exit(1)
+
+    console.print(f"Validando stack [bold]{stack.name}[/] en [dim]{stack.root}[/]...")
+    services = stack.resolve()
+    console.print(f"[green]OK:[/] {len(services)} servicio(s) resueltos en orden topológico:")
+    for s in services:
+        deps = f" (espera a: {', '.join(s.needs)})" if s.needs else ""
+        port_info = f" -> puerto {s.port}" if s.port else f" ({s.ready})"
+        console.print(f"  - [cyan]{s.name}[/]: [dim]{s.command}[/]{port_info}{deps}")
+
+    # Verificar estado de puertos
+    declared_ports = stack.ports()
+    if declared_ports:
+        occupied = [p for p in declared_ports if not ports.is_free(p)]
+        if occupied:
+            console.print(f"[yellow]Aviso:[/] Puertos actualmente en uso: {', '.join(map(str, occupied))}")
+        else:
+            console.print("[green]OK:[/] Todos los puertos declarados están libres")
+
+    # Sin el `✓` que habia aca: no existe en cp1252, o sea la pagina de
+    # codigos con la que sale la consola de Windows, y el comando entero
+    # terminaba en UnicodeEncodeError despues de haber validado bien. Los
+    # acentos si entran en cp1252, por eso se quedan.
+    console.print("\n[bold green]Stack validado con éxito.[/]")
+
+
+@app.command("logs")
+def logs_cmd(
+    target: str = typer.Argument(None, help="Ruta al proyecto"),
+    service: str = typer.Option(None, "--service", "-s", help="Filtrar por nombre de servicio"),
+    follow: bool = typer.Option(False, "--follow", "-f", help="Seguir logs en tiempo real"),
+    server_port: int = typer.Option(7666, "--port", "-p", help="Puerto del servidor de PortMaster"),
+) -> None:
+    """Muestra o sigue los logs del proyecto en ejecución en PortMaster."""
+    import time
+    import urllib.request
+
+    path = (Path.cwd() / (target or "")).resolve()
+    try:
+        stack = detect.stack_for(path)
+        pid = registry.project_id(stack.root)
+    except config.ConfigError as exc:
+        err.print(f"[red]Error:[/] {exc}")
+        raise typer.Exit(1)
+
+    token = registry.token()
+    base_url = f"http://127.0.0.1:{server_port}"
+
+    seq = 0
+    while True:
+        req = urllib.request.Request(
+            f"{base_url}/api/projects/{pid}/logs?since={seq}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            err.print(
+                f"[yellow]No se pudo conectar con PortMaster en {base_url}. Asegúrate de que `portmaster serve` está corriendo.[/]"
+            )
+            raise typer.Exit(1)
+
+        lines = data.get("lines", [])
+        for item in lines:
+            text = item.get("text", "")
+            seq = max(seq, item.get("seq", seq))
+            if not service or service in text:
+                console.print(text)
+
+        if not follow:
+            if not lines and seq == 0:
+                console.print(f"[dim]No hay logs disponibles para {stack.name}.[/]")
+            break
+
+        time.sleep(0.5)
+
+
+@app.command("stats")
+@app.command("top")
+def stats_cmd(
+    target: str = typer.Argument(None, help="Ruta al proyecto"),
+    server_port: int = typer.Option(7666, "--port", "-p", help="Puerto del servidor de PortMaster"),
+) -> None:
+    """Muestra el uso de CPU y memoria de los servicios en ejecución."""
+    import urllib.request
+
+    path = (Path.cwd() / (target or "")).resolve()
+    try:
+        stack = detect.stack_for(path)
+        pid = registry.project_id(stack.root)
+    except config.ConfigError as exc:
+        err.print(f"[red]Error:[/] {exc}")
+        raise typer.Exit(1)
+
+    token = registry.token()
+    base_url = f"http://127.0.0.1:{server_port}"
+    req = urllib.request.Request(
+        f"{base_url}/api/projects/{pid}/metrics",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        err.print(
+            f"[yellow]No se pudo conectar con PortMaster en {base_url}. Asegúrate de que `portmaster serve` está corriendo.[/]"
+        )
+        raise typer.Exit(1)
+
+    metrics = data.get("metrics", {})
+    if not metrics:
+        console.print(f"[dim]No hay servicios activos en {stack.name}.[/]")
+        return
+
+    table = Table(title=f"Métricas en tiempo real: {stack.name}")
+    table.add_column("Servicio", style="cyan")
+    table.add_column("PID", style="dim")
+    table.add_column("CPU %", justify="right")
+    table.add_column("Memoria (MB)", justify="right")
+
+    for name, s in metrics.items():
+        cpu = f"{s.get('cpu_percent', 0.0)}%"
+        mem = f"{s.get('memory_mb', 0.0)} MB"
+        table.add_row(name, str(s.get("pid", "-")), cpu, mem)
+
+    console.print(table)
 
 
 if __name__ == "__main__":

@@ -1586,3 +1586,48 @@ def test_share_rechaza_un_puerto_fuera_de_rango(client):
         res = client.post(f"/api/share?port={port}")
         assert res.status_code == 400, port
         assert "rango" in res.json()["detail"]
+
+
+def test_get_history_endpoint(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "HOME", tmp_path)
+    pid = "serverhistorytest"
+    from portmaster import history
+    history.append(pid, {"duration_s": 2.5, "result": "running", "profile": "prod"})
+
+    res = client.get(f"/api/projects/{pid}/history")
+    assert res.status_code == 200
+    data = res.json()
+    assert "history" in data
+    assert len(data["history"]) >= 1
+    assert data["history"][0]["duration_s"] == 2.5
+
+
+def test_get_metrics_endpoint(client, proyecto):
+    path, _ = proyecto
+    pid = registry.project_id(path)
+    # Sin arrancar, retorna métricas vacías
+    res = client.get(f"/api/projects/{pid}/metrics")
+    assert res.status_code == 200
+    assert res.json() == {"metrics": {}}
+
+    # Arrancado, retorna métricas del stack
+    client.post(f"/api/projects/{pid}/up", json={})
+    esperar_listo(client)
+    try:
+        res = client.get(f"/api/projects/{pid}/metrics")
+        assert res.status_code == 200
+        metrics = res.json().get("metrics", {})
+        assert "srv" in metrics
+        assert "memory_mb" in metrics["srv"]
+        assert "cpu_percent" in metrics["srv"]
+
+        # También debe venir incluido en /api/state sin requests adicionales
+        state_res = client.get("/api/state")
+        assert state_res.status_code == 200
+        proj = next(p for p in state_res.json()["projects"] if p["id"] == pid)
+        assert "metrics" in proj
+        assert "srv" in proj["metrics"]
+    finally:
+        client.post(f"/api/projects/{pid}/down")
+
+

@@ -140,6 +140,52 @@ Hooks síncronos de ciclo de vida:
 *   `post_start`: Comando que se ejecuta una vez que el servicio confirma que está
     listo (`ready`). Si falla, se reporta el error y se detiene el stack.
 
+## restart y max_retries
+
+`restart` decide qué pasa cuando un servicio termina solo, y vale `no` (el
+default), `on-failure` o `always`. Con `on-failure` reintenta si el código de
+salida no es cero; con `always`, también si salió limpio. `max_retries` es el
+tope de reintentos y por default son 3.
+
+```yaml
+services:
+  worker:
+    command: python worker.py
+    ready: none
+    restart: on-failure
+    max_retries: 2
+```
+
+Corriendo eso con un comando que sale con código 3:
+
+```
+worker | proceso terminado con codigo 3. Reiniciando automaticamente (intento 1/2)...
+worker | proceso terminado con codigo 3. Reiniciando automaticamente (intento 2/2)...
+```
+
+Agotados los reintentos, ese servicio queda abajo y no se vuelve a levantar. El
+resto del stack sigue como si nada: el seguimiento de logs continúa y el stack
+se da por terminado solo cuando no queda ningún servicio vivo. Con un solo
+servicio declarado son la misma cosa, con varios no.
+
+Dos límites que conviene saber antes de apoyarse en esto. El primero es que el
+vigilante vive en el seguimiento de logs, o sea que `restart` actúa mientras
+`portmaster up` sigue corriendo o mientras la interfaz tiene la sesión viva, y
+no después. El segundo es que la cuenta de reintentos no se reinicia cuando el
+servicio se estabiliza: un proceso que cae una vez por hora agota su
+`max_retries` a lo largo del día y deja de levantarse.
+
+Los servicios `detached` quedan afuera: su comando termina por diseño y
+tratarlo como una caída lo relanzaría en loop.
+
+Cualquier otro valor en `restart` es error al cargar el archivo, no a mitad del
+arranque:
+
+```
+services.x.restart debe ser 'no', 'on-failure' o 'always'
+services.x.max_retries debe ser un entero positivo o 0
+```
+
 ## scripts
 
 La sección `scripts` permite declarar tareas de desarrollo o pipelines secuenciales:

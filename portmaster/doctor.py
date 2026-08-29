@@ -185,6 +185,21 @@ def _parse_env_keys(path: Path) -> dict[str, str]:
     return result
 
 
+_PLACEHOLDER_SECRETS = {
+    "changeme",
+    "change_me",
+    "your_secret_here",
+    "your_api_key",
+    "your-secret-here",
+    "your-api-key",
+    "secret",
+    "password",
+    "admin",
+    "123456",
+    "todo",
+}
+
+
 def _dotenv(root: Path) -> list[Check]:
     examples = [p for p in (root / ".env.example", root / ".env.template") if p.is_file()]
     if not examples:
@@ -208,8 +223,14 @@ def _dotenv(root: Path) -> list[Check]:
     propias = _parse_env_keys(env_path)
     faltan = [k for k in declaradas if k not in propias]
     vacias = [k for k in declaradas if k in propias and not propias[k]]
+    placeholders = [
+        k
+        for k, v in propias.items()
+        if v.strip().strip("'\"").lower() in _PLACEHOLDER_SECRETS
+        or v.strip().strip("'\"").lower().startswith(("your_", "your-"))
+    ]
 
-    # Las dos en `warn` y no en `fail`. En este comando `fail` esta reservado
+    # Las advertencias en `warn` y no en `fail`. En este comando `fail` esta reservado
     # para lo que no puede arrancar y se sabe con certeza: un binario que no
     # esta en el PATH, docker apagado, un stack.yaml invalido. Una clave que
     # falta en el .env es una inferencia: puede ser opcional, o venir del
@@ -231,6 +252,15 @@ def _dotenv(root: Path) -> list[Check]:
                 "warn",
                 f"sin valor en el .env: {', '.join(vacias)}",
                 "completalas, o dejalas asi si el vacio es a proposito",
+            )
+        )
+    if placeholders:
+        checks.append(
+            Check(
+                "variables de entorno",
+                "warn",
+                f"valores de ejemplo/inseguros en .env: {', '.join(placeholders)}",
+                "reemplaza los placeholders por credenciales reales y seguras",
             )
         )
     return checks or [Check("variables de entorno", "ok", ".env completo")]

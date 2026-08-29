@@ -36,6 +36,7 @@ from . import (
     detect,
     docker,
     doctor,
+    history,
     ports,
     registry,
     runner,
@@ -146,25 +147,42 @@ class Session:
 
     def _run(self) -> None:
         assert self.engine is not None
+        pid = registry.project_id(self.stack.root)
+        t0 = time.monotonic()
         try:
             self.engine.up(self.profile)
+            dur_total = time.monotonic() - t0
+            
+            # Registrar el éxito del arranque
+            history.append(pid, {
+                "project": self.stack.name,
+                "profile": self.profile,
+                "duration_s": round(dur_total, 2),
+                "result": "running",
+                # Duraciones por servicio se obtendrian si runner guardara .start_time.
+                # Como es complejo refactorizar runner, guardamos las cuotas simples.
+                "services": [p.service.name for p in self.engine.procs if p.ready],
+            })
+            
             self.state = "running"
             threading.Thread(target=self._probe_late_http, daemon=True).start()
             if all(proc.service.detached for proc in self.engine.procs):
-                # Todo detached: los comandos ya terminaron y lo que quedo vivo
-                # (contenedores) esta fuera de nuestro arbol. follow() volveria
-                # en el acto y el stack diria "detenido" con todo arriba.
                 return
             self.engine.follow()
-            # Si el apagado ya empezo, el que manda es el: `follow` vuelve en el
-            # acto al cancelarse y "detenido" taparia el "apagando" mientras el
-            # comando de apagado todavia corre.
             if self.state != "stopping":
                 self.state = "stopped"
             _save_sessions_state()
         except Exception as exc:  # el hilo no debe morir en silencio
+            dur_total = time.monotonic() - t0
             self.error = runner.clean_error_message(str(exc))
             self.state = "error"
+            history.append(pid, {
+                "project": self.stack.name,
+                "profile": self.profile,
+                "duration_s": round(dur_total, 2),
+                "result": "error",
+                "error": self.error,
+            })
             _save_sessions_state()
             log.warning("stack %s fallo: %s", self.stack.name, exc)
 
@@ -624,6 +642,18 @@ def create_app(token: str | None = None) -> FastAPI:
         except ValueError as exc:
             log.info("browse rechazado: %s", exc)
             raise HTTPException(400, str(exc))
+
+    @app.get("/api/projects/{pid}/history", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
+    def get_history(pid: str) -> dict:
+        return {"history": history.read(pid)}
+
+    @app.get("/api/projects/{pid}/metrics", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
+    def get_metrics(pid: str) -> dict:
+        with sessions_lock:
+            session = sessions.get(pid)
+        if session is None or session.engine is None:
+            return {"metrics": {}}
+        return {"metrics": session.engine.resource_stats()}
 
     @app.post("/api/projects", dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)])
     def add_project(body: AddProject) -> dict:
@@ -1106,6 +1136,7 @@ def _project_view(path: Path) -> dict:
             "profiles": [],
             "default": [],
             "detected": False,
+            "metrics": {},
             "needs_docker": False,
             "docker_down": False,
         }
@@ -1189,6 +1220,7 @@ def _project_view(path: Path) -> dict:
 
     has_docker = any(doctor._program(s.command) == "docker" for s in stack.services.values())
     docker_down = _docker_is_down() if has_docker else False
+    metrics = session.engine.resource_stats() if session and session.engine else {}
 
     return {
         **base,
@@ -1200,6 +1232,7 @@ def _project_view(path: Path) -> dict:
         # Que levanta Arrancar sin perfil. Vacio = todos.
         "default": list(stack.default or ()),
         "services": services,
+        "metrics": metrics,
         # Los dos: `docker_down` en False quiere decir "el daemon contesta" y
         # tambien "este proyecto no usa Docker", y la interfaz necesita
         # distinguirlos para poder decir "corriendo" en vez de callarse.
