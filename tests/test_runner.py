@@ -2,6 +2,7 @@
 
 import dataclasses
 import io
+import os
 import socket
 import sys
 import textwrap
@@ -974,57 +975,53 @@ def test_runner_follow_down_clean_shutdown(tmp_path, free_ports):
         assert p.popen.poll() is not None
 
 
-def test_runner_guardrails_blocks_destructive_hooks(tmp_path):
-    from portmaster.guardrails import GuardrailError
+def test_un_stop_que_limpia_su_cache_no_queda_bloqueado(tmp_path, free_ports):
+    """La lista de patrones destructivos vetaba comandos legitimos.
 
-    # pre_start destructivo
-    pre_dir = tmp_path / "pre"
-    pre_dir.mkdir(parents=True, exist_ok=True)
-    stack_pre = stack_from(
-        pre_dir,
-        """
+    `rm -rf ~/.cache/loquesea` y `del /s /q <dir>` son lo que hace media docena
+    de hooks de limpieza reales, y quedaban bloqueados antes de ejecutarse. El
+    modelo de confianza del proyecto dice que `stack.yaml` ya es codigo
+    ejecutable por diseno: quien escribe ese comando ya tiene ejecucion
+    arbitraria, asi que la lista no defendia de nadie y si le rompia el archivo
+    al dueno del proyecto.
+
+    El comando es el real de cada plataforma, no uno equivalente que el patron
+    no mire: con un `python -c shutil.rmtree` este test pasaria en verde con y
+    sin el bloqueo, que es no cubrir nada. En POSIX el `~` sale del HOME que se
+    le declara al servicio, asi que borra dentro de tmp_path y no en el hogar
+    de verdad.
+    """
+    (port,) = free_ports(1)
+    hogar = tmp_path / "hogar"
+    basura = hogar / ".cache" / "mi-proyecto"
+    basura.mkdir(parents=True)
+    rastro = basura / "build.log"
+    rastro.write_text("x", encoding="utf-8")
+
+    if os.name == "nt":
+        limpiar = f"del /s /q {basura}"
+        env = ""
+    else:
+        limpiar = "rm -rf ~/.cache/mi-proyecto"
+        env = f"\n            env:\n              HOME: {hogar}"
+
+    stack = stack_from(
+        tmp_path,
+        f"""
         services:
           srv:
-            command: echo ok
-            pre_start: rm -rf /
+            command: {sys.executable} -c "{SERVER.format(port=port)}"
+            port: {port}
+            stop: {limpiar}{env}
         """,
     )
-    engine = make_runner(stack_pre)
-    with pytest.raises(GuardrailError):
-        engine.up()
+    engine = make_runner(stack)
+    engine.up()
+    assert rastro.is_file(), "el hook todavia no corrio"
 
-    # post_start destructivo
-    post_dir = tmp_path / "post"
-    post_dir.mkdir(parents=True, exist_ok=True)
-    stack_post = stack_from(
-        post_dir,
-        """
-        services:
-          srv:
-            command: echo ok
-            post_start: rm -rf /
-        """,
+    engine.down()
+
+    assert not rastro.exists(), (
+        "el stop no llego a ejecutarse: lo bloquearon por parecerse a un "
+        "comando destructivo"
     )
-    engine = make_runner(stack_post)
-    with pytest.raises(GuardrailError):
-        engine.up()
-
-    # stop destructivo en run_stop
-    service_stop = config.Service(
-        name="srv",
-        command="echo ok",
-        cwd=tmp_path,
-        port=None,
-        ready="start",
-        needs=(),
-        env={},
-        detached=False,
-        stop="rm -rf /",
-    )
-    with pytest.raises(GuardrailError):
-        runner.run_stop(service_stop)
-
-
-
-
-

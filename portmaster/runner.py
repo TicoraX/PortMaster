@@ -25,7 +25,7 @@ from pathlib import Path
 import psutil
 from rich.console import Console
 
-from . import config, detect, guardrails, ports
+from . import config, detect, ports
 from .config import Service, Stack
 
 
@@ -420,7 +420,6 @@ class Runner:
         # No es un error: `docker compose up -d` sobre un contenedor que ya esta
         # arriba cae aca y es el caso legitimo. Por eso avisa y no cancela.
         if service.pre_start:
-            guardrails.assert_safe_command(service.pre_start)
             self._say_raw(service.name, color, f"$ pre_start: {service.pre_start}")
             try:
                 res = subprocess.run(
@@ -454,7 +453,6 @@ class Runner:
         return proc
 
     def _spawn(self, service: Service) -> subprocess.Popen:
-        guardrails.assert_safe_command(service.command)
         # shell=True es deliberado: `npm run dev` y `docker compose up -d` no son
         # ejecutables, y stack.yaml ya es codigo ejecutable por diseño. El README
         # documenta el modelo de confianza.
@@ -500,7 +498,6 @@ class Runner:
                     detail += " · el puerto ya estaba ocupado antes de arrancar"
 
                 if service.post_start:
-                    guardrails.assert_safe_command(service.post_start)
                     self._say(proc, f"$ post_start: {service.post_start}")
                     try:
                         res = subprocess.run(
@@ -625,7 +622,6 @@ def run_stop(service: Service) -> subprocess.CompletedProcess | None:
     que colgarse.
     """
     assert service.stop
-    guardrails.assert_safe_command(service.stop)
     try:
         return subprocess.run(
             service.stop,

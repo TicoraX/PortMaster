@@ -56,8 +56,13 @@ esquema de `stack.yaml` y las rutas de la API local.
 - **`portmaster_share` solo publica puertos que el proyecto declara**, y nunca
   el de la propia interfaz. Del otro lado hay un agente y no una persona
   mirando la pantalla. El CLI no cambia: ahí el puerto lo escribís vos.
-- **Los comandos de `stack.yaml` pasan por una lista de patrones destructivos**
-  antes de ejecutarse.
+- **Los comandos de `stack.yaml` no se filtran por contenido.** Una lista de
+  patrones destructivos llegó a revisar cada `command`, `pre_start`,
+  `post_start`, `stop` y script. Se sacó: bloqueaba limpiezas normales como
+  `rm -rf ~/.cache/mi-proyecto` o `drop database test_db`, y dejaba pasar el
+  mismo borrado escrito con una variable de por medio. Quien escribe un
+  `stack.yaml` ya tiene ejecución arbitraria, así que la lista no defendía de
+  nadie y sí le rompía el archivo al dueño del proyecto.
 
 ## [1.2.1] - 2026-08-19
 
