@@ -25,7 +25,7 @@ from pathlib import Path
 import psutil
 from rich.console import Console
 
-from . import config, detect, ports
+from . import config, detect, guardrails, ports
 from .config import Service, Stack
 
 
@@ -133,6 +133,7 @@ class Runner:
     _cancel: threading.Event = field(default_factory=threading.Event)
     _down: bool = False
     restarting: bool = False
+    _retries: dict[str, int] = field(default_factory=dict)
     # Protege `procs` y `_down` entre los hilos de un mismo nivel y el apagado.
     _procs_lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -223,13 +224,31 @@ class Runner:
 
     def follow(self) -> None:
         """Sigue imprimiendo logs hasta Ctrl-C o hasta que no quede nada vivo."""
-        while not self._cancel.is_set() and (
-            # Durante un reinicio no queda nadie vivo por un instante, y sin esto
-            # el stack se daria por terminado justo ahi.
-            self.restarting
-            # Copia: un nivel todavia arrancando puede appendear mientras iteramos.
-            or any(p.popen.poll() is None for p in list(self.procs))
-        ):
+        while not self._cancel.is_set():
+            # Watchdog de reinicio para servicios caidos
+            restarted_any = False
+            for p in list(self.procs):
+                if not self._cancel.is_set() and p.popen.poll() is not None and not p.service.detached:
+                    retries = self._retries.get(p.service.name, 0)
+                    if p.service.restart in ("on-failure", "always") and retries < p.service.max_retries:
+                        exit_code = p.popen.poll()
+                        if p.service.restart == "always" or exit_code != 0:
+                            self._retries[p.service.name] = retries + 1
+                            self._say(
+                                p,
+                                f"proceso terminado con codigo {exit_code}. Reiniciando automaticamente (intento {retries + 1}/{p.service.max_retries})...",
+                            )
+                            if not self._cancel.is_set():
+                                try:
+                                    self.restart(p.service.name)
+                                    restarted_any = True
+                                except Exception as exc:
+                                    self._say(p, f"reintento fallo: {exc}")
+
+            # Si nadie esta vivo, no estamos reiniciando y no se disparo ningun reinicio, salimos
+            if not self.restarting and not restarted_any and not any(p.popen.poll() is None for p in list(self.procs)):
+                break
+
             if not self._drain():
                 time.sleep(POLL)
         self._drain()
@@ -334,6 +353,7 @@ class Runner:
         return proc
 
     def _spawn(self, service: Service) -> subprocess.Popen:
+        guardrails.assert_safe_command(service.command)
         # shell=True es deliberado: `npm run dev` y `docker compose up -d` no son
         # ejecutables, y stack.yaml ya es codigo ejecutable por diseño. El README
         # documenta el modelo de confianza.

@@ -1,49 +1,57 @@
 import json
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-
-from portmaster import registry
+from portmaster import guardrails, registry
 
 MAX_LIMIT = 50
+_history_lock = threading.Lock()
 
 
 def _history_file(pid: str) -> Path:
-    return (registry.HOME / "history" / f"{pid}.jsonl").resolve()
+    clean_pid = guardrails.validate_identifier(pid, "pid")
+    return (registry.HOME / "history" / f"{clean_pid}.jsonl").resolve()
 
 
 def append(pid: str, data: dict[str, Any]) -> None:
     if "timestamp" not in data:
         data["timestamp"] = datetime.now(timezone.utc).isoformat()
-    
+
     try:
         path = _history_file(pid)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(data) + "\n")
-    except OSError:
+        with _history_lock:
+            with path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(data) + "\n")
+    except (OSError, ValueError):
         pass
 
 
 def read(pid: str, limit: int = 5) -> list[dict[str, Any]]:
     limit = max(1, min(limit, MAX_LIMIT))
-    path = _history_file(pid)
+    try:
+        path = _history_file(pid)
+    except ValueError:
+        return []
+
     if not path.is_file():
         return []
-    
+
     lines = []
     try:
-        with path.open("r", encoding="utf-8") as f:
-            for line in f:
-                if line.strip():
-                    try:
-                        record = json.loads(line)
-                        if isinstance(record, dict):
-                            lines.append(record)
-                    except json.JSONDecodeError:
-                        continue
+        with _history_lock:
+            with path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        try:
+                            record = json.loads(line)
+                            if isinstance(record, dict):
+                                lines.append(record)
+                        except json.JSONDecodeError:
+                            continue
     except OSError:
         return []
-    
+
     return lines[-limit:]

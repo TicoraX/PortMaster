@@ -26,6 +26,8 @@ def test_mcp_tools_list():
     assert "portmaster_share" in tool_names
     assert "portmaster_run" in tool_names
     assert "portmaster_clean" in tool_names
+    assert "portmaster_history" in tool_names
+    assert "portmaster_init" in tool_names
 
 
 def _pedir_liberar(port):
@@ -299,3 +301,55 @@ def test_mcp_una_peticion_con_id_si_se_contesta():
     res = mcp.handle_request({"jsonrpc": "2.0", "id": 7, "method": "tools/list"})
     assert res is not None
     assert res["id"] == 7
+
+
+def test_mcp_tool_call_doctor(tmp_path):
+    """Prueba que portmaster_doctor ejecuta los checks sin crash."""
+    req = {
+        "jsonrpc": "2.0",
+        "id": 30,
+        "method": "tools/call",
+        "params": {"name": "portmaster_doctor", "arguments": {"path": str(tmp_path)}},
+    }
+    res = mcp.handle_request(req)
+    assert res["result"].get("isError") is not True, res["result"]
+    text = res["result"]["content"][0]["text"]
+    assert "[OK]" in text or "[WARN]" in text or "[FAIL]" in text
+
+
+def test_mcp_tool_call_history(tmp_path, monkeypatch):
+    """Prueba que portmaster_history lee la telemetria."""
+    monkeypatch.setattr(mcp.registry, "HOME", tmp_path)
+    pid = mcp.registry.project_id(tmp_path)
+    mcp.history.append(pid, {"event": "test", "duration_s": 1.5})
+
+    req = {
+        "jsonrpc": "2.0",
+        "id": 31,
+        "method": "tools/call",
+        "params": {"name": "portmaster_history", "arguments": {"path": str(tmp_path)}},
+    }
+    res = mcp.handle_request(req)
+    assert res["result"].get("isError") is not True, res["result"]
+    data = json.loads(res["result"]["content"][0]["text"])
+    assert data["project_id"] == pid
+    assert len(data["entries"]) >= 1
+    assert data["entries"][0]["event"] == "test"
+
+
+def test_mcp_tool_call_ports(free_ports):
+    """Prueba que portmaster_ports retorna lista de puertos formateada."""
+    (port,) = free_ports(1)
+    req = {
+        "jsonrpc": "2.0",
+        "id": 32,
+        "method": "tools/call",
+        "params": {"name": "portmaster_ports", "arguments": {"ports": [port]}},
+    }
+    res = mcp.handle_request(req)
+    assert res["result"].get("isError") is not True, res["result"]
+    data = json.loads(res["result"]["content"][0]["text"])
+    assert len(data) == 1
+    assert data[0]["port"] == port
+    assert data[0]["free"] is True
+

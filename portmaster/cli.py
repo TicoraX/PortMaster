@@ -936,8 +936,92 @@ def history_cmd(
             res_format += f"\n[dim]{r['error']}[/]"
             
         table.add_row(fecha, perfil, dur, res_format)
-        
+
     console.print(table)
+
+
+@app.command("test-stack")
+def test_stack_cmd(
+    target: str = typer.Argument(None, help="Ruta al proyecto o directorio"),
+) -> None:
+    """Valida la configuración del stack (puertos, dependencias, variables) sin levantar servicios."""
+    path = (Path.cwd() / (target or "")).resolve()
+    try:
+        stack = detect.stack_for(path)
+    except config.ConfigError as exc:
+        err.print(f"[bold red]Configuración inválida:[/] {exc}")
+        raise typer.Exit(1)
+
+    console.print(f"Validando stack [bold]{stack.name}[/] en [dim]{stack.root}[/]...")
+    services = stack.resolve()
+    console.print(f"  • [green]OK:[/] {len(services)} servicio(s) resueltos en orden topológico:")
+    for s in services:
+        deps = f" (espera a: {', '.join(s.needs)})" if s.needs else ""
+        port_info = f" -> puerto {s.port}" if s.port else f" ({s.ready})"
+        console.print(f"    - [cyan]{s.name}[/]: [dim]{s.command}[/]{port_info}{deps}")
+
+    # Verificar estado de puertos
+    declared_ports = stack.ports()
+    if declared_ports:
+        occupied = [p for p in declared_ports if not ports.is_free(p)]
+        if occupied:
+            console.print(f"  • [yellow]Aviso:[/] Puertos actualmente en uso: {', '.join(map(str, occupied))}")
+        else:
+            console.print("  • [green]OK:[/] Todos los puertos declarados están libres")
+
+    console.print("\n[bold green]✓ Stack validado con éxito.[/]")
+
+
+@app.command("logs")
+def logs_cmd(
+    target: str = typer.Argument(None, help="Ruta al proyecto"),
+    service: str = typer.Option(None, "--service", "-s", help="Filtrar por nombre de servicio"),
+    follow: bool = typer.Option(False, "--follow", "-f", help="Seguir logs en tiempo real"),
+    server_port: int = typer.Option(7666, "--port", "-p", help="Puerto del servidor de PortMaster"),
+) -> None:
+    """Muestra o sigue los logs del proyecto en ejecución en PortMaster."""
+    import time
+    import urllib.request
+
+    path = (Path.cwd() / (target or "")).resolve()
+    try:
+        stack = detect.stack_for(path)
+        pid = registry.project_id(stack.root)
+    except config.ConfigError as exc:
+        err.print(f"[red]Error:[/] {exc}")
+        raise typer.Exit(1)
+
+    token = registry.token()
+    base_url = f"http://127.0.0.1:{server_port}"
+
+    seq = 0
+    while True:
+        req = urllib.request.Request(
+            f"{base_url}/api/projects/{pid}/logs?since={seq}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            err.print(
+                f"[yellow]No se pudo conectar con PortMaster en {base_url}. Asegúrate de que `portmaster serve` está corriendo.[/]"
+            )
+            raise typer.Exit(1)
+
+        lines = data.get("lines", [])
+        for item in lines:
+            text = item.get("text", "")
+            seq = max(seq, item.get("seq", seq))
+            if not service or service in text:
+                console.print(text)
+
+        if not follow:
+            if not lines and seq == 0:
+                console.print(f"[dim]No hay logs disponibles para {stack.name}.[/]")
+            break
+
+        time.sleep(0.5)
 
 
 if __name__ == "__main__":

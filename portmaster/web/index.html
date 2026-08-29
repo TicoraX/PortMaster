@@ -257,7 +257,11 @@
               </button>
             </div>
             <div class="logs__box" hidden>
-              <input class="logs__filter" type="search" placeholder="Filtrar logs..." aria-label="Filtrar logs" />
+              <div class="logs__toolbar">
+                <input class="logs__filter" type="search" placeholder="Filtrar logs..." aria-label="Filtrar logs" />
+                <button class="btn btn--quiet btn--sm" type="button" data-act="copy-logs">Copiar</button>
+                <button class="btn btn--quiet btn--sm" type="button" data-act="clear-logs">Limpiar</button>
+              </div>
               <pre class="logs" tabindex="0"></pre>
             </div>
             <div class="history__box" hidden>

@@ -1586,3 +1586,18 @@ def test_share_rechaza_un_puerto_fuera_de_rango(client):
         res = client.post(f"/api/share?port={port}")
         assert res.status_code == 400, port
         assert "rango" in res.json()["detail"]
+
+
+def test_get_history_endpoint(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "HOME", tmp_path)
+    pid = "serverhistorytest"
+    from portmaster import history
+    history.append(pid, {"duration_s": 2.5, "result": "running", "profile": "prod"})
+
+    res = client.get(f"/api/projects/{pid}/history")
+    assert res.status_code == 200
+    data = res.json()
+    assert "history" in data
+    assert len(data["history"]) >= 1
+    assert data["history"][0]["duration_s"] == 2.5
+

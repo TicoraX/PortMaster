@@ -430,6 +430,32 @@ function buildCard(project) {
     });
   }
 
+  const copyLogsBtn = root.querySelector('[data-act="copy-logs"]');
+  if (copyLogsBtn) {
+    copyLogsBtn.setAttribute("aria-label", `Copiar logs de ${project.name}`);
+    copyLogsBtn.addEventListener("click", async () => {
+      if (!entry.rawLogs) {
+        flash("No hay logs disponibles para copiar", "neutral");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(entry.rawLogs);
+        flash("Logs copiados al portapapeles", "good");
+      } catch {
+        flash("No se pudo acceder al portapapeles", "bad");
+      }
+    });
+  }
+
+  const clearLogsBtn = root.querySelector('[data-act="clear-logs"]');
+  if (clearLogsBtn) {
+    clearLogsBtn.setAttribute("aria-label", `Limpiar logs de ${project.name}`);
+    clearLogsBtn.addEventListener("click", () => {
+      entry.rawLogs = "";
+      renderLogsText(entry);
+    });
+  }
+
   const logsButton = root.querySelector('[data-act="logs"]');
   logsButton.addEventListener("click", () => {
     entry.logsOpen = !entry.logsOpen;

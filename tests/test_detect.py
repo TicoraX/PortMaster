@@ -773,3 +773,26 @@ def test_un_framework_moderno_declara_un_servidor(tmp_path, framework):
     stack = detect.detect(tmp_path)
     assert stack.services["web"].command == "npm run dev"
 
+
+def test_deno_con_tasks(tmp_path):
+    write(
+        tmp_path,
+        "deno.json",
+        json.dumps({
+            "tasks": {"dev": "deno run --watch main.ts"}
+        }),
+    )
+    stack = detect.detect(tmp_path)
+    assert stack is not None
+    assert stack.services["web"].command == "deno task dev"
+    assert stack.services["web"].ready == "listen"
+
+
+def test_deno_con_entrypoint(tmp_path):
+    write(tmp_path, "deno.jsonc", "{\n  // config\n}\n")
+    write(tmp_path, "server.ts", "Deno.serve((_req) => new Response('Hello'));\n")
+    stack = detect.detect(tmp_path)
+    assert stack is not None
+    assert stack.services["web"].command == "deno run --allow-net server.ts"
+
+

@@ -11,7 +11,7 @@ from typing import Sequence
 
 from rich.console import Console
 
-from . import config
+from . import config, guardrails
 from .config import ConfigError, Stack
 
 
@@ -107,6 +107,7 @@ def run_script(
     for idx, cmd in enumerate(commands):
         # Si es el ultimo comando del pipeline, le pasamos los extra_args
         full_cmd = (cmd + extra_str) if (idx == len(commands) - 1 and extra_str) else cmd
+        guardrails.assert_safe_command(full_cmd)
         console.print(f"[bold cyan]$[/] [dim]{full_cmd}[/]")
         res = subprocess.run(
             full_cmd,

@@ -788,3 +788,58 @@ def test_share_rechaza_un_puerto_fuera_de_rango(tmp_path, monkeypatch):
         resultado = runner.invoke(cli.app, ["share", target])
         assert resultado.exit_code == 1, target
         assert "rango" in resultado.output
+
+
+def test_test_stack_valido(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text(
+        "services:\n  db:\n    command: echo db\n    port: 5432\n  api:\n    command: echo api\n    port: 8000\n    needs: [db]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    resultado = runner.invoke(cli.app, ["test-stack"])
+    assert resultado.exit_code == 0
+    assert "Stack validado con éxito" in resultado.output
+    assert "db" in resultado.output
+    assert "api" in resultado.output
+
+
+def test_test_stack_invalido(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text(
+        "services:\n  a:\n    command: echo a\n    needs: [b]\n  b:\n    command: echo b\n    needs: [a]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    resultado = runner.invoke(cli.app, ["test-stack"])
+    assert resultado.exit_code == 1
+    assert "circular" in resultado.output
+
+
+def test_cli_history_vacio(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text("services:\n  web:\n    command: echo web\n", encoding="utf-8")
+    monkeypatch.setattr(cli.registry, "HOME", tmp_path)
+    monkeypatch.chdir(tmp_path)
+    resultado = runner.invoke(cli.app, ["history"])
+    assert resultado.exit_code == 0
+    assert "No hay historial" in resultado.output
+
+
+def test_cli_history_con_entradas(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text("services:\n  web:\n    command: echo web\n", encoding="utf-8")
+    monkeypatch.setattr(cli.registry, "HOME", tmp_path)
+    monkeypatch.chdir(tmp_path)
+    pid = cli.registry.project_id(tmp_path)
+    cli.history.append(pid, {"duration_s": 3.4, "result": "running", "profile": "dev"})
+    resultado = runner.invoke(cli.app, ["history"])
+    assert resultado.exit_code == 0
+    assert "Historial de arranques" in resultado.output
+    assert "3.4s" in resultado.output
+
+
+def test_cli_logs_sin_servidor(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text("services:\n  web:\n    command: echo web\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    resultado = runner.invoke(cli.app, ["logs", "--port", "59999"])
+    assert resultado.exit_code == 1
+    assert "No se pudo conectar" in resultado.output
+
+

@@ -43,6 +43,8 @@ class Service:
     # una app que vive en un path o que necesita un token en la query. Puede
     # traer ${VAR}: lo expande runner.service_url, no la carga.
     url: str | None = None
+    restart: str = "no"
+    max_retries: int = 3
 
 
 @dataclass(frozen=True)
@@ -202,7 +204,7 @@ def _service(name: str, spec: object, root: Path) -> Service:
 
     unknown = set(spec) - {
         "command", "cwd", "port", "ready", "needs", "env", "detached", "stop",
-        "env_file", "pre_start", "post_start", "url",
+        "env_file", "pre_start", "post_start", "url", "restart", "max_retries",
     }
     if unknown:
         raise ConfigError(f"{where}: campos desconocidos: {', '.join(sorted(unknown))}")
@@ -255,14 +257,18 @@ def _service(name: str, spec: object, root: Path) -> Service:
         if not isinstance(url, str) or not url.strip():
             raise ConfigError(f"{where}.url debe ser texto no vacio")
         url = url.strip()
-        # Solo http y https. No es una barrera de seguridad —un stack.yaml ya
-        # ejecuta comandos— sino que convierte el error de tipeo mas comun,
-        # escribir `127.0.0.1:8765` sin esquema, en un mensaje claro al cargar
-        # en vez de una ruta relativa que el navegador interpreta como pueda.
         if not url.startswith(("http://", "https://")):
             raise ConfigError(
                 f"{where}.url debe empezar con http:// o https://, y es {url!r}"
             )
+
+    restart = spec.get("restart", "no")
+    if not isinstance(restart, str) or restart not in ("no", "on-failure", "always"):
+        raise ConfigError(f"{where}.restart debe ser 'no', 'on-failure' o 'always'")
+
+    max_retries = spec.get("max_retries", 3)
+    if not isinstance(max_retries, int) or isinstance(max_retries, bool) or max_retries < 0:
+        raise ConfigError(f"{where}.max_retries debe ser un entero positivo o 0")
 
     return Service(
         name=name,
@@ -278,6 +284,8 @@ def _service(name: str, spec: object, root: Path) -> Service:
         pre_start=pre_start,
         post_start=post_start,
         url=url,
+        restart=restart,
+        max_retries=max_retries,
     )
 
 

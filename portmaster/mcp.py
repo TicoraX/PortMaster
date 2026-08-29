@@ -9,7 +9,17 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import __version__, detect, docker, doctor, ports, registry, scripts, tunnel
+from . import (
+    __version__,
+    detect,
+    docker,
+    doctor,
+    history,
+    ports,
+    registry,
+    scripts,
+    tunnel,
+)
 
 # Los tuneles que abrio esta sesion de MCP. `serve_stdio` los cierra al salir:
 # un tunel es lo unico que este servidor deja fuera de su propio proceso, y del
@@ -147,6 +157,27 @@ def handle_request(req: dict[str, Any]) -> dict[str, Any] | None:
                         # esquema es una sugerencia y el campo puede llegar igual.
                         "inputSchema": {"type": "object", "properties": {}},
                     },
+                    {
+                        "name": "portmaster_history",
+                        "description": "Obtiene el historial de arranques y telemetría de un proyecto.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string", "description": "Ruta opcional al proyecto"},
+                                "limit": {"type": "integer", "description": "Cantidad máxima de entradas (default: 5)"},
+                            },
+                        },
+                    },
+                    {
+                        "name": "portmaster_init",
+                        "description": "Genera o congela la configuración de stack.yaml detectada para el proyecto.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string", "description": "Ruta opcional al proyecto"},
+                            },
+                        },
+                    },
                 ]
             },
         }
@@ -204,8 +235,12 @@ def _execute_tool(name: str, args: dict[str, Any]) -> str:
         return json.dumps(data, indent=2)
 
     if name == "portmaster_doctor":
-        results = doctor.check(cwd)
-        lines = [f"[{r.kind.upper()}] {r.name}: {r.detail or 'ok'}" for r in results]
+        results = doctor.run(cwd)
+        lines = [
+            f"[{r.level.upper()}] {r.name}: {r.detail or 'ok'}"
+            + (f" -> Solución: {r.fix}" if r.fix else "")
+            for r in results
+        ]
         return "\n".join(lines)
 
     if name == "portmaster_ports":
@@ -272,6 +307,16 @@ def _execute_tool(name: str, args: dict[str, Any]) -> str:
             )
         ok, msg = docker.prune(docker.DEFAULT_TARGETS)
         return f"Docker prune: {'éxito' if ok else 'fallo'} - {msg}"
+
+    if name == "portmaster_history":
+        pid = registry.project_id(cwd)
+        limit = int(args.get("limit", 5))
+        entries = history.read(pid, limit=limit)
+        return json.dumps({"project_id": pid, "entries": entries}, indent=2)
+
+    if name == "portmaster_init":
+        target = detect.freeze(cwd)
+        return f"Stack congelado exitosamente en: {target}"
 
     raise ValueError(f"Herramienta desconocida: {name}")
 

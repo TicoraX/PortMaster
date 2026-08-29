@@ -674,6 +674,11 @@ body {
   padding-inline: 0.5rem;
 }
 
+.btn--sm {
+  font-size: var(--text-xs);
+  padding: 0.35rem 0.55rem;
+}
+
 .btn--quiet:hover:not(:disabled):not([aria-disabled="true"]) {
   background: var(--color-paper-3);
   border-color: transparent;
@@ -723,8 +728,15 @@ body {
   margin-top: var(--space-md);
 }
 
+.logs__toolbar {
+  display: flex;
+  gap: var(--space-xs);
+  align-items: center;
+  margin-bottom: var(--space-xs);
+}
+
 .logs__filter {
-  width: 100%;
+  flex: 1;
   box-sizing: border-box;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
@@ -733,7 +745,6 @@ body {
   border: var(--rule) solid var(--color-rule);
   border-radius: var(--radius);
   padding: 0.4rem 0.6rem;
-  margin-bottom: var(--space-xs);
 }
 
 .logs {

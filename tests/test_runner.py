@@ -795,3 +795,49 @@ def test_un_pre_start_colgado_falla_como_arranque_y_no_como_traceback(tmp_path, 
         assert "pre_start" in str(exc.value)
     finally:
         engine.down()
+
+
+def test_service_auto_restart_on_failure(tmp_path, free_ports):
+    (port,) = free_ports(1)
+    flag = tmp_path / "runs.txt"
+    script = tmp_path / "flaky.py"
+    script.write_text(
+        "import socket, time, sys, pathlib\n"
+        f"p = pathlib.Path(r'{flag}')\n"
+        "count = len(p.read_text().splitlines()) if p.exists() else 0\n"
+        "p.write_text((p.read_text() if p.exists() else '') + f'{count+1}\\n')\n"
+        "s = socket.socket()\n"
+        f"s.bind(('127.0.0.1', {port}))\n"
+        "s.listen()\n"
+        "time.sleep(0.8 if count == 0 else 60)\n"
+        "if count == 0:\n"
+        "    sys.exit(1)\n",
+        encoding="utf-8",
+    )
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          flaky:
+            command: {sys.executable} flaky.py
+            port: {port}
+            restart: on-failure
+            max_retries: 2
+        """,
+    )
+    engine = make_runner(stack)
+    try:
+        engine.up()
+        import threading
+        t = threading.Thread(target=engine.follow, daemon=True)
+        t.start()
+        # Dar tiempo a que termine el primer intento y el watchdog lo reinicie
+        time.sleep(2.0)
+        assert flag.exists()
+        runs = flag.read_text().splitlines()
+        assert len(runs) >= 2
+    finally:
+        engine.down()
+
+
+
