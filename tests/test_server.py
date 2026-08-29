@@ -1620,6 +1620,13 @@ def test_get_metrics_endpoint(client, proyecto):
         assert "srv" in metrics
         assert "memory_mb" in metrics["srv"]
         assert "cpu_percent" in metrics["srv"]
+
+        # También debe venir incluido en /api/state sin requests adicionales
+        state_res = client.get("/api/state")
+        assert state_res.status_code == 200
+        proj = next(p for p in state_res.json()["projects"] if p["id"] == pid)
+        assert "metrics" in proj
+        assert "srv" in proj["metrics"]
     finally:
         client.post(f"/api/projects/{pid}/down")
 

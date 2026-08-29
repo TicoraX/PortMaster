@@ -4,6 +4,7 @@ import io
 import socket
 import sys
 import textwrap
+import threading
 import time
 from pathlib import Path
 
@@ -862,6 +863,81 @@ def test_runner_resource_stats(tmp_path, free_ports):
         assert stats["srv"]["pid"] is not None
     finally:
         engine.down()
+
+
+def test_runner_follow_down_clean_shutdown(tmp_path, free_ports):
+    (port,) = free_ports(1)
+    stack = stack_from(
+        tmp_path,
+        f"""
+        services:
+          srv:
+            command: {sys.executable} -c "import socket, time; s = socket.socket(); s.bind(('127.0.0.1', {port})); s.listen(); time.sleep(60)"
+            port: {port}
+        """,
+    )
+    engine = make_runner(stack)
+    engine.up()
+    t = threading.Thread(target=engine.follow, daemon=True)
+    t.start()
+    time.sleep(0.3)
+    engine.down()
+    t.join(timeout=2.0)
+    assert not t.is_alive()
+    for p in engine.procs:
+        assert p.popen.poll() is not None
+
+
+def test_runner_guardrails_blocks_destructive_hooks(tmp_path):
+    from portmaster.guardrails import GuardrailError
+
+    # pre_start destructivo
+    pre_dir = tmp_path / "pre"
+    pre_dir.mkdir(parents=True, exist_ok=True)
+    stack_pre = stack_from(
+        pre_dir,
+        """
+        services:
+          srv:
+            command: echo ok
+            pre_start: rm -rf /
+        """,
+    )
+    engine = make_runner(stack_pre)
+    with pytest.raises(GuardrailError):
+        engine.up()
+
+    # post_start destructivo
+    post_dir = tmp_path / "post"
+    post_dir.mkdir(parents=True, exist_ok=True)
+    stack_post = stack_from(
+        post_dir,
+        """
+        services:
+          srv:
+            command: echo ok
+            post_start: rm -rf /
+        """,
+    )
+    engine = make_runner(stack_post)
+    with pytest.raises(GuardrailError):
+        engine.up()
+
+    # stop destructivo en run_stop
+    service_stop = config.Service(
+        name="srv",
+        command="echo ok",
+        cwd=tmp_path,
+        port=None,
+        ready="start",
+        needs=(),
+        env={},
+        detached=False,
+        stop="rm -rf /",
+    )
+    with pytest.raises(GuardrailError):
+        runner.run_stop(service_stop)
+
 
 
 

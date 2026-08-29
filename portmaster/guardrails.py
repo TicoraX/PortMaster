@@ -17,9 +17,14 @@ _WINDOWS_RESERVED = {
     "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 }
 
-# Patrones de comandos destructivos irrecuperables
 _DESTRUCTIVE_PATTERNS = [
-    (re.compile(r"\brm\s+(-[a-zA-Z]*r[a-zA-Z]*\s+-[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*\s+-[a-zA-Z]*r[a-zA-Z]*|-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|--recursive\s+--force|--force\s+--recursive)\s+[/~*]", re.IGNORECASE), "comando destructivo raíz o home ('rm -rf /' o '~')"),
+    (
+        re.compile(
+            r"\brm\s+(?:-[a-zA-Z0-9_-]+\s+)*(?:-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*|-[a-zA-Z]*r[a-zA-Z]*\s+-[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*\s+-[a-zA-Z]*r[a-zA-Z]*|--recursive\s+--force|--force\s+--recursive)\s+(?:--\s+)?['\"]?(?:/(?:\*|\s|$|['\"])|\~|\$HOME|\$\{HOME\}|%USERPROFILE%|%HOMEPATH%|\*)",
+            re.IGNORECASE,
+        ),
+        "comando destructivo raíz o home ('rm -rf /' o '~')",
+    ),
     (re.compile(r"\b(rmdir|rd)\s+.*[/\\]s.*[a-zA-Z]:\\?", re.IGNORECASE), "borrado recursivo de disco completo ('rmdir /s /q C:\\')"),
     (re.compile(r"\bdel\s+.*[/\\]s.*[a-zA-Z]:", re.IGNORECASE), "borrado recursivo de archivos en unidad de disco"),
     (re.compile(r"\b(remove-item)\s+.*-recurse.*[a-zA-Z]:", re.IGNORECASE), "borrado recursivo en PowerShell ('Remove-Item -Recurse C:\\')"),

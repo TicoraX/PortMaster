@@ -270,7 +270,7 @@ def _levantar(
         if not custom_env.is_file():
             err.print(f"No se encontró el archivo env: {env_file}")
             raise typer.Exit(1)
-        extra_vars = doctor._parse_env_keys(custom_env)
+        extra_vars = config.parse_env_file(custom_env)
         os.environ.update(extra_vars)
 
     try:

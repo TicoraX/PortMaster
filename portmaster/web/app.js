@@ -765,33 +765,25 @@ function updateCard(entry, project) {
     );
   }
 
-  if (project.state === "running") {
-    api(`/api/projects/${project.id}/metrics`).then((res) => {
-      const metrics = res?.metrics || {};
-      const items = services.querySelectorAll(".service");
-      project.services.forEach((s, idx) => {
-        const item = items[idx];
-        if (!item) return;
-        const badge = item.querySelector(".service__metrics");
-        if (badge && metrics[s.name]) {
-          const m = metrics[s.name];
-          if (m.memory_mb > 0 || m.cpu_percent > 0) {
-            badge.textContent = `${m.cpu_percent}% · ${m.memory_mb} MB`;
-            badge.setAttribute("aria-label", `CPU: ${m.cpu_percent}%, Memoria: ${m.memory_mb} MB`);
-            badge.hidden = false;
-          } else {
-            badge.hidden = true;
-          }
-        } else if (badge) {
-          badge.hidden = true;
-        }
-      });
-    }).catch(() => {
-      services.querySelectorAll(".service__metrics").forEach((b) => {
-        b.hidden = true;
-      });
-    });
-  }
+  const metrics = project.metrics || {};
+  const items = services.querySelectorAll(".service");
+  project.services.forEach((s, idx) => {
+    const item = items[idx];
+    if (!item) return;
+    const badge = item.querySelector(".service__metrics");
+    if (badge && metrics[s.name]) {
+      const m = metrics[s.name];
+      if (m.memory_mb > 0 || m.cpu_percent > 0) {
+        badge.textContent = `${m.cpu_percent}% · ${m.memory_mb} MB`;
+        badge.setAttribute("aria-label", `CPU: ${m.cpu_percent}%, Memoria: ${m.memory_mb} MB`);
+        badge.hidden = false;
+      } else {
+        badge.hidden = true;
+      }
+    } else if (badge) {
+      badge.hidden = true;
+    }
+  });
 
   const select = root.querySelector(".profile__select");
   const wanted = [project.default.join(","), ...project.profiles].join("|");
@@ -899,10 +891,26 @@ function renderHistoryTable(entry, runs) {
       const tr = document.createElement("tr");
       
       const tdFecha = document.createElement("td");
-      const parts = (r.timestamp || "").split("T");
-      const day = parts[0];
-      const time = parts.length > 1 ? parts[1].substring(0, 5) : "";
-      tdFecha.textContent = `${day} ${time}`;
+      let fechaTexto = "";
+      if (r.timestamp) {
+        try {
+          const d = new Date(r.timestamp);
+          if (!isNaN(d.getTime())) {
+            const pad = (n) => String(n).padStart(2, "0");
+            const yyyy = d.getFullYear();
+            const mm = pad(d.getMonth() + 1);
+            const dd = pad(d.getDate());
+            const hh = pad(d.getHours());
+            const min = pad(d.getMinutes());
+            fechaTexto = `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+          } else {
+            fechaTexto = r.timestamp.replace("T", " ").substring(0, 16);
+          }
+        } catch (_) {
+          fechaTexto = r.timestamp.replace("T", " ").substring(0, 16);
+        }
+      }
+      tdFecha.textContent = fechaTexto;
       tr.appendChild(tdFecha);
       
       const tdPerfil = document.createElement("td");

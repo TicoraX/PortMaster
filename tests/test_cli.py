@@ -1,6 +1,7 @@
 """Comandos del CLI. Servidores reales, igual que el resto del suite."""
 
 import json
+import os
 import re
 import socket
 import subprocess
@@ -868,6 +869,32 @@ def test_cli_stats_sin_servidor(tmp_path, monkeypatch):
     resultado = runner.invoke(cli.app, ["stats", "--port", "59999"])
     assert resultado.exit_code == 1
     assert "No se pudo conectar" in resultado.output
+
+
+def test_up_env_file_unwraps_quotes(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text("services:\n  web:\n    command: echo $APP_PORT\n", encoding="utf-8")
+    (tmp_path / ".env.custom").write_text('APP_PORT="8080"\nSECRET=\'my-secret\'\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    llamado = {}
+
+    class FakeRunner:
+        def __init__(self, *args, **kwargs):
+            self.procs = []
+        def up(self, services):
+            llamado["env_port"] = os.environ.get("APP_PORT")
+            llamado["env_secret"] = os.environ.get("SECRET")
+            return self
+        def follow(self):
+            pass
+        def down(self):
+            pass
+
+    monkeypatch.setattr(cli.runner, "Runner", FakeRunner)
+    resultado = runner.invoke(cli.app, ["up", "--env-file", ".env.custom"])
+    assert resultado.exit_code == 0
+    assert llamado.get("env_port") == "8080"
+    assert llamado.get("env_secret") == "my-secret"
+
 
 
 

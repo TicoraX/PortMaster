@@ -228,7 +228,10 @@ class Runner:
             # Watchdog de reinicio para servicios caidos
             restarted_any = False
             for p in list(self.procs):
-                if not self._cancel.is_set() and p.popen.poll() is not None and not p.service.detached:
+                with self._procs_lock:
+                    if self._down or self._cancel.is_set():
+                        break
+                if p.popen.poll() is not None and not p.service.detached:
                     retries = self._retries.get(p.service.name, 0)
                     if p.service.restart in ("on-failure", "always") and retries < p.service.max_retries:
                         exit_code = p.popen.poll()
@@ -238,12 +241,14 @@ class Runner:
                                 p,
                                 f"proceso terminado con codigo {exit_code}. Reiniciando automaticamente (intento {retries + 1}/{p.service.max_retries})...",
                             )
-                            if not self._cancel.is_set():
-                                try:
-                                    self.restart(p.service.name)
-                                    restarted_any = True
-                                except Exception as exc:
-                                    self._say(p, f"reintento fallo: {exc}")
+                            with self._procs_lock:
+                                if self._down or self._cancel.is_set():
+                                    break
+                            try:
+                                self.restart(p.service.name)
+                                restarted_any = True
+                            except Exception as exc:
+                                self._say(p, f"reintento fallo: {exc}")
 
             # Si nadie esta vivo, no estamos reiniciando y no se disparo ningun reinicio, salimos
             if not self.restarting and not restarted_any and not any(p.popen.poll() is None for p in list(self.procs)):
@@ -255,16 +260,22 @@ class Runner:
 
     def restart(self, name: str) -> None:
         """Reinicia un servicio sin tocar el resto del stack."""
-        index = next((i for i, p in enumerate(self.procs) if p.service.name == name), None)
-        if index is None:
-            raise StartupError(f"{name} no esta corriendo en este stack")
+        with self._procs_lock:
+            if self._down or self._cancel.is_set():
+                raise StartupError("apagado en curso, no se puede reiniciar")
+            index = next((i for i, p in enumerate(self.procs) if p.service.name == name), None)
+            if index is None:
+                raise StartupError(f"{name} no esta corriendo en este stack")
+            old = self.procs[index]
+            self.restarting = True
 
-        old = self.procs[index]
-        self.restarting = True
         try:
             self._stop_one(old)
-            proc = self._spawn_proc(old.service, old.color)
-            self.procs[index] = proc
+            with self._procs_lock:
+                if self._down or self._cancel.is_set():
+                    raise StartupError("apagado en curso, no se puede reiniciar")
+                proc = self._spawn_proc(old.service, old.color)
+                self.procs[index] = proc
         finally:
             self.restarting = False
         self._wait_ready(proc)
@@ -353,6 +364,7 @@ class Runner:
         # No es un error: `docker compose up -d` sobre un contenedor que ya esta
         # arriba cae aca y es el caso legitimo. Por eso avisa y no cancela.
         if service.pre_start:
+            guardrails.assert_safe_command(service.pre_start)
             self._say_raw(service.name, color, f"$ pre_start: {service.pre_start}")
             try:
                 res = subprocess.run(
@@ -432,6 +444,7 @@ class Runner:
                     detail += " · el puerto ya estaba ocupado antes de arrancar"
 
                 if service.post_start:
+                    guardrails.assert_safe_command(service.post_start)
                     self._say(proc, f"$ post_start: {service.post_start}")
                     try:
                         res = subprocess.run(
@@ -556,6 +569,7 @@ def run_stop(service: Service) -> subprocess.CompletedProcess | None:
     que colgarse.
     """
     assert service.stop
+    guardrails.assert_safe_command(service.stop)
     try:
         return subprocess.run(
             service.stop,

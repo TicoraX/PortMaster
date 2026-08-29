@@ -35,28 +35,39 @@ def test_check_command_blocks_destructive():
     assert ok is False
     assert "destructivo" in reason
 
-    ok, reason = guardrails.check_command("rm -r -f /")
+    ok, _ = guardrails.check_command("rm -r -f /")
     assert ok is False
 
-    ok, reason = guardrails.check_command("rm -rf ~")
+    ok, _ = guardrails.check_command('rm -rf "/"')
     assert ok is False
 
-    ok, reason = guardrails.check_command("rd /s /q C:\\")
+    ok, _ = guardrails.check_command("rm -rf -- /")
     assert ok is False
 
-    ok, reason = guardrails.check_command("del /s /q C:\\*")
+    ok, _ = guardrails.check_command('rm -rf -- "$HOME"')
     assert ok is False
 
-    ok, reason = guardrails.check_command("Remove-Item -Recurse -Force C:\\")
+    ok, _ = guardrails.check_command("rm -rf ~")
     assert ok is False
 
-    ok, reason = guardrails.check_command("format C:")
+    ok, _ = guardrails.check_command("rd /s /q C:\\")
     assert ok is False
 
-    ok, reason = guardrails.check_command("DROP DATABASE production")
+    ok, _ = guardrails.check_command("del /s /q C:\\*")
+    assert ok is False
+
+    ok, _ = guardrails.check_command("Remove-Item -Recurse -Force C:\\")
+    assert ok is False
+
+    ok, _ = guardrails.check_command("format C:")
+    assert ok is False
+
+    ok, _ = guardrails.check_command("DROP DATABASE production")
     assert ok is False
 
 
 def test_assert_safe_command_raises():
     with pytest.raises(guardrails.GuardrailError):
         guardrails.assert_safe_command("rm -rf /")
+    with pytest.raises(guardrails.GuardrailError):
+        guardrails.assert_safe_command('rm -rf -- "$HOME"')

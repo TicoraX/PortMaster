@@ -1136,6 +1136,7 @@ def _project_view(path: Path) -> dict:
             "profiles": [],
             "default": [],
             "detected": False,
+            "metrics": {},
             "needs_docker": False,
             "docker_down": False,
         }
@@ -1219,6 +1220,7 @@ def _project_view(path: Path) -> dict:
 
     has_docker = any(doctor._program(s.command) == "docker" for s in stack.services.values())
     docker_down = _docker_is_down() if has_docker else False
+    metrics = session.engine.resource_stats() if session and session.engine else {}
 
     return {
         **base,
@@ -1230,6 +1232,7 @@ def _project_view(path: Path) -> dict:
         # Que levanta Arrancar sin perfil. Vacio = todos.
         "default": list(stack.default or ()),
         "services": services,
+        "metrics": metrics,
         # Los dos: `docker_down` en False quiere decir "el daemon contesta" y
         # tambien "este proyecto no usa Docker", y la interfaz necesita
         # distinguirlos para poder decir "corriendo" en vez de callarse.
