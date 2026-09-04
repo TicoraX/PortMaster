@@ -29,10 +29,12 @@ def aislado(tmp_path, monkeypatch):
     server.limiter._hits.clear()
     with server.sessions_lock:
         server.sessions.clear()
+        server.selected_profiles.clear()
     yield
     for session in list(server.sessions.values()):
         session.stop()
     server.sessions.clear()
+    server.selected_profiles.clear()
 
 
 @pytest.fixture
@@ -1718,6 +1720,121 @@ def test_project_view_includes_dependency_graph(client, proyecto):
     assert "levels" in proj["graph"]
     assert len(proj["graph"]["nodes"]) >= 1
     assert proj["graph"]["nodes"][0]["name"] == "srv"
+
+
+def test_env_audit_endpoint(client, tmp_path):
+    root = tmp_path / "env_proj"
+    root.mkdir()
+    (root / "stack.yaml").write_text("name: env_proj\nservices: {}\n", encoding="utf-8")
+    (root / ".env.example").write_text(
+        "API_KEY=\nDB_URL=\nSECRET_KEY=\nEMPTY_KEY=\n", encoding="utf-8"
+    )
+    (root / ".env").write_text(
+        "API_KEY=your_secret_here\nDB_URL=postgres://super_secret_user:super_secret_pass@127.0.0.1/db\nEMPTY_KEY=\n",
+        encoding="utf-8",
+    )
+    pid = registry.project_id(registry.add(root))
+
+    res = client.get(f"/api/projects/{pid}/env-audit")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["has_env"] is True
+    assert data["has_example"] is True
+    assert data["example_file"] == ".env.example"
+    assert data["ok"] is False
+    assert "SECRET_KEY" in data["missing_keys"]
+    assert "API_KEY" in data["placeholder_keys"]
+    assert "EMPTY_KEY" in data["empty_keys"]
+    # Verificar que NINGÚN secreto se filtra en la respuesta JSON ni en texto
+    assert "super_secret_user" not in res.text
+    assert "super_secret_pass" not in res.text
+
+    # Arreglar .env y verificar que ok pasa a True
+    (root / ".env").write_text(
+        "API_KEY=valid-prod-token-12345\nDB_URL=sqlite:///app.db\nSECRET_KEY=custom-key-999\nEMPTY_KEY=value\n",
+        encoding="utf-8",
+    )
+    res2 = client.get(f"/api/projects/{pid}/env-audit")
+    assert res2.status_code == 200
+    data2 = res2.json()
+    assert data2["ok"] is True
+    assert data2["missing_keys"] == []
+    assert data2["placeholder_keys"] == []
+    assert data2["empty_keys"] == []
+
+
+def test_switch_profile_endpoint(client, tmp_path, free_ports):
+    ports = free_ports(2)
+    p1, p2 = ports[0], ports[1]
+    root = tmp_path / "switch_proj"
+    root.mkdir()
+    (root / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        name: switch_proj
+        services:
+          web:
+            command: {sys.executable} -c "{SERVER.format(port=p1)}"
+            port: {p1}
+          api:
+            command: {sys.executable} -c "{SERVER.format(port=p2)}"
+            port: {p2}
+        profiles:
+          front: [web]
+          back: [api]
+        """),
+        encoding="utf-8",
+    )
+    pid = registry.project_id(registry.add(root))
+
+    # 1. Proyecto detenido: rechaza perfil desconocido con 400
+    res_err = client.post(f"/api/projects/{pid}/switch-profile", json={"profile": "desconocido"})
+    assert res_err.status_code == 400
+
+    # 2. Proyecto detenido: cambia perfil configurado a "front"
+    res = client.post(f"/api/projects/{pid}/switch-profile", json={"profile": "front"})
+    assert res.status_code == 200
+    assert res.json()["ok"] is True
+    assert res.json()["profile"] == "front"
+
+    # Verificar en /api/state que el perfil activo ahora es "front"
+    state = client.get("/api/state").json()
+    proj = next(p for p in state["projects"] if p["id"] == pid)
+    assert proj["profile"] == "front"
+
+    # 3. Arrancar con perfil "front"
+    assert client.post(f"/api/projects/{pid}/up", json={"profile": "front"}).status_code == 200
+    esperar_listo(client)
+    from portmaster import ports as ports_mod
+
+    assert not ports_mod.is_free(p1), "web debio arrancar"
+    assert ports_mod.is_free(p2), "api no debio arrancar"
+
+    # 4. Conmutar en caliente a perfil "back"
+    res_switch = client.post(f"/api/projects/{pid}/switch-profile", json={"profile": "back"})
+    assert res_switch.status_code == 200
+    assert res_switch.json()["ok"] is True
+    assert res_switch.json()["profile"] == "back"
+
+    # Esperar que web se detenga y api arranque
+    assert esperar(lambda: not ports_mod.is_free(p2) and ports_mod.is_free(p1), segundos=15)
+
+    # Verificar en /api/state que el proyecto sigue corriendo con perfil "back"
+    assert esperar(
+        lambda: any(
+            p["id"] == pid and p["state"] == "running" and p["profile"] == "back"
+            for p in client.get("/api/state").json()["projects"]
+        ),
+        segundos=15,
+    )
+    state2 = client.get("/api/state").json()
+    proj2 = next(p for p in state2["projects"] if p["id"] == pid)
+    assert proj2["profile"] == "back"
+    assert proj2["state"] == "running"
+
+    # 5. Apagar
+    assert client.post(f"/api/projects/{pid}/down").status_code == 200
+    assert esperar(lambda: ports_mod.is_free(p2))
+
 
 
 

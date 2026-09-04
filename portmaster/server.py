@@ -30,7 +30,7 @@ import psutil
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from rich.console import Console
 
 from . import (
@@ -240,6 +240,28 @@ class Session:
             self.state = "error"
             log.warning("reinicio de %s fallo: %s", name, exc)
 
+    def switch_profile_async(self, new_profile: str | None) -> None:
+        """Conmuta el perfil en caliente apagando servicios y arrancando el nuevo perfil."""
+        self.state = "stopping"
+        threading.Thread(target=self._switch_profile, args=(new_profile,), daemon=True).start()
+
+    def _switch_profile(self, new_profile: str | None) -> None:
+        self.stop()
+        self.profile = new_profile
+        self.error = None
+        self.late_http.clear()
+        self.stopped_by_user = False
+        self.state = "starting"
+        self.sink.write(
+            f"\n[portmaster] Conmutando al perfil '{new_profile or 'default'}'...\n"
+        )
+        console = Console(
+            file=self.sink, force_terminal=False, no_color=True, width=160, soft_wrap=True
+        )
+        self.engine = runner.Runner(self.stack, console=console)
+        self.thread = threading.current_thread()
+        self._run()
+
     def stop(self) -> None:
         self.stopped_by_user = True
         if self.engine is not None:
@@ -247,7 +269,11 @@ class Session:
             # levanto, asi que se le pide que corte y se lo espera. Despues su
             # `down` ya corrio y este no hace nada.
             self.engine.cancel()
-            if self.thread is not None:
+            if (
+                self.thread is not None
+                and self.thread.is_alive()
+                and self.thread != threading.current_thread()
+            ):
                 # ponytail: un detached en curso (`docker compose up -d`
                 # construyendo) no se puede cortar, se espera a que termine. Si
                 # alguna vez molesta, matar el arbol del comando detached.
@@ -359,8 +385,17 @@ class Session:
 
 
 sessions: dict[str, Session] = {}
+selected_profiles: dict[str, str | None] = {}
 sessions_lock = threading.Lock()
 limiter = RateLimit()
+
+
+def _current_profile(pid: str, session: Session | None) -> str | None:
+    if pid in selected_profiles:
+        return selected_profiles[pid]
+    if session is not None:
+        return session.profile
+    return None
 
 # Cuanto vale un chequeo del daemon de docker antes de repetirlo.
 DOCKER_TTL = 10.0
@@ -483,6 +518,16 @@ class AddProject(BaseModel):
 
 class UpRequest(BaseModel):
     profile: str | None = Field(default=None, max_length=100)
+
+
+class SwitchProfileRequest(BaseModel):
+    profile: str | None = Field(default=None, max_length=100)
+
+    @field_validator("profile", mode="before")
+    def _empty_to_none(cls, v: object) -> object:
+        if v == "":
+            return None
+        return v
 
 
 class KillAllRequest(BaseModel):
@@ -683,6 +728,43 @@ def create_app(token: str | None = None) -> FastAPI:
             return {"metrics": {}}
         return {"metrics": session.engine.resource_stats()}
 
+    @app.get("/api/projects/{pid}/env-audit", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
+    def get_env_audit(pid: str) -> dict:
+        path = _lookup(pid)
+        examples = [p for p in (path / ".env.example", path / ".env.template") if p.is_file()]
+        env_path = path / ".env"
+        has_env = env_path.is_file()
+        has_example = len(examples) > 0
+        example_name = examples[0].name if has_example else None
+
+        declaradas = doctor._parse_env_keys(examples[0]) if has_example else {}
+        propias = doctor._parse_env_keys(env_path) if has_env else {}
+
+        faltan = [k for k in declaradas if k not in propias]
+        vacias = [k for k in declaradas if k in propias and not propias[k]]
+        placeholders = [
+            k
+            for k, v in propias.items()
+            if v.strip().strip("'\"").lower() in doctor._PLACEHOLDER_SECRETS
+            or v.strip().strip("'\"").lower().startswith(("your_", "your-"))
+        ] if has_env else []
+
+        if has_example:
+            ok = has_env and len(faltan) == 0 and len(placeholders) == 0
+        else:
+            ok = (not has_env) or (len(placeholders) == 0)
+
+        # Cero secretos: sólo nombres de variables y flags booleanos.
+        return {
+            "ok": ok,
+            "has_env": has_env,
+            "has_example": has_example,
+            "example_file": example_name,
+            "missing_keys": faltan,
+            "empty_keys": vacias,
+            "placeholder_keys": placeholders,
+        }
+
     @app.post("/api/projects", dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)])
     def add_project(body: AddProject) -> dict:
         try:
@@ -758,11 +840,35 @@ def create_app(token: str | None = None) -> FastAPI:
                 raise HTTPException(409, "el stack ya esta corriendo")
             if live is not None and live.state == "stopping":
                 raise HTTPException(409, "el stack se esta apagando")
+            selected_profiles[pid] = body.profile
             session = Session(stack, body.profile)
             sessions[pid] = session
         session.start()
         _save_sessions_state()
         return {"ok": True}
+
+    @app.post(
+        "/api/projects/{pid}/switch-profile",
+        dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)],
+    )
+    def switch_profile(pid: str, body: SwitchProfileRequest) -> dict:
+        path = _lookup(pid)
+        try:
+            stack = detect.stack_for(path)
+            stack.resolve(body.profile)
+        except config.ConfigError as exc:
+            log.info("cambio de perfil rechazado para %s: %s", pid, exc)
+            raise HTTPException(400, str(exc))
+
+        with sessions_lock:
+            selected_profiles[pid] = body.profile
+            session = sessions.get(pid)
+            is_running = session is not None and session.state in ("starting", "running")
+            if is_running:
+                session.switch_profile_async(body.profile)
+
+        _save_sessions_state()
+        return {"ok": True, "profile": body.profile}
 
     @app.post(
         "/api/projects/{pid}/down",
@@ -1223,6 +1329,7 @@ def _project_view(path: Path) -> dict:
             "error": str(exc),
             "services": [],
             "profiles": [],
+            "profile": None,
             "default": [],
             "detected": False,
             "metrics": {},
@@ -1319,6 +1426,7 @@ def _project_view(path: Path) -> dict:
         "error": session.error if session else None,
         "detected": stack.detected,
         "profiles": sorted(stack.profiles),
+        "profile": _current_profile(pid, session),
         # Que levanta Arrancar sin perfil. Vacio = todos.
         "default": list(stack.default or ()),
         "services": services,

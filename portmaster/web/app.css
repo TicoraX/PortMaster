@@ -866,6 +866,96 @@ body {
   overflow: visible;
 }
 
+/* auditor seguro de entorno (.env) --------------------------------------- */
+
+.env__box {
+  margin-top: var(--space-sm);
+  background: var(--color-paper-2);
+  border: var(--rule) solid var(--color-rule);
+  border-radius: var(--radius);
+  padding: var(--space-sm);
+  font-size: var(--text-sm);
+}
+
+.env__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-xs);
+}
+
+.env__status-badge {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.env__status-badge--ok {
+  background: color-mix(in oklch, var(--color-ok) 15%, transparent);
+  color: var(--color-ok-ink);
+  border: var(--rule) solid color-mix(in oklch, var(--color-ok) 30%, transparent);
+}
+
+.env__status-badge--warn {
+  background: color-mix(in oklch, var(--color-warn) 18%, transparent);
+  color: var(--color-warn-ink);
+  border: var(--rule) solid color-mix(in oklch, var(--color-warn) 35%, transparent);
+}
+
+.env__summary {
+  color: var(--color-ink-2);
+  font-size: var(--text-xs);
+}
+
+.env__details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin-top: var(--space-xs);
+}
+
+.env__section-title {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--color-ink-2);
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.env__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.env__key-pill {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-paper-3);
+  border: var(--rule) solid var(--color-rule);
+  color: var(--color-ink);
+}
+
+.env__key-pill--missing {
+  border-color: color-mix(in oklch, var(--color-warn) 40%, transparent);
+  color: var(--color-warn-ink);
+}
+
+.env__key-pill--placeholder {
+  border-color: var(--color-bad-rule);
+  color: var(--color-bad-ink);
+}
+
 /* alta de proyecto -------------------------------------------------------- */
 
 .enroll {

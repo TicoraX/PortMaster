@@ -252,6 +252,9 @@
               <button class="btn btn--quiet" type="button" data-act="graph" aria-expanded="false" hidden>
                 Grafo
               </button>
+              <button class="btn btn--quiet" type="button" data-act="env-audit" aria-expanded="false">
+                .env
+              </button>
               <button class="btn btn--quiet project__freeze" type="button" data-act="freeze" hidden>
                 Congelar a stack.yaml
               </button>
@@ -287,6 +290,26 @@
               </div>
               <div class="graph__canvas-wrapper">
                 <svg class="graph__svg" role="img" aria-label="Grafo de dependencias"></svg>
+              </div>
+            </div>
+            <div class="env__box" hidden>
+              <div class="env__header">
+                <span class="env__status-badge"></span>
+                <span class="env__summary"></span>
+              </div>
+              <div class="env__details">
+                <div class="env__section env__section--missing" hidden>
+                  <span class="env__section-title">Claves faltantes en .env:</span>
+                  <ul class="env__list env__list--missing"></ul>
+                </div>
+                <div class="env__section env__section--placeholders" hidden>
+                  <span class="env__section-title">Claves con placeholders inseguros:</span>
+                  <ul class="env__list env__list--placeholders"></ul>
+                </div>
+                <div class="env__section env__section--empty" hidden>
+                  <span class="env__section-title">Claves declaradas vacías:</span>
+                  <ul class="env__list env__list--empty"></ul>
+                </div>
               </div>
             </div>
           </div>

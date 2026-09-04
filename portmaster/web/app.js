@@ -391,6 +391,28 @@ function buildCard(project) {
     );
   });
 
+  const profileSelect = root.querySelector(".profile__select");
+  if (profileSelect) {
+    profileSelect.addEventListener("change", () => {
+      const live = entry.lastState === "starting" || entry.lastState === "running";
+      const newProfile = profileSelect.value || null;
+      if (live) {
+        flash(`Conmutando ${project.name} al perfil "${newProfile || 'por defecto'}"...`, "neutral");
+        api(`/api/projects/${project.id}/switch-profile`, {
+          method: "POST",
+          body: JSON.stringify({ profile: newProfile }),
+        })
+          .then(() => pull())
+          .catch((err) => flash(`Fallo al conmutar perfil: ${err.message}`, "bad"));
+      } else {
+        api(`/api/projects/${project.id}/switch-profile`, {
+          method: "POST",
+          body: JSON.stringify({ profile: newProfile }),
+        }).catch(() => {});
+      }
+    });
+  }
+
   root.querySelector('[data-act="down"]').addEventListener("click", (event) => {
     act(event.currentTarget, () =>
       api(`/api/projects/${project.id}/down`, { method: "POST" }),
@@ -464,14 +486,19 @@ function buildCard(project) {
     if (entry.logsOpen) {
       entry.historyOpen = false;
       entry.graphOpen = false;
+      entry.envOpen = false;
       const hb = root.querySelector(".history__box");
       if (hb) hb.hidden = true;
       const gb = root.querySelector(".graph__box");
       if (gb) gb.hidden = true;
+      const eb = root.querySelector(".env__box");
+      if (eb) eb.hidden = true;
       const hBtn = root.querySelector('[data-act="history"]');
       if (hBtn) hBtn.setAttribute("aria-expanded", "false");
       const gBtn = root.querySelector('[data-act="graph"]');
       if (gBtn) gBtn.setAttribute("aria-expanded", "false");
+      const eBtn = root.querySelector('[data-act="env-audit"]');
+      if (eBtn) eBtn.setAttribute("aria-expanded", "false");
       startLogsStream(project.id, entry);
     } else {
       stopLogsStream(entry);
@@ -487,6 +514,7 @@ function buildCard(project) {
     if (entry.historyOpen) {
       entry.logsOpen = false;
       entry.graphOpen = false;
+      entry.envOpen = false;
       stopLogsStream(entry);
       if (logsBox) logsBox.hidden = true;
       logsButton.setAttribute("aria-expanded", "false");
@@ -494,6 +522,10 @@ function buildCard(project) {
       if (gb) gb.hidden = true;
       const gBtn = root.querySelector('[data-act="graph"]');
       if (gBtn) gBtn.setAttribute("aria-expanded", "false");
+      const eb = root.querySelector(".env__box");
+      if (eb) eb.hidden = true;
+      const eBtn = root.querySelector('[data-act="env-audit"]');
+      if (eBtn) eBtn.setAttribute("aria-expanded", "false");
       entry.lastHistoryState = project.state;
       pullHistory(project.id, entry);
     }
@@ -509,12 +541,40 @@ function buildCard(project) {
       if (entry.graphOpen) {
         entry.logsOpen = false;
         entry.historyOpen = false;
+        entry.envOpen = false;
         stopLogsStream(entry);
         if (logsBox) logsBox.hidden = true;
         logsButton.setAttribute("aria-expanded", "false");
         if (historyBox) historyBox.hidden = true;
         historyButton.setAttribute("aria-expanded", "false");
+        const eb = root.querySelector(".env__box");
+        if (eb) eb.hidden = true;
+        const eBtn = root.querySelector('[data-act="env-audit"]');
+        if (eBtn) eBtn.setAttribute("aria-expanded", "false");
         renderGraph(project, entry);
+      }
+    });
+  }
+
+  const envBox = root.querySelector(".env__box");
+  const envButton = root.querySelector('[data-act="env-audit"]');
+  if (envButton) {
+    envButton.addEventListener("click", () => {
+      entry.envOpen = !entry.envOpen;
+      if (envBox) envBox.hidden = !entry.envOpen;
+      envButton.setAttribute("aria-expanded", String(entry.envOpen));
+      if (entry.envOpen) {
+        entry.logsOpen = false;
+        entry.historyOpen = false;
+        entry.graphOpen = false;
+        stopLogsStream(entry);
+        if (logsBox) logsBox.hidden = true;
+        logsButton.setAttribute("aria-expanded", "false");
+        if (historyBox) historyBox.hidden = true;
+        historyButton.setAttribute("aria-expanded", "false");
+        if (graphBox) graphBox.hidden = true;
+        if (graphButton) graphButton.setAttribute("aria-expanded", "false");
+        pullEnvAudit(project.id, entry);
       }
     });
   }
@@ -840,6 +900,9 @@ function updateCard(entry, project) {
     );
   }
   root.querySelector(".profile").hidden = project.profiles.length === 0;
+  if (document.activeElement !== select) {
+    select.value = project.profile || "";
+  }
 
   const live = project.state === "starting" || project.state === "running";
   const stopping = project.state === "stopping";
@@ -870,6 +933,9 @@ function updateCard(entry, project) {
   }
   if (entry.graphOpen && hasGraph) {
     renderGraph(project, entry);
+  }
+  if (entry.envOpen) {
+    pullEnvAudit(project.id, entry);
   }
 }
 
@@ -1133,6 +1199,75 @@ function renderHistoryTable(entry, runs) {
       return tr;
     })
   );
+}
+
+async function pullEnvAudit(id, entry) {
+  const envBox = entry.root.querySelector(".env__box");
+  if (!envBox) return;
+
+  const badge = envBox.querySelector(".env__status-badge");
+  const summary = envBox.querySelector(".env__summary");
+  const missingSec = envBox.querySelector(".env__section--missing");
+  const missingList = envBox.querySelector(".env__list--missing");
+  const placeSec = envBox.querySelector(".env__section--placeholders");
+  const placeList = envBox.querySelector(".env__list--placeholders");
+  const emptySec = envBox.querySelector(".env__section--empty");
+  const emptyList = envBox.querySelector(".env__list--empty");
+
+  try {
+    const data = await api(`/api/projects/${id}/env-audit`);
+    if (data.ok) {
+      badge.textContent = "OK";
+      badge.className = "env__status-badge env__status-badge--ok";
+      if (data.has_example) {
+        summary.textContent = `.env sincronizado con ${data.example_file} (sin secretos por defecto).`;
+      } else if (data.has_env) {
+        summary.textContent = ".env local detectado sin placeholders inseguros.";
+      } else {
+        summary.textContent = "Sin archivos de entorno (.env ni .env.example).";
+      }
+    } else {
+      badge.textContent = "ADVERTENCIA";
+      badge.className = "env__status-badge env__status-badge--warn";
+      const motivos = [];
+      if (!data.has_env && data.has_example) {
+        motivos.push(`falta .env local (existe ${data.example_file})`);
+      }
+      if (data.missing_keys && data.missing_keys.length > 0) {
+        motivos.push(`${data.missing_keys.length} clave(s) faltante(s)`);
+      }
+      if (data.placeholder_keys && data.placeholder_keys.length > 0) {
+        motivos.push(`${data.placeholder_keys.length} clave(s) con valores placeholder`);
+      }
+      summary.textContent = motivos.join(" · ") || "Revisa la configuración de entorno.";
+    }
+
+    function renderKeys(sec, list, items, pillClass) {
+      if (!sec || !list) return;
+      if (items && items.length > 0) {
+        sec.hidden = false;
+        list.replaceChildren(
+          ...items.map((k) => {
+            const li = document.createElement("li");
+            const span = document.createElement("span");
+            span.className = `env__key-pill ${pillClass}`.trim();
+            span.textContent = k;
+            li.appendChild(span);
+            return li;
+          })
+        );
+      } else {
+        sec.hidden = true;
+        list.replaceChildren();
+      }
+    }
+
+    renderKeys(missingSec, missingList, data.missing_keys, "env__key-pill--missing");
+    renderKeys(placeSec, placeList, data.placeholder_keys, "env__key-pill--placeholder");
+    renderKeys(emptySec, emptyList, data.empty_keys, "");
+  } catch (err) {
+    if (summary) summary.textContent = `Error al verificar entorno: ${err.message}`;
+  }
 }
 
 function render(projects, data) {
