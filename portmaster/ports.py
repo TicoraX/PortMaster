@@ -281,6 +281,31 @@ def next_free(start: int, limit: int = 20) -> int:
     raise RuntimeError(f"sin puerto libre entre {start} y {start + limit - 1}")
 
 
+def suggest_alternative(port: int, exclude: set[int] | None = None) -> int:
+    """Sugiere el siguiente puerto libre cercano a `port`.
+
+    Si el puerto original ya está libre y no está en `exclude`, lo devuelve.
+    De lo contrario, busca secuencialmente desde `port + 1` descartando
+    los puertos de `exclude` y los que no estén libres en el sistema.
+    """
+    check_port(port)
+    forbidden = set(exclude) if exclude else set()
+    if port not in forbidden and is_free(port):
+        return port
+
+    limit = min(port + 100, 65536)
+    for candidate in range(port + 1, limit):
+        if candidate not in forbidden and is_free(candidate):
+            return candidate
+
+    # Fallback si se agotó el rango superior
+    for candidate in range(max(1024, port - 100), port):
+        if candidate not in forbidden and is_free(candidate):
+            return candidate
+
+    raise RuntimeError(f"no hay puertos libres alternativos cerca de {port}")
+
+
 def proxy_owner(status: PortStatus) -> str | None:
     """Motor que publica el puerto, si el dueno es un proxy de Docker o WSL.
 

@@ -708,6 +708,20 @@ body {
   border-color: var(--color-bad);
 }
 
+.btn--alt-port {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 0.3rem 0.55rem;
+  color: var(--color-ink-2);
+  border-color: var(--color-rule-strong);
+}
+
+.btn--alt-port:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--color-paper-2);
+  color: var(--color-ink);
+  border-color: var(--color-ink-2);
+}
+
 .profile {
   display: inline-flex;
   align-items: center;

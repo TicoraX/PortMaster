@@ -765,6 +765,56 @@ def create_app(token: str | None = None) -> FastAPI:
             "placeholder_keys": placeholders,
         }
 
+    @app.get(
+        "/api/projects/{pid}/conflicts",
+        dependencies=[quota("state", QUOTA_READ), Depends(require_token)],
+    )
+    def project_conflicts(pid: str) -> dict:
+        path = _lookup(pid)
+        try:
+            stack = detect.stack_for(path)
+        except config.ConfigError as exc:
+            raise HTTPException(400, str(exc))
+
+        with sessions_lock:
+            session = sessions.get(pid)
+        is_ours = session is not None and session.state in ("starting", "running")
+
+        declared = registry.declared_ports()
+        all_declared = set(declared.keys())
+
+        conflicts = []
+        wanted_ports = [s.port for s in stack.services.values() if s.port]
+        scanned = ports.scan_many(wanted_ports)
+
+        for s in stack.services.values():
+            if not s.port:
+                continue
+            status = scanned.get(s.port)
+            if status and not status.free and not is_ours:
+                occ = _occupant(status, False)
+                if occ is not None:
+                    suggested = ports.suggest_alternative(s.port, exclude=all_declared)
+                    can_kill = (
+                        status.pid is not None
+                        and status.pid not in ports.PROTECTED_PIDS
+                        and occ.get("proxy") is None
+                    )
+                    conflicts.append(
+                        {
+                            "service": s.name,
+                            "port": s.port,
+                            "occupant": occ,
+                            "can_kill": can_kill,
+                            "suggested_port": suggested,
+                        }
+                    )
+
+        return {
+            "has_conflicts": len(conflicts) > 0,
+            "conflicts": conflicts,
+        }
+
     @app.post("/api/projects", dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)])
     def add_project(body: AddProject) -> dict:
         try:
@@ -1022,6 +1072,28 @@ def create_app(token: str | None = None) -> FastAPI:
 
         log.info("proceso cerrado: puerto=%d pid=%d nombre=%s", port, status.pid, status.name)
         return {"ok": True}
+
+    @app.get(
+        "/api/ports/{port}/suggest",
+        dependencies=[quota("state", QUOTA_READ), Depends(require_token)],
+    )
+    def suggest_port(port: int) -> dict:
+        try:
+            ports.check_port(port)
+        except ValueError as exc:
+            log.info("puerto rechazado para sugerencia: %s", exc)
+            raise HTTPException(400, str(exc))
+
+        status = ports.scan(port)
+        declared = registry.declared_ports()
+        all_declared = set(declared.keys())
+        suggested = ports.suggest_alternative(port, exclude=all_declared)
+        return {
+            "port": port,
+            "free": status.free,
+            "suggested": suggested,
+            "occupant": _occupant(status, False),
+        }
 
     @app.get("/api/version", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
     def version() -> dict:
@@ -1379,6 +1451,12 @@ def _project_view(path: Path) -> dict:
         # Solo lo que contesta HTTP se ofrece para abrir: un postgres listo tiene
         # puerto y no es algo que mandar al navegador.
         abrible = state != "stopped" and service.name in openable
+        occ = _occupant(status, state != "stopped")
+        suggested_alt = (
+            ports.suggest_alternative(service.port, set(compartidos.keys()))
+            if (status is not None and not status.free and (occ is not None or state == "stopped"))
+            else None
+        )
         services.append(
             {
                 "name": service.name,
@@ -1397,7 +1475,8 @@ def _project_view(path: Path) -> dict:
                 "url": runner.service_url(service) if abrible else None,
                 "needs": list(service.needs),
                 "state": state,
-                "occupant": _occupant(status, state != "stopped"),
+                "occupant": occ,
+                "suggested_port": suggested_alt,
                 # Otros proyectos registrados que declaran este mismo puerto.
                 # Conviven mientras no corran a la vez, y saberlo antes evita
                 # el "puerto ocupado" que no dice por quien.

@@ -222,3 +222,25 @@ def test_scan_many_usa_cache_de_procesos(listener):
     cache = ports._process_listeners_cache()
     assert isinstance(cache, dict)
     assert cache.get(port) == os.getpid()
+
+
+def test_suggest_alternative_occupied_port(listener):
+    _, port = listener
+    # port está ocupado por listener
+    suggested = ports.suggest_alternative(port)
+    assert suggested != port
+    assert ports.is_free(suggested)
+
+
+def test_suggest_alternative_when_free(free_ports):
+    (p,) = free_ports(1)
+    # p está libre
+    assert ports.suggest_alternative(p) == p
+
+
+def test_suggest_alternative_excludes_ports(free_ports):
+    ports_list = free_ports(3)
+    p0, p1 = ports_list[0], ports_list[1]
+    suggested = ports.suggest_alternative(p0, exclude={p0, p1})
+    assert suggested not in {p0, p1}
+    assert ports.is_free(suggested)

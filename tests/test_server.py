@@ -1836,6 +1836,82 @@ def test_switch_profile_endpoint(client, tmp_path, free_ports):
     assert esperar(lambda: ports_mod.is_free(p2))
 
 
+def test_suggest_port_endpoint(client, free_ports):
+    (p,) = free_ports(1)
+    # 1. Puerto libre
+    res_free = client.get(f"/api/ports/{p}/suggest")
+    assert res_free.status_code == 200
+    data_free = res_free.json()
+    assert data_free["port"] == p
+    assert data_free["free"] is True
+    assert data_free["suggested"] == p
+
+    # 2. Puerto ocupado
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", p))
+    sock.listen()
+    try:
+        res_busy = client.get(f"/api/ports/{p}/suggest")
+        assert res_busy.status_code == 200
+        data_busy = res_busy.json()
+        assert data_busy["port"] == p
+        assert data_busy["free"] is False
+        assert data_busy["suggested"] != p
+        assert data_busy["occupant"] is not None
+        assert data_busy["occupant"]["pid"] == os.getpid()
+    finally:
+        sock.close()
+
+
+def test_project_conflicts_endpoint(client, tmp_path, free_ports):
+    (p,) = free_ports(1)
+    root = tmp_path / "conflict_proj"
+    root.mkdir()
+    (root / "stack.yaml").write_text(
+        textwrap.dedent(f"""
+        name: conflict_proj
+        services:
+          web:
+            command: {sys.executable} -c "{SERVER.format(port=p)}"
+            port: {p}
+        """),
+        encoding="utf-8",
+    )
+    pid = registry.project_id(registry.add(root))
+
+    # Sin conflicto cuando el puerto está libre
+    res_ok = client.get(f"/api/projects/{pid}/conflicts")
+    assert res_ok.status_code == 200
+    assert res_ok.json()["has_conflicts"] is False
+    assert res_ok.json()["conflicts"] == []
+
+    # Ocupamos el puerto con un socket ajeno
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", p))
+    sock.listen()
+    try:
+        res_conf = client.get(f"/api/projects/{pid}/conflicts")
+        assert res_conf.status_code == 200
+        data = res_conf.json()
+        assert data["has_conflicts"] is True
+        assert len(data["conflicts"]) == 1
+        c = data["conflicts"][0]
+        assert c["service"] == "web"
+        assert c["port"] == p
+        assert c["occupant"]["pid"] == os.getpid()
+        assert c["suggested_port"] != p
+
+        # Verificar que /api/state también incluye suggested_port en la vista del servicio
+        state = client.get("/api/state").json()
+        proj = next(proj for proj in state["projects"] if proj["id"] == pid)
+        web_svc = proj["services"][0]
+        assert web_svc["port_taken"] is False or web_svc["occupant"] is not None
+        assert web_svc["suggested_port"] != p
+    finally:
+        sock.close()
+
+
+
 
 
 

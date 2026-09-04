@@ -924,3 +924,20 @@ def test_test_stack_no_revienta_en_una_consola_cp1252(tmp_path, monkeypatch):
     )
     assert "UnicodeEncodeError" not in (res.stdout + res.stderr), res.stdout + res.stderr
     assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_serve_port_occupied_suggests_alternative(free_ports):
+    """Si el puerto de serve está ocupado, sugiere el comando free y el puerto alternativo."""
+    (port,) = free_ports(1)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", port))
+    sock.listen()
+    try:
+        resultado = runner.invoke(cli.app, ["serve", "--port", str(port), "--no-open"])
+        assert resultado.exit_code == 1
+        assert f"El puerto {port} ya esta ocupado" in resultado.output
+        assert f"portmaster free {port}" in resultado.output
+        assert "arranca con: --port" in resultado.output
+    finally:
+        sock.close()
+

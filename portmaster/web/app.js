@@ -322,11 +322,27 @@ function renderService(service, projectId) {
     // Detras del proxy hay un contenedor, no un proceso que cerrar: el pid es
     // el del motor. Quien lo publica sale en la lista de proyectos que comparten
     // el puerto, que ya esta al lado.
-    text.textContent = `contenedor publicado por ${service.occupant.proxy}`;
+    const extra = service.suggested_port ? ` · Libre: :${service.suggested_port}` : "";
+    text.textContent = `contenedor publicado por ${service.occupant.proxy}${extra}`;
     stateCell.dataset.tone = "warn";
+    if (service.suggested_port) {
+      const copyAlt = document.createElement("button");
+      copyAlt.type = "button";
+      copyAlt.className = "btn btn--quiet btn--alt-port";
+      copyAlt.textContent = `:${service.suggested_port}`;
+      copyAlt.title = `Copiar puerto alternativo libre :${service.suggested_port}`;
+      copyAlt.addEventListener("click", () => {
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(String(service.suggested_port));
+          flash(`Puerto :${service.suggested_port} copiado al portapapeles`, "good");
+        }
+      });
+      node.querySelector(".service__act").append(copyAlt);
+    }
   } else if (service.occupant) {
     const who = service.occupant;
-    text.textContent = `ocupado por ${who.name}${who.pid ? ` (${who.pid})` : ""}`;
+    const extra = service.suggested_port ? ` · Libre: :${service.suggested_port}` : "";
+    text.textContent = `ocupado por ${who.name}${who.pid ? ` (${who.pid})` : ""}${extra}`;
     stateCell.dataset.tone = "bad";
 
     const kill = document.createElement("button");
@@ -337,6 +353,21 @@ function renderService(service, projectId) {
       act(kill, () => api(`/api/ports/${service.port}/kill`, { method: "POST" })),
     );
     node.querySelector(".service__act").append(kill);
+
+    if (service.suggested_port) {
+      const copyAlt = document.createElement("button");
+      copyAlt.type = "button";
+      copyAlt.className = "btn btn--quiet btn--alt-port";
+      copyAlt.textContent = `:${service.suggested_port}`;
+      copyAlt.title = `Copiar puerto alternativo libre :${service.suggested_port}`;
+      copyAlt.addEventListener("click", () => {
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(String(service.suggested_port));
+          flash(`Puerto :${service.suggested_port} copiado al portapapeles`, "good");
+        }
+      });
+      node.querySelector(".service__act").append(copyAlt);
+    }
   } else {
     const [label, tone] = SERVICE_LABELS[service.state] || SERVICE_LABELS.stopped;
     text.textContent = label;

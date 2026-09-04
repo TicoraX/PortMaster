@@ -664,7 +664,11 @@ def serve_cmd(
         ocupante = ports.scan(port)
         quien = ocupante.name or "un proceso desconocido"
         err.print(f"El puerto {port} ya esta ocupado por {quien} (pid {ocupante.pid}).")
-        err.print(f"Cerralo con: portmaster free {port}   o arranca con: --port <otro>")
+        try:
+            suggested = ports.suggest_alternative(port)
+            err.print(f"Cerralo con: portmaster free {port}   o arranca con: --port {suggested}")
+        except Exception:
+            err.print(f"Cerralo con: portmaster free {port}   o arranca con: --port <otro>")
         raise typer.Exit(1)
 
     token = registry.token()
