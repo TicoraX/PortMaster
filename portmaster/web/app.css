@@ -1609,12 +1609,12 @@ body {
 }
 
 .mcp__status-badge--ok {
-  background: var(--color-ok-soft, oklch(93% 0.03 155));
+  background: color-mix(in oklch, var(--color-ok) 14%, transparent);
   color: var(--color-ok-ink);
 }
 
 .mcp__status-badge--rate_limited {
-  background: var(--color-warn-soft, oklch(93% 0.03 75));
+  background: color-mix(in oklch, var(--color-warn) 16%, transparent);
   color: var(--color-warn-ink);
 }
 

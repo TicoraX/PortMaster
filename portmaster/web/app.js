@@ -213,6 +213,30 @@ function abrirUrl(service) {
   return service.url || `http://localhost:${service.port}`;
 }
 
+function escapeXml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function createAltPortButton(port) {
+  const copyAlt = document.createElement("button");
+  copyAlt.type = "button";
+  copyAlt.className = "btn btn--quiet btn--alt-port";
+  copyAlt.textContent = `:${port}`;
+  copyAlt.title = `Copiar puerto alternativo libre :${port}`;
+  copyAlt.addEventListener("click", () => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(String(port));
+      flash(`Puerto :${port} copiado al portapapeles`, "good");
+    }
+  });
+  return copyAlt;
+}
+
 function renderService(service, projectId) {
   const node = ui.tplService.content.firstElementChild.cloneNode(true);
   node.querySelector(".service__name").prepend(kindIcon(service.kind));
@@ -332,18 +356,7 @@ function renderService(service, projectId) {
     text.textContent = `contenedor publicado por ${service.occupant.proxy}${extra}`;
     stateCell.dataset.tone = "warn";
     if (service.suggested_port) {
-      const copyAlt = document.createElement("button");
-      copyAlt.type = "button";
-      copyAlt.className = "btn btn--quiet btn--alt-port";
-      copyAlt.textContent = `:${service.suggested_port}`;
-      copyAlt.title = `Copiar puerto alternativo libre :${service.suggested_port}`;
-      copyAlt.addEventListener("click", () => {
-        if (navigator.clipboard) {
-          navigator.clipboard.writeText(String(service.suggested_port));
-          flash(`Puerto :${service.suggested_port} copiado al portapapeles`, "good");
-        }
-      });
-      node.querySelector(".service__act").append(copyAlt);
+      node.querySelector(".service__act").append(createAltPortButton(service.suggested_port));
     }
   } else if (service.occupant) {
     const who = service.occupant;
@@ -361,18 +374,7 @@ function renderService(service, projectId) {
     node.querySelector(".service__act").append(kill);
 
     if (service.suggested_port) {
-      const copyAlt = document.createElement("button");
-      copyAlt.type = "button";
-      copyAlt.className = "btn btn--quiet btn--alt-port";
-      copyAlt.textContent = `:${service.suggested_port}`;
-      copyAlt.title = `Copiar puerto alternativo libre :${service.suggested_port}`;
-      copyAlt.addEventListener("click", () => {
-        if (navigator.clipboard) {
-          navigator.clipboard.writeText(String(service.suggested_port));
-          flash(`Puerto :${service.suggested_port} copiado al portapapeles`, "good");
-        }
-      });
-      node.querySelector(".service__act").append(copyAlt);
+      node.querySelector(".service__act").append(createAltPortButton(service.suggested_port));
     }
   } else {
     const [label, tone] = SERVICE_LABELS[service.state] || SERVICE_LABELS.stopped;
@@ -405,7 +407,7 @@ function renderService(service, projectId) {
 
 function buildCard(project) {
   const root = ui.tplProject.content.firstElementChild.cloneNode(true);
-  const entry = { root, logSeq: 0, logsOpen: false, expanded: false, userToggled: false };
+  const entry = { root, logSeq: 0, logsOpen: false, expanded: false, userToggled: false, lastState: project.state };
   const logs = root.querySelector(".logs");
 
   const toggleBtn = root.querySelector(".project__toggle");
@@ -435,18 +437,17 @@ function buildCard(project) {
       const newProfile = profileSelect.value || null;
       if (live) {
         flash(`Conmutando ${project.name} al perfil "${newProfile || 'por defecto'}"...`, "neutral");
-        api(`/api/projects/${project.id}/switch-profile`, {
-          method: "POST",
-          body: JSON.stringify({ profile: newProfile }),
-        })
-          .then(() => pull())
-          .catch((err) => flash(`Fallo al conmutar perfil: ${err.message}`, "bad"));
-      } else {
-        api(`/api/projects/${project.id}/switch-profile`, {
-          method: "POST",
-          body: JSON.stringify({ profile: newProfile }),
-        }).catch(() => {});
       }
+      api(`/api/projects/${project.id}/switch-profile`, {
+        method: "POST",
+        body: JSON.stringify({ profile: newProfile }),
+      })
+        .then(() => {
+          if (live) pull();
+        })
+        .catch((err) => {
+          if (live) flash(`Fallo al conmutar perfil: ${err.message}`, "bad");
+        });
     });
   }
 
@@ -839,6 +840,7 @@ ui.orphansKillAll.addEventListener("click", (event) => {
 
 function updateCard(entry, project) {
   const { root } = entry;
+  entry.lastState = project.state;
   root.querySelector(".project__name").textContent = project.name;
   root.querySelector(".project__path").textContent = project.path;
 
@@ -1056,11 +1058,11 @@ function renderGraph(project, entry) {
         <circle cx="12" cy="${nodeHeight / 2}" r="4" fill="${dotColor}" />
         <text x="24" y="${nodeHeight / 2 + (portText ? -2 : 4)}"
               fill="var(--color-ink)" font-family="var(--font-mono)" font-size="11" font-weight="600">
-          ${label}
+          ${escapeXml(label)}
         </text>
         ${
           portText
-            ? `<text x="24" y="${nodeHeight / 2 + 10}" fill="var(--color-ink-3)" font-family="var(--font-mono)" font-size="9">${portText}</text>`
+            ? `<text x="24" y="${nodeHeight / 2 + 10}" fill="var(--color-ink-3)" font-family="var(--font-mono)" font-size="9">${escapeXml(portText)}</text>`
             : ""
         }
       </g>
@@ -1193,7 +1195,8 @@ function renderHistoryTable(entry, runs) {
       let fechaTexto = "";
       if (r.timestamp) {
         try {
-          const d = new Date(r.timestamp);
+          const raw = r.timestamp.endsWith("Z") || r.timestamp.includes("+") ? r.timestamp : `${r.timestamp}Z`;
+          const d = new Date(raw);
           if (!isNaN(d.getTime())) {
             const pad = (n) => String(n).padStart(2, "0");
             const yyyy = d.getFullYear();

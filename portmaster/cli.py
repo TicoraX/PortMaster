@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import psutil
@@ -265,13 +264,13 @@ def _levantar(
     env_file: str | None = None,
 ) -> None:
     """El cuerpo de `up`, por raiz explicita. `switch` levanta otro directorio."""
+    extra_env: dict[str, str] = {}
     if env_file:
         custom_env = (root / env_file).resolve()
         if not custom_env.is_file():
             err.print(f"No se encontró el archivo env: {env_file}")
             raise typer.Exit(1)
-        extra_vars = config.parse_env_file(custom_env)
-        os.environ.update(extra_vars)
+        extra_env = config.parse_env_file(custom_env)
 
     try:
         stack = detect.stack_for(root)
@@ -288,7 +287,7 @@ def _levantar(
     if free:
         _free_ports(services, yes, force)
 
-    engine = runner.Runner(stack, console=console, timeout=timeout)
+    engine = runner.Runner(stack, console=console, timeout=timeout, extra_env=extra_env)
     try:
         engine.up(profile)
     except runner.StartupError as exc:
@@ -853,7 +852,7 @@ def clean_cmd(
     # `--solo` acota, `--volumes` suma. Son cosas distintas: una elige de lo que
     # se regenera, la otra agrega lo que tiene datos adentro.
     objetivos = list(solo) if solo else list(docker.DEFAULT_TARGETS)
-    desconocidos = [t for t in objetivos if t not in docker.TARGETS]
+    desconocidos = [t for t in objetivos if t not in docker.DEFAULT_TARGETS]
     if desconocidos:
         err.print(
             f"Categoria desconocida: {', '.join(desconocidos)}. "
@@ -968,12 +967,12 @@ def test_stack_cmd(
     path = (Path.cwd() / (target or "")).resolve()
     try:
         stack = detect.stack_for(path)
+        services = stack.resolve()
     except config.ConfigError as exc:
         err.print(f"[bold red]Configuración inválida:[/] {exc}")
         raise typer.Exit(1)
 
     console.print(f"Validando stack [bold]{stack.name}[/] en [dim]{stack.root}[/]...")
-    services = stack.resolve()
     console.print(f"[green]OK:[/] {len(services)} servicio(s) resueltos en orden topológico:")
     for s in services:
         deps = f" (espera a: {', '.join(s.needs)})" if s.needs else ""

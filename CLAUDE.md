@@ -198,7 +198,10 @@ archivo. La segunda hipotesis ya iba camino a la tercera.
 Para probar cambios de interfaz:
 
 ```bash
-.venv/Scripts/python -m portmaster serve --port 7667 --no-open   # el del repo
+# Windows: .venv/Scripts/python -m portmaster serve --port 7667 --no-open
+# POSIX:   .venv/bin/python -m portmaster serve --port 7667 --no-open
+# O con el entorno activado:
+python -m portmaster serve --port 7667 --no-open
 curl -s http://127.0.0.1:7667/static/app.css | grep lo-que-acabas-de-escribir
 ```
 

@@ -56,12 +56,12 @@ def test_history_rotation(tmp_path, monkeypatch):
     pid = "rotateproj"
     # Escribir payload pesado para activar la rotación
     payload = "x" * 1000
-    for i in range(150):
+    for i in range(300):
         history.append(pid, {"index": i, "payload": payload})
 
     file_path = history._history_file(pid)
     assert file_path.is_file()
-    entries = history.read(pid, limit=10)
-    assert len(entries) == 10
-    assert entries[-1]["index"] == 149
+    entries = history.read(pid, limit=350)
+    assert len(entries) <= history.RETAIN_ENTRIES
+    assert entries[-1]["index"] == 299
 

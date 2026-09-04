@@ -29,12 +29,13 @@ from . import config, detect, ports
 from .config import Service, Stack
 
 
-def build_env(service: Service) -> dict[str, str]:
+def build_env(service: Service, extra_env: dict[str, str] | None = None) -> dict[str, str]:
     """Construye el entorno de ejecucion con precedencia clara:
     1. os.environ
     2. ~/.portmaster/env.global (si existe)
     3. service.env_file (en orden)
     4. service.env (declarado explicito)
+    5. extra_env (e.g. desde --env-file en CLI)
     """
     env = dict(os.environ)
     global_env = Path.home() / ".portmaster" / "env.global"
@@ -44,12 +45,14 @@ def build_env(service: Service) -> dict[str, str]:
         if env_path.is_file():
             env.update(config.parse_env_file(env_path))
     env.update(service.env)
+    if extra_env:
+        env.update(extra_env)
     env["PYTHONUNBUFFERED"] = "1"
     env["FORCE_COLOR"] = "1"
     return env
 
 
-def service_url(service: Service) -> str | None:
+def service_url(service: Service, extra_env: dict[str, str] | None = None) -> str | None:
     """Adonde lleva "Abrir" para este servicio, o None si no se puede saber.
 
     Sin `url:` devuelve None y el que llama arma el default de siempre con el
@@ -67,7 +70,7 @@ def service_url(service: Service) -> str | None:
     if not service.url:
         return None
 
-    env = build_env(service)
+    env = build_env(service, extra_env=extra_env)
     faltante = False
 
     def resolve(match: re.Match) -> str:
@@ -134,6 +137,7 @@ class Runner:
     console: Console = field(default_factory=Console)
     timeout: float = 60.0
     procs: list[Proc] = field(default_factory=list)
+    extra_env: dict[str, str] = field(default_factory=dict)
     _logs: queue.Queue = field(default_factory=queue.Queue)
     _width: int = 8
     _cancel: threading.Event = field(default_factory=threading.Event)
@@ -241,6 +245,9 @@ class Runner:
     def follow(self) -> None:
         """Sigue imprimiendo logs hasta Ctrl-C o hasta que no quede nada vivo."""
         while not self._cancel.is_set():
+            with self._procs_lock:
+                if self._down:
+                    break
             # Watchdog de reinicio para servicios caidos
             restarted_any = False
             for p in list(self.procs):
@@ -252,19 +259,23 @@ class Runner:
                     if p.service.restart in ("on-failure", "always") and retries < p.service.max_retries:
                         exit_code = p.popen.poll()
                         if p.service.restart == "always" or exit_code != 0:
-                            self._retries[p.service.name] = retries + 1
+                            with self._procs_lock:
+                                if self._down or self._cancel.is_set():
+                                    break
+                                self._retries[p.service.name] = retries + 1
                             self._say(
                                 p,
                                 f"proceso terminado con codigo {exit_code}. Reiniciando automaticamente (intento {retries + 1}/{p.service.max_retries})...",
                             )
-                            with self._procs_lock:
-                                if self._down or self._cancel.is_set():
-                                    break
                             try:
                                 self.restart(p.service.name)
                                 restarted_any = True
                             except Exception as exc:
                                 self._say(p, f"reintento fallo: {exc}")
+
+            with self._procs_lock:
+                if self._down or self._cancel.is_set():
+                    break
 
             # Si nadie esta vivo, no estamos reiniciando y no se disparo ningun reinicio, salimos
             if not self.restarting and not restarted_any and not any(p.popen.poll() is None for p in list(self.procs)):
@@ -467,7 +478,7 @@ class Runner:
             comando,
             shell=True,
             cwd=service.cwd,
-            env=build_env(service),
+            env=build_env(service, extra_env=self.extra_env),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -516,7 +527,7 @@ class Runner:
             service.command,
             shell=True,
             cwd=service.cwd,
-            env=build_env(service),
+            env=build_env(service, extra_env=self.extra_env),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -678,7 +689,7 @@ def dependency_graph(stack: Stack, profile: str | None = None) -> dict:
     }
 
 
-def run_stop(service: Service) -> subprocess.CompletedProcess | None:
+def run_stop(service: Service, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess | None:
     """Corre el `stop:` de un servicio. None si no termino a tiempo.
 
     Vive afuera del `Runner` porque `portmaster down` tiene que poder apagar un
@@ -692,7 +703,7 @@ def run_stop(service: Service) -> subprocess.CompletedProcess | None:
             service.stop,
             shell=True,
             cwd=service.cwd,
-            env=build_env(service),
+            env=build_env(service, extra_env=extra_env),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,

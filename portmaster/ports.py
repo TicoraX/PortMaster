@@ -293,14 +293,12 @@ def suggest_alternative(port: int, exclude: set[int] | None = None) -> int:
     if port not in forbidden and is_free(port):
         return port
 
-    limit = min(port + 100, 65536)
-    for candidate in range(port + 1, limit):
-        if candidate not in forbidden and is_free(candidate):
-            return candidate
-
-    # Fallback si se agotó el rango superior
-    for candidate in range(max(1024, port - 100), port):
-        if candidate not in forbidden and is_free(candidate):
+    arriba = range(port + 1, min(port + 100, 65536))
+    abajo = range(max(1024, port - 100), port)
+    candidatos = [c for c in (*arriba, *abajo) if c not in forbidden]
+    taken = _listeners(set(candidatos))
+    for candidate in candidatos:
+        if candidate not in taken and _bind_free(candidate):
             return candidate
 
     raise RuntimeError(f"no hay puertos libres alternativos cerca de {port}")

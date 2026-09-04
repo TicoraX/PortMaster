@@ -587,16 +587,18 @@ def _deno_at(path: Path, name: str) -> Service | None:
         if deno_file.is_file():
             try:
                 data = json.loads(_read(deno_file) or "{}")
-                tasks = data.get("tasks", {})
-                if isinstance(tasks, dict):
-                    for task_name in ("dev", "start", "serve"):
-                        if task_name in tasks:
-                            return _served(name, f"deno task {task_name}", path)
+                if isinstance(data, dict):
+                    tasks = data.get("tasks", {})
+                    if isinstance(tasks, dict):
+                        for task_name in ("dev", "start", "serve"):
+                            if task_name in tasks:
+                                return _served(name, f"deno task {task_name}", path)
             except json.JSONDecodeError:
                 pass
-            for entry in ("main.ts", "server.ts", "main.js", "server.js", "app.ts"):
-                if (path / entry).is_file():
-                    return _served(name, f"deno run --allow-net {entry}", path)
+            if not (path / "package.json").is_file():
+                for entry in ("main.ts", "server.ts", "main.js", "server.js", "app.ts"):
+                    if (path / entry).is_file():
+                        return _served(name, f"deno run --allow-net {entry}", path)
     return None
 
 

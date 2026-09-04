@@ -63,7 +63,7 @@ def _rotate_if_needed(path: Path) -> None:
         if not path.is_file() or path.stat().st_size < 100_000:
             return
         last_lines = _read_tail_lines(path, RETAIN_ENTRIES)
-        if len(last_lines) >= RETAIN_ENTRIES:
+        if last_lines:
             tmp_path = path.with_suffix(".tmp")
             with tmp_path.open("w", encoding="utf-8") as f:
                 for line_str in last_lines:

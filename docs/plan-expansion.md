@@ -65,19 +65,23 @@ Este documento define la evolución de PortMaster desde un orquestador de *stack
     ```
 *   **Grupos de Proyectos**: `portmaster group up <nombre_grupo>` y matriz preventiva de colisión de puertos.
 
-### Fase 5: Higiene del Sistema y Docker (`portmaster clean / prune`)
-*   **Módulo**: [`portmaster/doctor.py`](../portmaster/doctor.py), [`portmaster/docker.py`](../portmaster/docker.py)
+### Fase 5: Higiene del Sistema y Docker (`portmaster clean`)
+*   **Módulo**: [`portmaster/docker.py`](../portmaster/docker.py), [`portmaster/cli.py`](../portmaster/cli.py)
 *   **Limpieza Asistida**:
-    *   `portmaster docker prune`: Remueve contenedores parados, redes no usadas y volúmenes huérfanos.
-    *   `portmaster doctor --fix`: Auto-reparación (iniciar Docker Desktop, purgar procesos zombies huérfanos).
+    *   `portmaster clean` (con `--volumes` opcional): Remueve contenedores parados, imágenes huérfanas, build-cache y redes no usadas.
+    *   `portmaster doctor`: Diagnóstico integral del entorno local y detección de problemas.
 
 ### Fase 6: Servidor MCP e Integración con Agentes de IA
 *   **Módulo**: [`portmaster/mcp.py`](../portmaster/mcp.py)
 *   **Herramientas MCP Expuestas**:
-    *   `list_services`: Estado de salud, puertos y procesos.
-    *   `restart_service`: Reinicio atómico de un servicio específico.
-    *   `get_service_logs`: Consulta de logs con filtrado de errores para depuración autónoma.
-    *   `free_port`: Liberación de puertos conflictivos.
+    *   `portmaster_status`: Estado de salud, puertos y procesos.
+    *   `portmaster_restart`: Reinicio atómico de un servicio específico.
+    *   `portmaster_logs`: Consulta de logs con filtrado para depuración autónoma.
+    *   `portmaster_free_port`: Liberación de puertos conflictivos.
+    *   `portmaster_clean`: Limpieza segura de recursos Docker.
+    *   `portmaster_doctor`: Diagnóstico integral del sistema.
+    *   `portmaster_history`: Historial de arranques de proyectos.
+    *   `portmaster_init`: Inicialización asistida de `stack.yaml`.
 
 ### Fase 7: Detección Avanzada (Monorrepos, `uv`, Frameworks) y UI Web Polish
 *   **Módulo**: [`portmaster/detect.py`](../portmaster/detect.py), [`portmaster/web/`](../portmaster/web)

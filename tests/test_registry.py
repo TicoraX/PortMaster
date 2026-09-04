@@ -3,6 +3,7 @@ from portmaster import registry
 
 
 def test_find_collisions(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "HOME", tmp_path)
     monkeypatch.setattr(registry, "PROJECTS", tmp_path / "projects.json")
 
     p1 = tmp_path / "app1"

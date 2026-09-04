@@ -296,6 +296,10 @@ class Session:
             scanned = ports.scan_many(sueltos)
             for status in scanned.values():
                 if not status.free and status.pid is not None:
+                    if ports.proxy_owner(status) is not None:
+                        # El pid es el proxy de Docker: matarlo deja el
+                        # contenedor corriendo sin publicar.
+                        continue
                     try:
                         ports.kill(status.pid, status.create_time, port=status.port)
                     except Exception:
@@ -1016,17 +1020,27 @@ def create_app(token: str | None = None) -> FastAPI:
                     return
 
                 start_time = time.monotonic()
+                last_event_time = start_time
+                effective_max = max_duration or 3600.0
                 while True:
-                    if max_duration and (time.monotonic() - start_time) > max_duration:
+                    now = time.monotonic()
+                    if (now - start_time) > effective_max:
                         break
 
+                    had_event = False
                     while True:
                         try:
                             seq, text = sub_q.get_nowait()
                             payload = json.dumps({"seq": seq, "text": text})
                             yield f"data: {payload}\n\n"
+                            had_event = True
+                            last_event_time = now
                         except queue.Empty:
                             break
+
+                    if not had_event and (now - last_event_time) >= 15.0:
+                        yield ": keepalive\n\n"
+                        last_event_time = now
 
                     await asyncio.sleep(0.05)
             except (asyncio.CancelledError, GeneratorExit):

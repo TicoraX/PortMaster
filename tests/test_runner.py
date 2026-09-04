@@ -752,7 +752,7 @@ def test_una_variable_sin_valor_deja_el_servicio_sin_url(tmp_path, sin_env_globa
     assert runner.service_url(service) is None
 
 
-def test_una_variable_sin_valor_pero_con_default_si_expande(tmp_path):
+def test_una_variable_sin_valor_pero_con_default_si_expande(tmp_path, sin_env_global):
     service = _servicio_con_url(tmp_path, "http://h/?t=${NO_EXISTE_TAMPOCO:-vacio}")
     assert runner.service_url(service) == "http://h/?t=vacio"
 
@@ -834,11 +834,13 @@ def test_service_auto_restart_on_failure(tmp_path, free_ports):
         import threading
         t = threading.Thread(target=engine.follow, daemon=True)
         t.start()
-        # Dar tiempo a que termine el primer intento y el watchdog lo reinicie
-        time.sleep(2.0)
+        limite = time.monotonic() + 20
+        while time.monotonic() < limite:
+            if flag.exists() and len(flag.read_text().splitlines()) >= 2:
+                break
+            time.sleep(0.1)
         assert flag.exists()
-        runs = flag.read_text().splitlines()
-        assert len(runs) >= 2
+        assert len(flag.read_text().splitlines()) >= 2, "el watchdog no reinicio el servicio"
     finally:
         engine.down()
 
@@ -913,6 +915,7 @@ def test_apagar_no_espera_al_pre_start_de_un_reinicio(tmp_path, free_ports):
         """,
     )
     engine = make_runner(stack)
+    hilo = None
     try:
         engine.up()
         # El hook se agrega despues del arranque: interesa el reinicio, no el
@@ -945,7 +948,8 @@ def test_apagar_no_espera_al_pre_start_de_un_reinicio(tmp_path, free_ports):
         )
     finally:
         engine.down()
-        hilo.join(timeout=30)
+        if hilo is not None:
+            hilo.join(timeout=30)
 
     # El proceso que el reinicio alcanzo a levantar no puede quedar vivo: si
     # `down` ya paso por la lista, lo baja el que lo arranco.

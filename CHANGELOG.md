@@ -4,6 +4,17 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
+## [1.4.0] - 2026-09-04
+
+### Agregado
+
+- **Streaming de logs en vivo por SSE (`/api/projects/{pid}/logs/stream`).**
+  Permite monitorear la salida en tiempo real con indicador "En vivo", reconexión automática y emisión periódica de keepalive.
+- **Grafo interactivo de dependencias DAG (SVG).**
+  Visualización topológica de los servicios y dependencias con estados en tiempo real directamente en la ficha del proyecto.
+- **Selector reactivo de perfiles con conmutación en vivo.**
+  Permite alternar entre perfiles (`all`, `backend`, `frontend`, etc.) desde la UI web con recarga transparente y preservación de estado.
+
 ## [1.3.0] - 2026-08-29
 
 ### Agregado
@@ -324,6 +335,8 @@ Primera versión publicada. Lo que sigue es el alcance completo, no un diff.
   la tarjeta, y no lo impide: `docker compose up -d` sobre un contenedor que ya
   está arriba es el mismo caso y ahí es correcto. Ver `docs/pendientes.md`.
 
+[1.4.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.4.0
+[1.3.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.3.0
 [1.2.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.2.0
 [1.1.1]: https://github.com/TicoraX/PortMaster/releases/tag/v1.1.1
 [1.1.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.1.0

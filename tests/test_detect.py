@@ -796,3 +796,21 @@ def test_deno_con_entrypoint(tmp_path):
     assert stack.services["web"].command == "deno run --allow-net server.ts"
 
 
+def test_deno_no_secuestra_proyecto_node(tmp_path):
+    write(tmp_path, "deno.json", "{\n  \"fmt\": {\"indentWidth\": 2}\n}\n")
+    write(tmp_path, "server.ts", "import express from 'express';\n")
+    write(tmp_path, "package.json", json.dumps({"scripts": {"dev": "vite"}}))
+    stack = detect.detect(tmp_path)
+    assert stack is not None
+    assert stack.services["web"].command == "npm run dev"
+
+
+def test_deno_json_no_dict_no_revienta(tmp_path):
+    write(tmp_path, "deno.json", "[\"array\", \"invalido\"]")
+    write(tmp_path, "server.ts", "console.log('hola');")
+    stack = detect.detect(tmp_path)
+    assert stack is not None
+    assert stack.services["web"].command == "deno run --allow-net server.ts"
+
+
+

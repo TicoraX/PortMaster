@@ -880,9 +880,8 @@ def test_up_env_file_unwraps_quotes(tmp_path, monkeypatch):
     class FakeRunner:
         def __init__(self, *args, **kwargs):
             self.procs = []
+            llamado["extra_env"] = kwargs.get("extra_env", {})
         def up(self, services):
-            llamado["env_port"] = os.environ.get("APP_PORT")
-            llamado["env_secret"] = os.environ.get("SECRET")
             return self
         def follow(self):
             pass
@@ -892,8 +891,28 @@ def test_up_env_file_unwraps_quotes(tmp_path, monkeypatch):
     monkeypatch.setattr(cli.runner, "Runner", FakeRunner)
     resultado = runner.invoke(cli.app, ["up", "--env-file", ".env.custom"])
     assert resultado.exit_code == 0
-    assert llamado.get("env_port") == "8080"
-    assert llamado.get("env_secret") == "my-secret"
+    assert llamado.get("extra_env", {}).get("APP_PORT") == "8080"
+    assert llamado.get("extra_env", {}).get("SECRET") == "my-secret"
+
+
+def test_clean_solo_rejects_volumes(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    resultado = runner.invoke(cli.app, ["clean", "--solo", "volumes"])
+    assert resultado.exit_code == 1
+    assert "Categoria desconocida" in resultado.output
+
+
+def test_test_stack_cycle_dependency_error(tmp_path, monkeypatch):
+    (tmp_path / "stack.yaml").write_text(
+        "services:\n"
+        "  s1:\n    command: echo 1\n    needs: [s2]\n"
+        "  s2:\n    command: echo 2\n    needs: [s1]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    resultado = runner.invoke(cli.app, ["test-stack"])
+    assert resultado.exit_code == 1
+    assert "Configuración inválida" in resultado.output
 
 
 

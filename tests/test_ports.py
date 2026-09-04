@@ -224,12 +224,17 @@ def test_scan_many_usa_cache_de_procesos(listener):
     assert cache.get(port) == os.getpid()
 
 
-def test_suggest_alternative_occupied_port(listener):
-    _, port = listener
-    # port está ocupado por listener
-    suggested = ports.suggest_alternative(port)
-    assert suggested != port
-    assert ports.is_free(suggested)
+def test_suggest_alternative_occupied_port(free_ports):
+    (port,) = free_ports(1)
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", port))
+    sock.listen(1)
+    try:
+        suggested = ports.suggest_alternative(port)
+        assert suggested != port
+        assert ports.is_free(suggested)
+    finally:
+        sock.close()
 
 
 def test_suggest_alternative_when_free(free_ports):

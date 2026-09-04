@@ -90,9 +90,15 @@ def import_data(data: list[str]) -> list[str]:
 
 # Cuanto vale reusar el mapa antes de recalcularlo, para quien lo pida cacheado.
 PORTS_TTL = 30.0
+_cache_lock = threading.Lock()
+# Sube con cada cambio del registro. Un escaneo que empezo antes de un `add`
+# no puede escribir su resultado despues: seria el estado viejo pisando al
+# nuevo, con 30s de vida por delante.
+_revision = 0
 # Los puertos y los nombres salen del mismo recorrido: un solo cache, que es
 # una cosa menos que olvidarse de invalidar en `_save`.
 _ports_cache: tuple[float, dict[int, list[Path]], dict[Path, str]] | None = None
+_docker_cache: tuple[float, bool] | None = None
 
 
 def declared_ports(max_age: float = 0.0) -> dict[int, list[Path]]:
@@ -118,8 +124,10 @@ def declared_ports(max_age: float = 0.0) -> dict[int, list[Path]]:
     """
     global _ports_cache
     now = time.monotonic()
-    if max_age > 0 and _ports_cache is not None and now - _ports_cache[0] < max_age:
-        return _ports_cache[1]
+    with _cache_lock:
+        if max_age > 0 and _ports_cache is not None and now - _ports_cache[0] < max_age:
+            return _ports_cache[1]
+        revision = _revision
 
     found: dict[int, list[Path]] = {}
     names: dict[Path, str] = {}
@@ -127,7 +135,9 @@ def declared_ports(max_age: float = 0.0) -> dict[int, list[Path]]:
         names[path], puertos = _stack_of(path)
         for port in sorted(puertos):
             found.setdefault(port, []).append(path)
-    _ports_cache = (now, found, names)
+    with _cache_lock:
+        if revision == _revision:
+            _ports_cache = (now, found, names)
     return found
 
 
@@ -139,16 +149,9 @@ def name_of(path: Path, max_age: float = PORTS_TTL) -> str:
     usuario a buscar un proyecto que en la interfaz no existe.
     """
     declared_ports(max_age=max_age)
-    cache = _ports_cache
+    with _cache_lock:
+        cache = _ports_cache
     return cache[2].get(path, path.name) if cache else path.name
-
-
-_docker_cache: tuple[float, bool] | None = None
-_cache_lock = threading.Lock()
-# Sube con cada cambio del registro. Un escaneo que empezo antes de un `add`
-# no puede escribir su resultado despues: seria el estado viejo pisando al
-# nuevo, con 30s de vida por delante.
-_revision = 0
 
 
 def any_uses_docker(max_age: float = 0.0) -> bool:

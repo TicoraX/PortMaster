@@ -4,7 +4,20 @@ import sys
 import textwrap
 import time
 
+import pytest
+
 from portmaster import mcp, ports
+
+
+@pytest.fixture(autouse=True)
+def reset_mcp_state():
+    with mcp._action_lock:
+        mcp._action_timestamps.clear()
+    mcp.clear_telemetry()
+    yield
+    with mcp._action_lock:
+        mcp._action_timestamps.clear()
+    mcp.clear_telemetry()
 
 
 def test_mcp_initialize():
