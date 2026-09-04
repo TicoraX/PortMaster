@@ -941,3 +941,16 @@ def test_serve_port_occupied_suggests_alternative(free_ports):
     finally:
         sock.close()
 
+
+def test_mcp_status_cli():
+    """El comando mcp-status muestra estadísticas de llamadas MCP sin reventar."""
+    from portmaster import mcp
+
+    mcp.clear_telemetry()
+    mcp.record_tool_call("portmaster_status", 15.0, "ok")
+    resultado = runner.invoke(cli.app, ["mcp-status"])
+    assert resultado.exit_code == 0
+    assert "Servidor MCP PortMaster" in resultado.output
+    assert "portmaster_status" in resultado.output
+
+

@@ -1911,6 +1911,25 @@ def test_project_conflicts_endpoint(client, tmp_path, free_ports):
         sock.close()
 
 
+def test_mcp_activity_endpoint(client):
+    from portmaster import mcp
+
+    mcp.clear_telemetry()
+    mcp.record_tool_call("portmaster_doctor", 45.2, "ok", "ok (512 bytes)")
+    res = client.get("/api/mcp/activity")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total_calls"] == 1
+    assert data["by_tool"].get("portmaster_doctor") == 1
+    assert data["rate_limit_max"] == 30
+    assert len(data["recent_events"]) == 1
+    ev = data["recent_events"][0]
+    assert ev["tool"] == "portmaster_doctor"
+    assert ev["duration_ms"] == 45.2
+    assert ev["status"] == "ok"
+
+
+
 
 
 

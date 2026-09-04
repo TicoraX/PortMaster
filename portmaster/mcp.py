@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import collections
+import datetime
 import io
 import json
 import os
@@ -186,17 +188,24 @@ def handle_request(req: dict[str, Any]) -> dict[str, Any] | None:
         }
 
     if method == "tools/call":
-        tool_name = params.get("name")
+        tool_name = params.get("name") or ""
         arguments = params.get("arguments", {})
+        t0 = time.perf_counter()
 
         try:
             res_content = _execute_tool(tool_name, arguments)
+            dur_ms = round((time.perf_counter() - t0) * 1000, 2)
+            record_tool_call(tool_name, dur_ms, "ok", f"ok ({len(res_content)} bytes)")
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {"content": [{"type": "text", "text": res_content}]},
             }
         except Exception as exc:
+            dur_ms = round((time.perf_counter() - t0) * 1000, 2)
+            msg = str(exc)
+            status = "rate_limited" if "Límite de acciones MCP excedido" in msg else "error"
+            record_tool_call(tool_name, dur_ms, status, msg)
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
@@ -217,6 +226,57 @@ _ACTION_BUDGET_WINDOW = 60.0
 _MAX_ACTIONS_PER_WINDOW = 30
 _action_timestamps: list[float] = []
 _action_lock = threading.Lock()
+
+_MAX_TELEMETRY_EVENTS = 100
+_telemetry_events: collections.deque[dict[str, Any]] = collections.deque(maxlen=_MAX_TELEMETRY_EVENTS)
+_telemetry_lock = threading.Lock()
+_telemetry_counter: int = 0
+_telemetry_by_tool: dict[str, int] = collections.defaultdict(int)
+
+
+def record_tool_call(tool: str, duration_ms: float, status: str, summary: str = "") -> None:
+    """Registra una invocación de herramienta MCP en el buffer circular de telemetría."""
+    global _telemetry_counter
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    with _telemetry_lock:
+        _telemetry_counter += 1
+        _telemetry_by_tool[tool] += 1
+        _telemetry_events.appendleft(
+            {
+                "tool": tool,
+                "timestamp": now_iso,
+                "duration_ms": duration_ms,
+                "status": status,
+                "summary": summary[:200] if summary else "",
+            }
+        )
+
+
+def get_telemetry() -> dict[str, Any]:
+    """Devuelve las estadísticas y llamadas recientes a herramientas MCP."""
+    now = time.monotonic()
+    with _action_lock:
+        while _action_timestamps and _action_timestamps[0] < now - _ACTION_BUDGET_WINDOW:
+            _action_timestamps.pop(0)
+        active_rate = len(_action_timestamps)
+
+    with _telemetry_lock:
+        return {
+            "total_calls": _telemetry_counter,
+            "active_rate_per_min": active_rate,
+            "rate_limit_max": _MAX_ACTIONS_PER_WINDOW,
+            "by_tool": dict(_telemetry_by_tool),
+            "recent_events": list(_telemetry_events),
+        }
+
+
+def clear_telemetry() -> None:
+    """Limpia el buffer y contadores de telemetría (usado para tests)."""
+    global _telemetry_counter
+    with _telemetry_lock:
+        _telemetry_counter = 0
+        _telemetry_by_tool.clear()
+        _telemetry_events.clear()
 
 
 def _check_action_budget() -> None:

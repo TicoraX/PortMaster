@@ -392,3 +392,64 @@ def test_mcp_action_budget_limit(monkeypatch):
         mcp._action_timestamps.clear()
 
 
+def test_mcp_telemetry_records_success(tmp_path):
+    mcp.clear_telemetry()
+    (tmp_path / "stack.yaml").write_text("services:\n  api:\n    command: echo api\n", encoding="utf-8")
+    req = {
+        "jsonrpc": "2.0",
+        "id": 101,
+        "method": "tools/call",
+        "params": {"name": "portmaster_status", "arguments": {"path": str(tmp_path)}},
+    }
+    res = mcp.handle_request(req)
+    assert res["result"].get("isError") is not True
+
+    data = mcp.get_telemetry()
+    assert data["total_calls"] == 1
+    assert data["by_tool"].get("portmaster_status") == 1
+    assert len(data["recent_events"]) == 1
+    event = data["recent_events"][0]
+    assert event["tool"] == "portmaster_status"
+    assert event["status"] == "ok"
+    assert event["duration_ms"] >= 0
+    assert "timestamp" in event
+
+
+def test_mcp_telemetry_records_error_and_rate_limit():
+    mcp.clear_telemetry()
+    # 1. Error de herramienta desconocida
+    req_err = {
+        "jsonrpc": "2.0",
+        "id": 102,
+        "method": "tools/call",
+        "params": {"name": "non_existent_tool", "arguments": {}},
+    }
+    res_err = mcp.handle_request(req_err)
+    assert res_err["result"].get("isError") is True
+
+    data = mcp.get_telemetry()
+    assert data["total_calls"] == 1
+    assert data["recent_events"][0]["status"] == "error"
+
+    # 2. Rate limit
+    with mcp._action_lock:
+        mcp._action_timestamps.extend([time.monotonic()] * mcp._MAX_ACTIONS_PER_WINDOW)
+
+    req_limit = {
+        "jsonrpc": "2.0",
+        "id": 103,
+        "method": "tools/call",
+        "params": {"name": "portmaster_ports", "arguments": {"ports": [80]}},
+    }
+    res_limit = mcp.handle_request(req_limit)
+    assert res_limit["result"].get("isError") is True
+
+    data_limit = mcp.get_telemetry()
+    assert data_limit["total_calls"] == 2
+    assert data_limit["recent_events"][0]["status"] == "rate_limited"
+
+    with mcp._action_lock:
+        mcp._action_timestamps.clear()
+
+
+

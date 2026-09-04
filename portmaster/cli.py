@@ -1099,5 +1099,62 @@ def stats_cmd(
     console.print(table)
 
 
+@app.command("mcp-status")
+def mcp_status_cmd(
+    server_port: int = typer.Option(7666, "--port", "-p", help="Puerto del servidor de PortMaster"),
+) -> None:
+    """Muestra la telemetría y estado de llamadas MCP para agentes IA."""
+    import urllib.request
+
+    token = registry.token()
+    base_url = f"http://127.0.0.1:{server_port}"
+    req = urllib.request.Request(
+        f"{base_url}/api/mcp/activity",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        data = mcp.get_telemetry()
+
+    total = data.get("total_calls", 0)
+    rate = data.get("active_rate_per_min", 0)
+    max_rate = data.get("rate_limit_max", 30)
+    console.print(
+        f"[bold]Servidor MCP PortMaster[/] · Llamadas: [cyan]{total}[/] · Cuota: [green]{rate}/{max_rate}[/] req/min"
+    )
+
+    by_tool = data.get("by_tool", {})
+    if by_tool:
+        tool_table = Table(title="Invocaciones por herramienta MCP")
+        tool_table.add_column("Herramienta", style="cyan")
+        tool_table.add_column("Llamadas", justify="right")
+        for tool, count in sorted(by_tool.items(), key=lambda x: -x[1]):
+            tool_table.add_row(tool, str(count))
+        console.print(tool_table)
+
+    events = data.get("recent_events", [])
+    if events:
+        ev_table = Table(title="Invocaciones recientes (últimas 10)")
+        ev_table.add_column("Timestamp", style="dim")
+        ev_table.add_column("Herramienta", style="cyan")
+        ev_table.add_column("Duración", justify="right")
+        ev_table.add_column("Estado")
+        for ev in events[:10]:
+            st = ev.get("status", "ok")
+            st_style = (
+                "[green]ok[/]"
+                if st == "ok"
+                else (f"[yellow]{st}[/]" if st == "rate_limited" else f"[red]{st}[/]")
+            )
+            dur = f"{ev.get('duration_ms', 0):.1f} ms"
+            ts = ev.get("timestamp", "").replace("T", " ")[:19]
+            ev_table.add_row(ts, ev.get("tool", "-"), dur, st_style)
+        console.print(ev_table)
+    elif not by_tool:
+        console.print("[dim]Sin actividad reciente de agentes MCP.[/]")
+
+
 if __name__ == "__main__":
     app()

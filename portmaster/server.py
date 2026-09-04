@@ -40,6 +40,7 @@ from . import (
     docker,
     doctor,
     history,
+    mcp,
     ports,
     registry,
     runner,
@@ -1094,6 +1095,14 @@ def create_app(token: str | None = None) -> FastAPI:
             "suggested": suggested,
             "occupant": _occupant(status, False),
         }
+
+    @app.get(
+        "/api/mcp/activity",
+        dependencies=[quota("state", QUOTA_READ), Depends(require_token)],
+    )
+    def mcp_activity() -> dict:
+        """Telemetría y registro de invocaciones de herramientas MCP para agentes IA."""
+        return mcp.get_telemetry()
 
     @app.get("/api/version", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
     def version() -> dict:

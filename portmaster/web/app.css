@@ -1534,3 +1534,92 @@ body {
   font-size: var(--text-xs);
   color: var(--color-ink-3);
 }
+
+/* telemetria mcp modal ------------------------------------------------------ */
+
+.mcp-modal {
+  max-width: 680px;
+  width: 90vw;
+}
+
+.mcp__content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  margin-top: var(--space-sm);
+}
+
+.mcp__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  font-size: var(--text-sm);
+  color: var(--color-ink-2);
+  background: var(--color-paper);
+  padding: var(--space-sm) var(--space-md);
+  border: var(--rule) solid var(--color-rule);
+  border-radius: var(--radius);
+}
+
+.mcp__stat strong {
+  color: var(--color-ink);
+  font-family: var(--font-mono);
+}
+
+.mcp__breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.mcp__pill {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 0.2rem 0.5rem;
+  background: var(--color-paper-2);
+  border: var(--rule) solid var(--color-rule-strong);
+  border-radius: 9999px;
+  color: var(--color-ink-2);
+}
+
+.mcp__table-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+  border: var(--rule) solid var(--color-rule);
+  border-radius: var(--radius);
+  background: var(--color-paper);
+}
+
+.mcp__table {
+  width: 100%;
+  margin: 0;
+}
+
+.mcp__tool-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-ink);
+}
+
+.mcp__status-badge {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+}
+
+.mcp__status-badge--ok {
+  background: var(--color-ok-soft, oklch(93% 0.03 155));
+  color: var(--color-ok-ink);
+}
+
+.mcp__status-badge--rate_limited {
+  background: var(--color-warn-soft, oklch(93% 0.03 75));
+  color: var(--color-warn-ink);
+}
+
+.mcp__status-badge--error {
+  background: var(--color-bad-soft);
+  color: var(--color-bad-ink);
+}
+

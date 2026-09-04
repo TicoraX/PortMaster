@@ -44,6 +44,12 @@ const ui = {
   btnPortsModal: document.getElementById("btn-ports-modal"),
   portsModal: document.getElementById("ports-modal"),
   portsModalList: document.getElementById("ports-modal-list"),
+  btnMcpModal: document.getElementById("btn-mcp-modal"),
+  mcpModal: document.getElementById("mcp-modal"),
+  mcpTotalCalls: document.getElementById("mcp-total-calls"),
+  mcpQuotaUsed: document.getElementById("mcp-quota-used"),
+  mcpBreakdown: document.getElementById("mcp-breakdown"),
+  mcpTbody: document.getElementById("mcp-tbody"),
 };
 
 const TITLE = document.title;
@@ -2048,6 +2054,85 @@ async function refreshPortsModal() {
     );
   } catch {
     // Silencioso
+  }
+}
+
+/* mcp modal ----------------------------------------------------------------- */
+
+if (ui.btnMcpModal && ui.mcpModal) {
+  ui.btnMcpModal.addEventListener("click", () => {
+    ui.mcpModal.showModal();
+    refreshMcpModal();
+  });
+  const closeBtn = ui.mcpModal.querySelector('[data-mcp-modal="close"]');
+  if (closeBtn) {
+    closeBtn.addEventListener("click", () => {
+      ui.mcpModal.close();
+    });
+  }
+}
+
+async function refreshMcpModal() {
+  if (!ui.mcpModal) return;
+  try {
+    const data = await api("/api/mcp/activity");
+    if (ui.mcpTotalCalls) ui.mcpTotalCalls.textContent = String(data.total_calls || 0);
+    if (ui.mcpQuotaUsed) {
+      ui.mcpQuotaUsed.textContent = `${data.active_rate_per_min || 0}/${data.rate_limit_max || 30}`;
+    }
+
+    if (ui.mcpBreakdown) {
+      ui.mcpBreakdown.replaceChildren();
+      const byTool = data.by_tool || {};
+      const entries = Object.entries(byTool).sort((a, b) => b[1] - a[1]);
+      for (const [tool, count] of entries) {
+        const pill = document.createElement("span");
+        pill.className = "mcp__pill";
+        pill.textContent = `${tool}: ${count}`;
+        ui.mcpBreakdown.append(pill);
+      }
+    }
+
+    if (ui.mcpTbody) {
+      ui.mcpTbody.replaceChildren();
+      const events = data.recent_events || [];
+      if (events.length === 0) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 4;
+        td.style.textAlign = "center";
+        td.style.color = "var(--color-ink-3)";
+        td.textContent = "Sin llamadas registradas aún";
+        tr.append(td);
+        ui.mcpTbody.append(tr);
+        return;
+      }
+      for (const ev of events) {
+        const tr = document.createElement("tr");
+
+        const tdTime = document.createElement("td");
+        const ts = (ev.timestamp || "").replace("T", " ").substring(11, 19);
+        tdTime.textContent = ts;
+
+        const tdTool = document.createElement("td");
+        tdTool.className = "mcp__tool-name";
+        tdTool.textContent = ev.tool || "-";
+
+        const tdDur = document.createElement("td");
+        tdDur.textContent = `${ev.duration_ms || 0} ms`;
+
+        const tdStatus = document.createElement("td");
+        const badge = document.createElement("span");
+        badge.className = `mcp__status-badge mcp__status-badge--${ev.status || "ok"}`;
+        badge.textContent = ev.status || "ok";
+        tdStatus.append(badge);
+
+        tr.append(tdTime, tdTool, tdDur, tdStatus);
+        ui.mcpTbody.append(tr);
+      }
+    }
+  } catch (err) {
+    console.error("Error al cargar telemetría MCP:", err);
   }
 }
 

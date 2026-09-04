@@ -15,6 +15,9 @@
       <h1 class="wordmark">PortMaster</h1>
       <p class="masthead__status" id="connection" role="status">Conectando…</p>
       <p class="masthead__health" id="health" hidden></p>
+      <button class="btn btn--quiet masthead__notify" type="button" id="btn-mcp-modal" title="Telemetría y llamadas de herramientas MCP">
+        MCP
+      </button>
       <button class="btn btn--quiet masthead__notify" type="button" id="notify" hidden>
         Avisarme
       </button>
@@ -159,6 +162,33 @@
           <button class="btn btn--quiet" type="button" data-ports-modal="close">Cerrar</button>
         </div>
         <ul class="orphans__list" id="ports-modal-list"></ul>
+      </dialog>
+
+      <dialog class="picker mcp-modal" id="mcp-modal" aria-label="Telemetría de Agentes MCP">
+        <div class="picker__head">
+          <p class="picker__path">Telemetría de Agentes MCP</p>
+          <button class="btn btn--quiet" type="button" data-mcp-modal="close">Cerrar</button>
+        </div>
+        <div class="mcp__content">
+          <div class="mcp__stats">
+            <span class="mcp__stat">Llamadas totales: <strong id="mcp-total-calls">0</strong></span>
+            <span class="mcp__stat">Cuota activa: <strong id="mcp-quota-used">0/30</strong> req/min</span>
+          </div>
+          <div class="mcp__breakdown" id="mcp-breakdown"></div>
+          <div class="mcp__table-scroll">
+            <table class="history__table mcp__table">
+              <thead>
+                <tr>
+                  <th>Hora</th>
+                  <th>Herramienta</th>
+                  <th>Duración</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody id="mcp-tbody"></tbody>
+            </table>
+          </div>
+        </div>
       </dialog>
 
       <dialog class="picker" id="picker" aria-label="Elegir carpeta">
