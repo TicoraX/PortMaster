@@ -1631,3 +1631,78 @@ def test_get_metrics_endpoint(client, proyecto):
         client.post(f"/api/projects/{pid}/down")
 
 
+def test_sink_subscription_and_dispatch():
+    sink = server._Sink()
+    sub_q = sink.subscribe()
+    sink.write("primera linea\nsegunda linea\n")
+
+    item1 = sub_q.get(timeout=1.0)
+    assert item1 == (1, "primera linea")
+    item2 = sub_q.get(timeout=1.0)
+    assert item2 == (2, "segunda linea")
+
+    sink.unsubscribe(sub_q)
+    sink.write("tercera linea\n")
+    import queue
+    with pytest.raises(queue.Empty):
+        sub_q.get(timeout=0.1)
+
+
+def test_logs_stream_endpoint(client, proyecto):
+    path, _ = proyecto
+    pid = registry.project_id(path)
+
+    # Con proyecto apagado, el endpoint responde 404
+    res = client.get(f"/api/projects/{pid}/logs/stream")
+    assert res.status_code == 404
+
+    client.post(f"/api/projects/{pid}/up", json={})
+    esperar_listo(client)
+    try:
+        # Escribir en el sink para tener una línea conocida
+        sesion = server.sessions[pid]
+        sesion.sink.write("evento de prueba en vivo\n")
+
+        # Petición SSE con stream (follow=False para terminar de leer el lote de logs existentes)
+        with client.stream("GET", f"/api/projects/{pid}/logs/stream?follow=false") as response:
+            assert response.status_code == 200
+            assert "text/event-stream" in response.headers.get("content-type", "")
+
+            lines = [chunk for chunk in response.iter_lines() if chunk.startswith("data: ")]
+            assert any("evento de prueba en vivo" in line for line in lines)
+    finally:
+        client.post(f"/api/projects/{pid}/down")
+
+
+def test_logs_stream_dynamic_realtime(client, proyecto):
+    path, _ = proyecto
+    pid = registry.project_id(path)
+
+    client.post(f"/api/projects/{pid}/up", json={})
+    esperar_listo(client)
+    try:
+        sesion = server.sessions[pid]
+        current_seq = sesion.sink.seq
+
+        import threading
+
+        def emit_later():
+            time.sleep(0.05)
+            sesion.sink.write("linea dinamica en vuelo\n")
+
+        t = threading.Thread(target=emit_later)
+        t.start()
+
+        with client.stream(
+            "GET", f"/api/projects/{pid}/logs/stream?since={current_seq}&max_duration=0.6"
+        ) as response:
+            assert response.status_code == 200
+            lines = [chunk for chunk in response.iter_lines() if chunk.startswith("data: ")]
+            assert any("linea dinamica en vuelo" in line for line in lines)
+
+        t.join()
+    finally:
+        client.post(f"/api/projects/{pid}/down")
+
+
+

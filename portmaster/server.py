@@ -13,8 +13,11 @@ como superficie sensible aunque solo escuche en loopback:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import json
 import logging
+import queue
 import secrets
 import threading
 import time
@@ -25,7 +28,7 @@ from typing import Literal
 
 import psutil
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from rich.console import Console
@@ -99,20 +102,45 @@ class _Sink:
         self.lines: deque[tuple[int, str]] = deque(maxlen=LOG_LINES)
         self.seq = 0
         self._partial = ""
+        self._subscribers: set[queue.Queue[tuple[int, str]]] = set()
+        self._lock = threading.Lock()
+
+    def subscribe(self) -> queue.Queue[tuple[int, str]]:
+        q: queue.Queue[tuple[int, str]] = queue.Queue(maxsize=1000)
+        with self._lock:
+            self._subscribers.add(q)
+        return q
+
+    def unsubscribe(self, q: queue.Queue[tuple[int, str]]) -> None:
+        with self._lock:
+            self._subscribers.discard(q)
 
     def write(self, text: str) -> int:
         self._partial += text
         *complete, self._partial = self._partial.split("\n")
         for line in complete:
             self.seq += 1
-            self.lines.append((self.seq, line.rstrip()))
+            item = (self.seq, line.rstrip())
+            self.lines.append(item)
+            self._dispatch(item)
         return len(text)
 
     def flush(self) -> None:
         if self._partial:
             self.seq += 1
-            self.lines.append((self.seq, self._partial.rstrip()))
+            item = (self.seq, self._partial.rstrip())
+            self.lines.append(item)
+            self._dispatch(item)
             self._partial = ""
+
+    def _dispatch(self, item: tuple[int, str]) -> None:
+        with self._lock:
+            subs = list(self._subscribers)
+        for q in subs:
+            try:
+                q.put_nowait(item)
+            except queue.Full:
+                pass
 
 
 @dataclass
@@ -797,6 +825,67 @@ def create_app(token: str | None = None) -> FastAPI:
             if seq > since
         ]
         return {"lines": pending, "seq": session.sink.seq}
+
+    @app.get(
+        "/api/projects/{pid}/logs/stream",
+        dependencies=[quota("state", QUOTA_READ), Depends(require_token)],
+    )
+    async def stream_logs(
+        pid: str,
+        since: int = 0,
+        follow: bool = True,
+        max_duration: float | None = None,
+    ) -> StreamingResponse:
+        with sessions_lock:
+            session = sessions.get(pid)
+        if session is None:
+            raise HTTPException(404, "el proyecto no esta corriendo")
+
+        sub_q = session.sink.subscribe()
+
+        async def event_generator():
+            try:
+                # 1. Emitir líneas pendientes del buffer
+                pending = [
+                    (seq, text)
+                    for seq, text in list(session.sink.lines)
+                    if seq > since
+                ]
+                for seq, text in pending:
+                    payload = json.dumps({"seq": seq, "text": text})
+                    yield f"data: {payload}\n\n"
+
+                if not follow:
+                    return
+
+                start_time = time.monotonic()
+                while True:
+                    if max_duration and (time.monotonic() - start_time) > max_duration:
+                        break
+
+                    while True:
+                        try:
+                            seq, text = sub_q.get_nowait()
+                            payload = json.dumps({"seq": seq, "text": text})
+                            yield f"data: {payload}\n\n"
+                        except queue.Empty:
+                            break
+
+                    await asyncio.sleep(0.05)
+            except (asyncio.CancelledError, GeneratorExit):
+                pass
+            finally:
+                session.sink.unsubscribe(sub_q)
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.post(
         "/api/ports/{port}/kill",

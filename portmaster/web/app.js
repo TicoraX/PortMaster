@@ -465,7 +465,9 @@ function buildCard(project) {
       entry.historyOpen = false;
       root.querySelector(".history__box").hidden = true;
       root.querySelector('[data-act="history"]').setAttribute("aria-expanded", "false");
-      pullLogs(project.id, entry);
+      startLogsStream(project.id, entry);
+    } else {
+      stopLogsStream(entry);
     }
   });
 
@@ -477,6 +479,7 @@ function buildCard(project) {
     historyButton.setAttribute("aria-expanded", String(entry.historyOpen));
     if (entry.historyOpen) {
       entry.logsOpen = false;
+      stopLogsStream(entry);
       if (logsBox) logsBox.hidden = true;
       logsButton.setAttribute("aria-expanded", "false");
       entry.lastHistoryState = project.state;
@@ -815,12 +818,67 @@ function updateCard(entry, project) {
     live || stopping || project.state === "invalid";
   root.querySelector('[data-act="down"]').disabled = !algoVivo || stopping;
 
-  if (entry.logsOpen) pullLogs(project.id, entry);
+  if (entry.logsOpen) {
+    if (!entry.eventSource) {
+      startLogsStream(project.id, entry);
+    }
+  } else {
+    stopLogsStream(entry);
+  }
   
   if (entry.historyOpen && entry.lastHistoryState !== project.state) {
     entry.lastHistoryState = project.state;
     pullHistory(project.id, entry);
   }
+}
+
+function startLogsStream(id, entry) {
+  if (entry.eventSource) return;
+  const liveBadge = entry.root.querySelector(".logs__live");
+  if (!window.EventSource) {
+    if (liveBadge) liveBadge.hidden = true;
+    pullLogs(id, entry);
+    return;
+  }
+  const url = `/api/projects/${id}/logs/stream?since=${entry.logSeq}&token=${encodeURIComponent(token)}`;
+  try {
+    const es = new EventSource(url);
+    entry.eventSource = es;
+
+    es.onopen = () => {
+      if (liveBadge) liveBadge.hidden = false;
+    };
+
+    es.onmessage = (event) => {
+      try {
+        const item = JSON.parse(event.data);
+        if (item.seq > entry.logSeq) {
+          entry.logSeq = item.seq;
+          entry.rawLogs = (entry.rawLogs || "") + item.text + "\n";
+          renderLogsText(entry);
+        }
+      } catch {
+        /* noop */
+      }
+    };
+
+    es.onerror = () => {
+      stopLogsStream(entry);
+      pullLogs(id, entry);
+    };
+  } catch {
+    stopLogsStream(entry);
+    pullLogs(id, entry);
+  }
+}
+
+function stopLogsStream(entry) {
+  if (entry.eventSource) {
+    entry.eventSource.close();
+    entry.eventSource = null;
+  }
+  const liveBadge = entry.root.querySelector(".logs__live");
+  if (liveBadge) liveBadge.hidden = true;
 }
 
 async function pullLogs(id, entry) {

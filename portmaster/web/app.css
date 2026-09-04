@@ -758,6 +758,30 @@ body {
   padding: 0.4rem 0.6rem;
 }
 
+.logs__live {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-good);
+  background: color-mix(in oklch, var(--color-good) 12%, transparent);
+  border: var(--rule) solid var(--color-good);
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.logs__live::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-good);
+  box-shadow: 0 0 4px var(--color-good);
+}
+
 .logs {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
