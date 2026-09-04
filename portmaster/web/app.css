@@ -829,6 +829,43 @@ body {
   margin-left: auto;
 }
 
+/* grafo de dependencias --------------------------------------------------- */
+
+.graph__box {
+  margin-top: var(--space-sm);
+  background: var(--color-paper-2);
+  border: var(--rule) solid var(--color-rule);
+  border-radius: var(--radius);
+  padding: var(--space-sm);
+  overflow: hidden;
+}
+
+.graph__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-xs);
+}
+
+.graph__title {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--color-ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.graph__canvas-wrapper {
+  overflow-x: auto;
+  padding: var(--space-xs) 0;
+}
+
+.graph__svg {
+  display: block;
+  margin: 0 auto;
+  overflow: visible;
+}
+
 /* alta de proyecto -------------------------------------------------------- */
 
 .enroll {

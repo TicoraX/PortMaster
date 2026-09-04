@@ -249,6 +249,9 @@
               <button class="btn btn--quiet" type="button" data-act="history" aria-expanded="false">
                 Historial
               </button>
+              <button class="btn btn--quiet" type="button" data-act="graph" aria-expanded="false" hidden>
+                Grafo
+              </button>
               <button class="btn btn--quiet project__freeze" type="button" data-act="freeze" hidden>
                 Congelar a stack.yaml
               </button>
@@ -277,6 +280,14 @@
                 </thead>
                 <tbody class="history__tbody"></tbody>
               </table>
+            </div>
+            <div class="graph__box" hidden>
+              <div class="graph__header">
+                <span class="graph__title">Orden de arranque y dependencias</span>
+              </div>
+              <div class="graph__canvas-wrapper">
+                <svg class="graph__svg" role="img" aria-label="Grafo de dependencias"></svg>
+              </div>
             </div>
           </div>
         </div>

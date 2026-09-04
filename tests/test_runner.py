@@ -1125,3 +1125,53 @@ def test_el_stop_de_un_servicio_no_corre_dos_veces(tmp_path, free_ports):
         f"el stop corrio {len(cuenta.read_text())} veces en vez de una"
     )
     engine.down()
+
+
+def test_dependency_graph(tmp_path):
+    stack = stack_from(
+        tmp_path,
+        """
+        services:
+          db:
+            command: echo db
+            port: 5432
+          api:
+            command: echo api
+            port: 8000
+            needs: [db]
+          web:
+            command: echo web
+            port: 3000
+            needs: [api]
+          worker:
+            command: echo worker
+            needs: [db]
+        profiles:
+          backend_only: [db, api]
+        """,
+    )
+    # Grafo completo
+    graph = runner.dependency_graph(stack)
+    assert graph["levels"] == [["db"], ["api", "worker"], ["web"]]
+    assert len(graph["nodes"]) == 4
+
+    node_map = {n["name"]: n for n in graph["nodes"]}
+    assert node_map["db"]["level"] == 0
+    assert node_map["db"]["needs"] == []
+    assert node_map["api"]["level"] == 1
+    assert node_map["api"]["needs"] == ["db"]
+    assert node_map["worker"]["level"] == 1
+    assert node_map["worker"]["needs"] == ["db"]
+    assert node_map["web"]["level"] == 2
+    assert node_map["web"]["needs"] == ["api"]
+
+    assert {"from": "db", "to": "api"} in graph["edges"]
+    assert {"from": "db", "to": "worker"} in graph["edges"]
+    assert {"from": "api", "to": "web"} in graph["edges"]
+
+    # Grafo filtrado por perfil
+    profile_graph = runner.dependency_graph(stack, profile="backend_only")
+    assert profile_graph["levels"] == [["db"], ["api"]]
+    assert len(profile_graph["nodes"]) == 2
+    assert profile_graph["edges"] == [{"from": "db", "to": "api"}]
+

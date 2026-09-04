@@ -1228,6 +1228,7 @@ def _project_view(path: Path) -> dict:
             "metrics": {},
             "needs_docker": False,
             "docker_down": False,
+            "graph": {"levels": [], "nodes": [], "edges": []},
         }
 
     with sessions_lock:
@@ -1327,6 +1328,7 @@ def _project_view(path: Path) -> dict:
         # distinguirlos para poder decir "corriendo" en vez de callarse.
         "needs_docker": has_docker,
         "docker_down": docker_down,
+        "graph": runner.dependency_graph(stack),
     }
 
 

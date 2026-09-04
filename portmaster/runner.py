@@ -654,6 +654,30 @@ def _levels(services: list[Service]) -> list[list[Service]]:
     return levels
 
 
+def dependency_graph(stack: Stack, profile: str | None = None) -> dict:
+    """Calcula nodos, aristas y niveles de arranque topológico del stack."""
+    services = stack.resolve(profile)
+    levels = _levels(services)
+    nivel_de = {s.name: lvl_idx for lvl_idx, lvl in enumerate(levels) for s in lvl}
+    return {
+        "levels": [[s.name for s in lvl] for lvl in levels],
+        "nodes": [
+            {
+                "name": s.name,
+                "level": nivel_de.get(s.name, 0),
+                "needs": list(s.needs),
+                "port": s.port,
+            }
+            for s in services
+        ],
+        "edges": [
+            {"from": dep, "to": s.name}
+            for s in services
+            for dep in s.needs
+        ],
+    }
+
+
 def run_stop(service: Service) -> subprocess.CompletedProcess | None:
     """Corre el `stop:` de un servicio. None si no termino a tiempo.
 

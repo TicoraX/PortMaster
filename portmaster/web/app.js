@@ -463,8 +463,15 @@ function buildCard(project) {
     logsButton.setAttribute("aria-expanded", String(entry.logsOpen));
     if (entry.logsOpen) {
       entry.historyOpen = false;
-      root.querySelector(".history__box").hidden = true;
-      root.querySelector('[data-act="history"]').setAttribute("aria-expanded", "false");
+      entry.graphOpen = false;
+      const hb = root.querySelector(".history__box");
+      if (hb) hb.hidden = true;
+      const gb = root.querySelector(".graph__box");
+      if (gb) gb.hidden = true;
+      const hBtn = root.querySelector('[data-act="history"]');
+      if (hBtn) hBtn.setAttribute("aria-expanded", "false");
+      const gBtn = root.querySelector('[data-act="graph"]');
+      if (gBtn) gBtn.setAttribute("aria-expanded", "false");
       startLogsStream(project.id, entry);
     } else {
       stopLogsStream(entry);
@@ -479,13 +486,38 @@ function buildCard(project) {
     historyButton.setAttribute("aria-expanded", String(entry.historyOpen));
     if (entry.historyOpen) {
       entry.logsOpen = false;
+      entry.graphOpen = false;
       stopLogsStream(entry);
       if (logsBox) logsBox.hidden = true;
       logsButton.setAttribute("aria-expanded", "false");
+      const gb = root.querySelector(".graph__box");
+      if (gb) gb.hidden = true;
+      const gBtn = root.querySelector('[data-act="graph"]');
+      if (gBtn) gBtn.setAttribute("aria-expanded", "false");
       entry.lastHistoryState = project.state;
       pullHistory(project.id, entry);
     }
   });
+
+  const graphBox = root.querySelector(".graph__box");
+  const graphButton = root.querySelector('[data-act="graph"]');
+  if (graphButton) {
+    graphButton.addEventListener("click", () => {
+      entry.graphOpen = !entry.graphOpen;
+      if (graphBox) graphBox.hidden = !entry.graphOpen;
+      graphButton.setAttribute("aria-expanded", String(entry.graphOpen));
+      if (entry.graphOpen) {
+        entry.logsOpen = false;
+        entry.historyOpen = false;
+        stopLogsStream(entry);
+        if (logsBox) logsBox.hidden = true;
+        logsButton.setAttribute("aria-expanded", "false");
+        if (historyBox) historyBox.hidden = true;
+        historyButton.setAttribute("aria-expanded", "false");
+        renderGraph(project, entry);
+      }
+    });
+  }
 
   cards.set(project.id, entry);
   return entry;
@@ -830,6 +862,112 @@ function updateCard(entry, project) {
     entry.lastHistoryState = project.state;
     pullHistory(project.id, entry);
   }
+
+  const graphButton = root.querySelector('[data-act="graph"]');
+  const hasGraph = project.graph && project.graph.nodes && project.graph.nodes.length > 1;
+  if (graphButton) {
+    graphButton.hidden = !hasGraph;
+  }
+  if (entry.graphOpen && hasGraph) {
+    renderGraph(project, entry);
+  }
+}
+
+function renderGraph(project, entry) {
+  const svg = entry.root.querySelector(".graph__svg");
+  if (!svg || !project.graph || !project.graph.nodes || !project.graph.nodes.length) return;
+
+  const { levels, nodes, edges } = project.graph;
+  const nodeMap = new Map();
+  const serviceStateMap = new Map((project.services || []).map((s) => [s.name, s.state]));
+
+  const nodeWidth = 130;
+  const nodeHeight = 36;
+  const colGap = 60;
+  const rowGap = 16;
+  const padding = 20;
+
+  const maxRows = Math.max(...levels.map((l) => l.length), 1);
+  const totalWidth = Math.max(340, padding * 2 + levels.length * nodeWidth + Math.max(0, levels.length - 1) * colGap);
+  const totalHeight = padding * 2 + maxRows * nodeHeight + Math.max(0, maxRows - 1) * rowGap;
+
+  levels.forEach((level, colIdx) => {
+    const x = padding + colIdx * (nodeWidth + colGap);
+    const colHeight = level.length * nodeHeight + (level.length - 1) * rowGap;
+    const startY = padding + (totalHeight - 2 * padding - colHeight) / 2;
+
+    level.forEach((name, rowIdx) => {
+      const y = startY + rowIdx * (nodeHeight + rowGap);
+      const nodeData = nodes.find((n) => n.name === name) || { name, port: null };
+      nodeMap.set(name, {
+        x,
+        y,
+        name,
+        port: nodeData.port,
+        state: serviceStateMap.get(name) || "stopped",
+      });
+    });
+  });
+
+  const arrowId = `arrow-${project.id}`;
+  let html = `
+    <defs>
+      <marker id="${arrowId}" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L6,3 z" fill="var(--color-rule-strong)" />
+      </marker>
+    </defs>
+  `;
+
+  (edges || []).forEach((edge) => {
+    const from = nodeMap.get(edge.from);
+    const to = nodeMap.get(edge.to);
+    if (!from || !to) return;
+
+    const startX = from.x + nodeWidth;
+    const startY = from.y + nodeHeight / 2;
+    const endX = to.x;
+    const endY = to.y + nodeHeight / 2;
+    const c1X = startX + (endX - startX) / 2;
+    const c2X = c1X;
+
+    html += `
+      <path d="M ${startX} ${startY} C ${c1X} ${startY}, ${c2X} ${endY}, ${endX} ${endY}"
+            stroke="var(--color-rule-strong)" stroke-width="1.5" fill="none"
+            marker-end="url(#${arrowId})" />
+    `;
+  });
+
+  nodeMap.forEach((node) => {
+    let dotColor = "var(--color-ink-4)";
+    if (node.state === "ready") dotColor = "var(--color-good)";
+    else if (node.state === "starting") dotColor = "var(--color-warn)";
+    else if (node.state === "error") dotColor = "var(--color-bad)";
+
+    const label = node.name.length > 12 ? node.name.slice(0, 11) + "…" : node.name;
+    const portText = node.port ? `:${node.port}` : "";
+
+    html += `
+      <g class="graph__node" transform="translate(${node.x}, ${node.y})">
+        <rect width="${nodeWidth}" height="${nodeHeight}" rx="6"
+              fill="var(--color-paper)" stroke="var(--color-rule-strong)" stroke-width="1" />
+        <circle cx="12" cy="${nodeHeight / 2}" r="4" fill="${dotColor}" />
+        <text x="24" y="${nodeHeight / 2 + (portText ? -2 : 4)}"
+              fill="var(--color-ink)" font-family="var(--font-mono)" font-size="11" font-weight="600">
+          ${label}
+        </text>
+        ${
+          portText
+            ? `<text x="24" y="${nodeHeight / 2 + 10}" fill="var(--color-ink-3)" font-family="var(--font-mono)" font-size="9">${portText}</text>`
+            : ""
+        }
+      </g>
+    `;
+  });
+
+  svg.setAttribute("viewBox", `0 0 ${totalWidth} ${totalHeight}`);
+  svg.setAttribute("width", String(totalWidth));
+  svg.setAttribute("height", String(totalHeight));
+  svg.innerHTML = html;
 }
 
 function startLogsStream(id, entry) {

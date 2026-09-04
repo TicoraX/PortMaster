@@ -1705,4 +1705,20 @@ def test_logs_stream_dynamic_realtime(client, proyecto):
         client.post(f"/api/projects/{pid}/down")
 
 
+def test_project_view_includes_dependency_graph(client, proyecto):
+    path, _ = proyecto
+    pid = registry.project_id(path)
+
+    res = client.get("/api/state")
+    assert res.status_code == 200
+    proj = next(p for p in res.json()["projects"] if p["id"] == pid)
+    assert "graph" in proj
+    assert "nodes" in proj["graph"]
+    assert "edges" in proj["graph"]
+    assert "levels" in proj["graph"]
+    assert len(proj["graph"]["nodes"]) >= 1
+    assert proj["graph"]["nodes"][0]["name"] == "srv"
+
+
+
 
