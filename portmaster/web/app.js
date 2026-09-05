@@ -66,6 +66,19 @@ let hayProyectos = false;
 let query = "";
 let statusFilter = "";
 let page = 1;
+let cachedEditors = null;
+
+async function loadAvailableEditors() {
+  if (cachedEditors !== null) return cachedEditors;
+  try {
+    const data = await api("/api/editors");
+    cachedEditors = data && data.editors ? data.editors : [];
+  } catch {
+    cachedEditors = [];
+  }
+  return cachedEditors;
+}
+
 
 /* token ------------------------------------------------------------------- */
 
@@ -667,21 +680,23 @@ function buildCard(project) {
     });
   }
 
-  // Abrir proyecto en editor de codigo (VS Code / Cursor)
-  const openEditorBtn = root.querySelector('[data-act="open-editor"]');
-  if (openEditorBtn) {
-    openEditorBtn.addEventListener("click", (event) => {
-      act(event.currentTarget, async () => {
-        try {
-          const res = await api("/api/open-editor", {
-            method: "POST",
-            body: JSON.stringify({ path: project.path }),
-          });
-          flash(`Abriendo ${project.name} en ${res.editor || 'editor'}...`, "neutral");
-        } catch (err) {
-          flash(err.message, "warn");
-        }
-      });
+  // Cuadro deslizable para elegir y abrir editor (VS Code / Cursor / etc.)
+  const editorSelect = root.querySelector('[data-act="select-editor"]');
+  if (editorSelect) {
+    editorSelect.addEventListener("change", async (event) => {
+      const chosenEditor = editorSelect.value;
+      if (!chosenEditor) return;
+      // Regresar el select a su valor inicial para permitir re-selección
+      editorSelect.value = "";
+      try {
+        const res = await api("/api/open-editor", {
+          method: "POST",
+          body: JSON.stringify({ path: project.path, editor: chosenEditor }),
+        });
+        flash(`Abriendo ${project.name} en ${res.editor || chosenEditor}...`, "neutral");
+      } catch (err) {
+        flash(err.message, "warn");
+      }
     });
   }
 
@@ -1010,6 +1025,34 @@ function updateCard(entry, project) {
   if (document.activeElement !== select) {
     select.value = project.profile || "";
   }
+
+  // Poblar select de editores disponibles de forma no intrusiva
+  const editorSelect = root.querySelector('[data-act="select-editor"]');
+  if (editorSelect && editorSelect.dataset.loaded !== "true") {
+    loadAvailableEditors().then((editors) => {
+      editorSelect.dataset.loaded = "true";
+      if (!editors || editors.length === 0) {
+        editorSelect.closest(".editor-select-wrap").hidden = true;
+        return;
+      }
+      editorSelect.closest(".editor-select-wrap").hidden = false;
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.disabled = true;
+      placeholder.selected = true;
+      placeholder.textContent = "Editor…";
+      editorSelect.replaceChildren(
+        placeholder,
+        ...editors.map((ed) => {
+          const opt = document.createElement("option");
+          opt.value = ed.id;
+          opt.textContent = ed.name;
+          return opt;
+        }),
+      );
+    });
+  }
+
 
   const live = project.state === "starting" || project.state === "running";
   const stopping = project.state === "stopping";

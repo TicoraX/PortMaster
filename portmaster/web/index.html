@@ -271,7 +271,15 @@
           <div class="project__body">
             <div class="project__path-wrapper">
               <p class="project__path"></p>
-              <button class="btn btn--quiet btn--sm project__path-copy" type="button" aria-label="Copiar ruta">Copiar ruta</button>
+              <div class="project__path-actions">
+                <button class="btn btn--quiet btn--sm project__path-copy" type="button" aria-label="Copiar ruta">Copiar ruta</button>
+                <button class="btn btn--quiet btn--sm" type="button" data-act="open-folder" title="Abrir en el Explorador de archivos del sistema">Carpeta</button>
+                <div class="editor-select-wrap">
+                  <select class="editor__select" data-act="select-editor" title="Elegir y abrir en editor">
+                    <option value="" disabled selected>Editor…</option>
+                  </select>
+                </div>
+              </div>
             </div>
             <p class="project__error" hidden></p>
             <p class="project__docker-warning" hidden></p>
@@ -281,12 +289,6 @@
                 <span class="profile__label">Perfil</span>
                 <select class="profile__select"></select>
               </label>
-              <button class="btn btn--quiet" type="button" data-act="open-folder" title="Abrir en el Explorador de archivos del sistema">
-                Carpeta
-              </button>
-              <button class="btn btn--quiet" type="button" data-act="open-editor" title="Abrir proyecto en editor (VS Code / Cursor)">
-                Editor
-              </button>
               <button class="btn btn--quiet" type="button" data-act="logs" aria-expanded="false">
                 Logs
               </button>

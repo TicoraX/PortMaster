@@ -533,6 +533,8 @@ class AddProject(BaseModel):
 
 class PathRequest(BaseModel):
     path: str = Field(min_length=1, max_length=4096)
+    editor: str | None = Field(default=None, max_length=50)
+
 
 
 
@@ -755,7 +757,9 @@ def create_app(token: str | None = None) -> FastAPI:
         p_str = str(resolved)
         try:
             if sys.platform == "win32":
-                os.startfile(p_str)
+                # explorer.exe fuerza a Windows a crear una ventana en primer plano
+                # enfocando la carpeta solicitada en vez de un startfile pasivo.
+                subprocess.Popen(["explorer.exe", p_str])
             elif sys.platform == "darwin":
                 subprocess.Popen(["open", p_str])
             else:
@@ -764,6 +768,22 @@ def create_app(token: str | None = None) -> FastAPI:
         except Exception as exc:
             log.warning("fallo al abrir carpeta %s: %s", p_str, exc)
             raise HTTPException(500, f"fallo al abrir el explorador: {exc}")
+
+    @app.get("/api/editors", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
+    def list_editors() -> dict:
+        """Detecta que editores estan instalados en el sistema."""
+        available = []
+        # VS Code
+        if shutil.which("code.cmd") or shutil.which("code"):
+            available.append({"id": "code", "name": "VS Code"})
+        # Cursor
+        if shutil.which("cursor.cmd") or shutil.which("cursor"):
+            available.append({"id": "cursor", "name": "Cursor"})
+        # Custom
+        env_editor = os.environ.get("PORTMASTER_EDITOR") or os.environ.get("EDITOR")
+        if env_editor and shutil.which(env_editor):
+            available.append({"id": "env", "name": f"Sistema ({env_editor})"})
+        return {"editors": available}
 
     @app.post("/api/open-editor", dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)])
     def open_editor(req: PathRequest) -> dict:
@@ -777,32 +797,50 @@ def create_app(token: str | None = None) -> FastAPI:
         if not resolved.is_dir():
             raise HTTPException(400, f"no es un directorio: {req.path}")
 
-        # Deteccion de editor en PATH
-        candidates = [
-            os.environ.get("PORTMASTER_EDITOR"),
-            os.environ.get("EDITOR"),
-            "cursor.cmd",
-            "cursor",
-            "code.cmd",
-            "code",
-        ]
+        # Si el usuario eligio un editor especifico del dropdown
+        target = req.editor.lower().strip() if req.editor else ""
         found_editor = None
-        for cand in candidates:
+        editor_display = "Editor"
+
+        if target == "cursor":
+            found_editor = shutil.which("cursor.cmd") or shutil.which("cursor")
+            editor_display = "Cursor"
+        elif target == "code" or target == "vscode":
+            found_editor = shutil.which("code.cmd") or shutil.which("code")
+            editor_display = "VS Code"
+        elif target == "env":
+            cand = os.environ.get("PORTMASTER_EDITOR") or os.environ.get("EDITOR")
             if cand and shutil.which(cand):
                 found_editor = cand
-                break
+                editor_display = cand
 
         if not found_editor:
-            raise HTTPException(404, "No se detectó VS Code, Cursor ni variable $EDITOR en el sistema.")
+            # Fallback a autodeteccion
+            candidates = [
+                os.environ.get("PORTMASTER_EDITOR"),
+                os.environ.get("EDITOR"),
+                "cursor.cmd",
+                "cursor",
+                "code.cmd",
+                "code",
+            ]
+            for cand in candidates:
+                if cand and shutil.which(cand):
+                    found_editor = cand
+                    editor_display = "Cursor" if "cursor" in cand.lower() else ("VS Code" if "code" in cand.lower() else cand)
+                    break
+
+        if not found_editor:
+            raise HTTPException(404, "No se detectó el editor solicitado en el sistema.")
 
         p_str = str(resolved)
         try:
             subprocess.Popen([found_editor, p_str], shell=(sys.platform == "win32"))
-            editor_name = "Cursor" if "cursor" in found_editor.lower() else ("VS Code" if "code" in found_editor.lower() else found_editor)
-            return {"ok": True, "editor": editor_name, "path": p_str}
+            return {"ok": True, "editor": editor_display, "path": p_str}
         except Exception as exc:
             log.warning("fallo al abrir editor %s en %s: %s", found_editor, p_str, exc)
             raise HTTPException(500, f"fallo al lanzar el editor: {exc}")
+
 
 
     @app.get("/api/projects/{pid}/history", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])

@@ -9,9 +9,9 @@ esquema de `stack.yaml` y las rutas de la API local.
 ### Agregado
 
 - **Apertura directa en el Explorador de Archivos del sistema (`open-folder`).**
-  Botón "Abrir en Explorador" en el modal de selección de carpetas y botón "Carpeta" en las acciones de cada proyecto para abrir Windows Explorer, Finder o gestor Linux de forma nativa (`os.startfile`).
-- **Apertura de proyectos en editor de código (`open-editor`).**
-  Botón "Editor" en cada ficha de proyecto con auto-detección de VS Code (`code`), Cursor (`cursor`) o variable `$PORTMASTER_EDITOR` / `$EDITOR`.
+  Botón "Abrir en Explorador" en el modal de selección de carpetas y botón "Carpeta" en la barra de ruta para abrir Windows Explorer en primer plano forzado (`explorer.exe`), Finder o gestor Linux.
+- **Selector desplegable de editor de código (`open-editor`).**
+  Cuadro deslizable compacto en la barra de ruta que lista dinámicamente los editores instalados en el sistema (VS Code, Cursor o `$EDITOR`) para abrir el proyecto en el editor elegido por el usuario.
 - **Copiado rápido de ruta con feedback visual.**
   Botón discreto "Copiar ruta" en la ficha del proyecto que copia la ruta exacta al portapapeles y transiciona temporalmente su texto a "Copiado".
 - **Carpetas y raíces frecuentes en selector de proyectos.**

@@ -1974,15 +1974,13 @@ def test_open_folder_exitoso(client, tmp_path, monkeypatch):
     carpeta.mkdir()
 
     abierto = []
-    if sys.platform == "win32":
-        monkeypatch.setattr(os, "startfile", lambda p: abierto.append(p))
-    else:
-        monkeypatch.setattr(subprocess, "Popen", lambda cmd: abierto.append(cmd))
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: abierto.append(cmd))
 
     res = client.post("/api/open-folder", json={"path": str(carpeta)})
     assert res.status_code == 200
     assert res.json()["ok"] is True
     assert len(abierto) == 1
+
 
 
 def test_open_folder_rechaza_invalido_o_no_existente(client, tmp_path):
@@ -2022,7 +2020,40 @@ def test_open_editor_sin_editor_en_sistema(client, tmp_path, monkeypatch):
     assert res.status_code == 404
 
 
+def test_list_editors_detecta_instalados(client, monkeypatch):
+    def fake_which(cmd):
+        if "cursor" in cmd:
+            return "/usr/bin/cursor"
+        return None
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+    res = client.get("/api/editors")
+    assert res.status_code == 200
+    ids = [e["id"] for e in res.json()["editors"]]
+    assert "cursor" in ids
+
+
+def test_open_editor_con_seleccion_especifica(client, tmp_path, monkeypatch):
+    carpeta = tmp_path / "proyecto_cursor"
+    carpeta.mkdir()
+
+    def fake_which(cmd):
+        if "cursor" in cmd:
+            return "C:\\bin\\cursor.cmd"
+        return None
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+    lanzado = []
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: lanzado.append(cmd))
+
+    res = client.post("/api/open-editor", json={"path": str(carpeta), "editor": "cursor"})
+    assert res.status_code == 200
+    assert res.json()["editor"] == "Cursor"
+    assert len(lanzado) == 1
+
+
 def test_browse_frecuentes(client, tmp_path, monkeypatch):
+
     base1 = tmp_path / "dev"
     base1.mkdir()
     p1 = base1 / "app1"
