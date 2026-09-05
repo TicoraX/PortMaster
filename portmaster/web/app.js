@@ -19,6 +19,8 @@ const ui = {
   pagerAt: document.getElementById("pager-at"),
   picker: document.getElementById("picker"),
   pickerPath: document.getElementById("picker-path"),
+  pickerFrequent: document.getElementById("picker-frequent"),
+  pickerFrequentChips: document.getElementById("picker-frequent-chips"),
   pickerList: document.getElementById("picker-list"),
   pickerNote: document.getElementById("picker-note"),
   tplProject: document.getElementById("tpl-project"),
@@ -625,6 +627,61 @@ function buildCard(project) {
         if (graphButton) graphButton.setAttribute("aria-expanded", "false");
         pullEnvAudit(project.id, entry);
       }
+    });
+  }
+
+  // Copiar ruta del proyecto con transicion de texto sobria
+  const copyBtn = root.querySelector(".project__path-copy");
+  if (copyBtn) {
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(project.path);
+        const prevText = copyBtn.textContent;
+        copyBtn.textContent = "Copiado";
+        copyBtn.disabled = true;
+        setTimeout(() => {
+          copyBtn.textContent = prevText;
+          copyBtn.disabled = false;
+        }, 1500);
+      } catch {
+        flash("No se pudo copiar la ruta", "bad");
+      }
+    });
+  }
+
+  // Abrir carpeta en explorador nativo
+  const openFolderBtn = root.querySelector('[data-act="open-folder"]');
+  if (openFolderBtn) {
+    openFolderBtn.addEventListener("click", (event) => {
+      act(event.currentTarget, async () => {
+        try {
+          await api("/api/open-folder", {
+            method: "POST",
+            body: JSON.stringify({ path: project.path }),
+          });
+          flash(`Explorador abierto en ${project.name}`, "neutral");
+        } catch (err) {
+          flash(`Error al abrir explorador: ${err.message}`, "bad");
+        }
+      });
+    });
+  }
+
+  // Abrir proyecto en editor de codigo (VS Code / Cursor)
+  const openEditorBtn = root.querySelector('[data-act="open-editor"]');
+  if (openEditorBtn) {
+    openEditorBtn.addEventListener("click", (event) => {
+      act(event.currentTarget, async () => {
+        try {
+          const res = await api("/api/open-editor", {
+            method: "POST",
+            body: JSON.stringify({ path: project.path }),
+          });
+          flash(`Abriendo ${project.name} en ${res.editor || 'editor'}...`, "neutral");
+        } catch (err) {
+          flash(err.message, "warn");
+        }
+      });
     });
   }
 
@@ -1848,12 +1905,60 @@ ui.browse.addEventListener("click", () => {
   const backBtn = ui.picker.querySelector('[data-picker="back"]');
   if (backBtn) backBtn.disabled = true;
   ui.picker.showModal();
+  loadFrequentRoots();
   browseTo(ui.path.value.trim() || here.path, true);
 });
+
+async function loadFrequentRoots() {
+  if (!ui.pickerFrequent || !ui.pickerFrequentChips) return;
+  try {
+    const data = await api("/api/browse/frecuentes");
+    if (data && data.roots && data.roots.length > 0) {
+      ui.pickerFrequentChips.replaceChildren(
+        ...data.roots.map((rootPath) => {
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = "picker__chip";
+          chip.textContent = rootPath;
+          chip.title = `Ir a ${rootPath}`;
+          chip.addEventListener("click", () => browseTo(rootPath));
+          return chip;
+        })
+      );
+      ui.pickerFrequent.hidden = false;
+    } else {
+      ui.pickerFrequent.hidden = true;
+    }
+  } catch {
+    ui.pickerFrequent.hidden = true;
+  }
+}
 
 ui.picker.querySelector('[data-picker="close"]').addEventListener("click", () => {
   ui.picker.close();
 });
+
+const osFolderBtn = ui.picker.querySelector('[data-picker="os-folder"]');
+if (osFolderBtn) {
+  osFolderBtn.addEventListener("click", (event) => {
+    const targetPath = here.path || ui.path.value.trim();
+    if (!targetPath) {
+      flash("No hay una carpeta seleccionada para abrir", "neutral");
+      return;
+    }
+    act(event.currentTarget, async () => {
+      try {
+        await api("/api/open-folder", {
+          method: "POST",
+          body: JSON.stringify({ path: targetPath }),
+        });
+        flash(`Explorador abierto en ${targetPath}`, "neutral");
+      } catch (err) {
+        flash(`Error al abrir explorador: ${err.message}`, "bad");
+      }
+    });
+  });
+}
 
 const backBtn = ui.picker.querySelector('[data-picker="back"]');
 if (backBtn) {
@@ -1878,6 +1983,71 @@ ui.picker.querySelector('[data-picker="pick"]').addEventListener("click", (event
     ui.path.value = "";
   });
 });
+
+/* drag and drop en zona de registro ---------------------------------------- */
+
+if (ui.enroll) {
+  ui.enroll.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    ui.enroll.classList.add("enroll--dragover");
+  });
+
+  ui.enroll.addEventListener("dragleave", (e) => {
+    if (!ui.enroll.contains(e.relatedTarget)) {
+      ui.enroll.classList.remove("enroll--dragover");
+    }
+  });
+
+  ui.enroll.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    ui.enroll.classList.remove("enroll--dragover");
+
+    const items = e.dataTransfer.items;
+    let droppedName = "";
+    if (items && items.length > 0) {
+      const item = items[0];
+      const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+      if (entry) {
+        droppedName = entry.name;
+      }
+    }
+    if (!droppedName && e.dataTransfer.files.length > 0) {
+      droppedName = e.dataTransfer.files[0].name;
+    }
+
+    if (droppedName) {
+      // Comparar contra rutas frecuentes
+      try {
+        const freq = await api("/api/browse/frecuentes");
+        if (freq && freq.roots) {
+          for (const r of freq.roots) {
+            const sep = r.includes("\\") ? "\\" : "/";
+            const candidate = `${r.replace(/[\\/]+$/, "")}${sep}${droppedName}`;
+            try {
+              const test = await api(`/api/browse?path=${encodeURIComponent(candidate)}`);
+              if (test && test.path) {
+                ui.path.value = test.path;
+                flash(`Ruta asignada: ${test.path}`, "good");
+                return;
+              }
+            } catch {
+              // No era esta raiz, probar siguiente
+            }
+          }
+        }
+      } catch {
+        // Continuar a fallback
+      }
+
+      // Si no se resolvio con raices frecuentes, abrir picker y sugerir nombre
+      ui.picker.showModal();
+      loadFrequentRoots();
+      browseTo("", true);
+      flash(`Arrastraste "${droppedName}". Selecciona su carpeta padre.`, "neutral");
+    }
+  });
+}
+
 
 /* autocompletado no intrusivo en el registro ----------------------------- */
 

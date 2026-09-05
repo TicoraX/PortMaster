@@ -97,3 +97,25 @@ def roots() -> dict:
             seen.add(mount)
             entries.append({"name": mount, "path": mount, "markers": []})
     return {"path": "", "parent": None, "markers": [], "truncated": False, "entries": entries}
+
+
+def frequent_roots(project_paths: list[Path]) -> list[str]:
+    """Calcula las carpetas padre mas comunes de los proyectos registrados.
+
+    Permite saltos directos en el selector de carpetas y autocompletado sin
+    recorrer todo el arbol de discos.
+    """
+    counts: dict[str, int] = {}
+    for p in project_paths:
+        try:
+            parent = p.parent
+            if parent != p and parent.is_dir():
+                parent_str = str(parent)
+                counts[parent_str] = counts.get(parent_str, 0) + 1
+        except OSError:
+            continue
+
+    # Ordenar por frecuencia descendente
+    sorted_parents = [k for k, _ in sorted(counts.items(), key=lambda item: item[1], reverse=True)]
+    return sorted_parents[:6]
+

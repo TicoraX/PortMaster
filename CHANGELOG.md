@@ -4,6 +4,21 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
+## [1.4.3] - 2026-09-05
+
+### Agregado
+
+- **Apertura directa en el Explorador de Archivos del sistema (`open-folder`).**
+  Botón "Abrir en Explorador" en el modal de selección de carpetas y botón "Carpeta" en las acciones de cada proyecto para abrir Windows Explorer, Finder o gestor Linux de forma nativa (`os.startfile`).
+- **Apertura de proyectos en editor de código (`open-editor`).**
+  Botón "Editor" en cada ficha de proyecto con auto-detección de VS Code (`code`), Cursor (`cursor`) o variable `$PORTMASTER_EDITOR` / `$EDITOR`.
+- **Copiado rápido de ruta con feedback visual.**
+  Botón discreto "Copiar ruta" en la ficha del proyecto que copia la ruta exacta al portapapeles y transiciona temporalmente su texto a "Copiado".
+- **Carpetas y raíces frecuentes en selector de proyectos.**
+  Detección automática de las carpetas padre más comunes de los proyectos registrados (`/api/browse/frecuentes`) presentadas como chips de acceso inmediato en el picker.
+- **Soporte de arrastrar y soltar (Drag & Drop) en la zona de registro.**
+  Permite arrastrar una carpeta desde el explorador del sistema a la interfaz web para auto-asignar la ruta comparándola con las raíces conocidas.
+
 ## [1.4.2] - 2026-09-04
 
 ### Corregido

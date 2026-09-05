@@ -17,8 +17,12 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import queue
 import secrets
+import shutil
+import subprocess
+import sys
 import threading
 import time
 from collections import defaultdict, deque
@@ -527,6 +531,11 @@ class AddProject(BaseModel):
     path: str = Field(min_length=1, max_length=4096)
 
 
+class PathRequest(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+
+
+
 class UpRequest(BaseModel):
     profile: str | None = Field(default=None, max_length=100)
 
@@ -726,6 +735,75 @@ def create_app(token: str | None = None) -> FastAPI:
         except ValueError as exc:
             log.info("browse rechazado: %s", exc)
             raise HTTPException(400, str(exc))
+
+    @app.get("/api/browse/frecuentes", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
+    def browse_frecuentes() -> dict:
+        return {"roots": browse_module.frequent_roots(registry.paths())}
+
+    @app.post("/api/open-folder", dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)])
+    def open_folder(req: PathRequest) -> dict:
+        p = Path(req.path).expanduser()
+        if not p.is_absolute():
+            raise HTTPException(400, f"la ruta debe ser absoluta: {req.path}")
+        try:
+            resolved = p.resolve(strict=True)
+        except OSError:
+            raise HTTPException(400, f"la carpeta no existe: {req.path}")
+        if not resolved.is_dir():
+            raise HTTPException(400, f"no es un directorio: {req.path}")
+
+        p_str = str(resolved)
+        try:
+            if sys.platform == "win32":
+                os.startfile(p_str)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", p_str])
+            else:
+                subprocess.Popen(["xdg-open", p_str])
+            return {"ok": True, "path": p_str}
+        except Exception as exc:
+            log.warning("fallo al abrir carpeta %s: %s", p_str, exc)
+            raise HTTPException(500, f"fallo al abrir el explorador: {exc}")
+
+    @app.post("/api/open-editor", dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)])
+    def open_editor(req: PathRequest) -> dict:
+        p = Path(req.path).expanduser()
+        if not p.is_absolute():
+            raise HTTPException(400, f"la ruta debe ser absoluta: {req.path}")
+        try:
+            resolved = p.resolve(strict=True)
+        except OSError:
+            raise HTTPException(400, f"la carpeta no existe: {req.path}")
+        if not resolved.is_dir():
+            raise HTTPException(400, f"no es un directorio: {req.path}")
+
+        # Deteccion de editor en PATH
+        candidates = [
+            os.environ.get("PORTMASTER_EDITOR"),
+            os.environ.get("EDITOR"),
+            "cursor.cmd",
+            "cursor",
+            "code.cmd",
+            "code",
+        ]
+        found_editor = None
+        for cand in candidates:
+            if cand and shutil.which(cand):
+                found_editor = cand
+                break
+
+        if not found_editor:
+            raise HTTPException(404, "No se detectó VS Code, Cursor ni variable $EDITOR en el sistema.")
+
+        p_str = str(resolved)
+        try:
+            subprocess.Popen([found_editor, p_str], shell=(sys.platform == "win32"))
+            editor_name = "Cursor" if "cursor" in found_editor.lower() else ("VS Code" if "code" in found_editor.lower() else found_editor)
+            return {"ok": True, "editor": editor_name, "path": p_str}
+        except Exception as exc:
+            log.warning("fallo al abrir editor %s en %s: %s", found_editor, p_str, exc)
+            raise HTTPException(500, f"fallo al lanzar el editor: {exc}")
+
 
     @app.get("/api/projects/{pid}/history", dependencies=[quota("state", QUOTA_READ), Depends(require_token)])
     def get_history(pid: str) -> dict:

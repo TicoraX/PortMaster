@@ -1969,6 +1969,76 @@ def test_sink_concurrencia_escribe_sin_perder_seq():
     assert seqs == list(range(1, total_esperado + 1))
 
 
+def test_open_folder_exitoso(client, tmp_path, monkeypatch):
+    carpeta = tmp_path / "mi_carpeta"
+    carpeta.mkdir()
+
+    abierto = []
+    if sys.platform == "win32":
+        monkeypatch.setattr(os, "startfile", lambda p: abierto.append(p))
+    else:
+        monkeypatch.setattr(subprocess, "Popen", lambda cmd: abierto.append(cmd))
+
+    res = client.post("/api/open-folder", json={"path": str(carpeta)})
+    assert res.status_code == 200
+    assert res.json()["ok"] is True
+    assert len(abierto) == 1
+
+
+def test_open_folder_rechaza_invalido_o_no_existente(client, tmp_path):
+    res_relativa = client.post("/api/open-folder", json={"path": "carpeta/relativa"})
+    assert res_relativa.status_code == 400
+
+    no_existe = tmp_path / "fantasma"
+    res_no_existe = client.post("/api/open-folder", json={"path": str(no_existe)})
+    assert res_no_existe.status_code == 400
+
+
+def test_open_editor_con_editor_detectado(client, tmp_path, monkeypatch):
+    carpeta = tmp_path / "proyecto_editor"
+    carpeta.mkdir()
+
+    monkeypatch.setenv("PORTMASTER_EDITOR", "dummy_editor")
+    monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/dummy_editor" if cmd == "dummy_editor" else None)
+
+    lanzado = []
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: lanzado.append(cmd))
+
+    res = client.post("/api/open-editor", json={"path": str(carpeta)})
+    assert res.status_code == 200
+    assert res.json()["ok"] is True
+    assert len(lanzado) == 1
+
+
+def test_open_editor_sin_editor_en_sistema(client, tmp_path, monkeypatch):
+    carpeta = tmp_path / "proyecto_sin_editor"
+    carpeta.mkdir()
+
+    monkeypatch.delenv("PORTMASTER_EDITOR", raising=False)
+    monkeypatch.delenv("EDITOR", raising=False)
+    monkeypatch.setattr(shutil, "which", lambda cmd: None)
+
+    res = client.post("/api/open-editor", json={"path": str(carpeta)})
+    assert res.status_code == 404
+
+
+def test_browse_frecuentes(client, tmp_path, monkeypatch):
+    base1 = tmp_path / "dev"
+    base1.mkdir()
+    p1 = base1 / "app1"
+    p1.mkdir()
+    p2 = base1 / "app2"
+    p2.mkdir()
+
+    monkeypatch.setattr(registry, "paths", lambda: [p1, p2])
+
+    res = client.get("/api/browse/frecuentes")
+    assert res.status_code == 200
+    roots = res.json()["roots"]
+    assert str(base1) in roots
+
+
+
 
 
 

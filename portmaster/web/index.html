@@ -196,12 +196,17 @@
           <p class="picker__path" id="picker-path"></p>
           <button class="btn btn--quiet" type="button" data-picker="close">Cerrar</button>
         </div>
+        <div class="picker__frequent" id="picker-frequent" hidden>
+          <span class="picker__frequent-label">Frecuentes:</span>
+          <div class="picker__frequent-chips" id="picker-frequent-chips"></div>
+        </div>
         <ul class="picker__list" id="picker-list"></ul>
         <p class="picker__note" id="picker-note" hidden></p>
         <div class="picker__foot">
           <div class="picker__nav">
             <button class="btn" type="button" data-picker="back" disabled>Volver</button>
             <button class="btn" type="button" data-picker="up">Arriba</button>
+            <button class="btn btn--quiet" type="button" data-picker="os-folder" title="Abrir esta carpeta en el explorador de archivos del sistema">Abrir en Explorador</button>
           </div>
           <button class="btn btn--primary" type="button" data-picker="pick">Usar esta carpeta</button>
         </div>
@@ -264,7 +269,10 @@
 
         <div class="project__details">
           <div class="project__body">
-            <p class="project__path"></p>
+            <div class="project__path-wrapper">
+              <p class="project__path"></p>
+              <button class="btn btn--quiet btn--sm project__path-copy" type="button" aria-label="Copiar ruta">Copiar ruta</button>
+            </div>
             <p class="project__error" hidden></p>
             <p class="project__docker-warning" hidden></p>
             <ul class="services"></ul>
@@ -273,6 +281,12 @@
                 <span class="profile__label">Perfil</span>
                 <select class="profile__select"></select>
               </label>
+              <button class="btn btn--quiet" type="button" data-act="open-folder" title="Abrir en el Explorador de archivos del sistema">
+                Carpeta
+              </button>
+              <button class="btn btn--quiet" type="button" data-act="open-editor" title="Abrir proyecto en editor (VS Code / Cursor)">
+                Editor
+              </button>
               <button class="btn btn--quiet" type="button" data-act="logs" aria-expanded="false">
                 Logs
               </button>

@@ -371,12 +371,34 @@ body {
   overflow: hidden;
 }
 
+.project__path-wrapper {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin: 0.15rem 0 0;
+}
+
 .project__path {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--color-ink-3);
-  margin: 0.15rem 0 0;
+  margin: 0;
   overflow-wrap: anywhere;
+}
+
+.project__path-copy {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  padding: 0.2rem 0.5rem;
+  color: var(--color-ink-3);
+  border-color: transparent;
+  transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+
+.project__path-copy:hover {
+  color: var(--color-ink);
+  background: var(--color-paper-3);
 }
 
 .project__error {
@@ -1083,6 +1105,52 @@ body {
   font-size: var(--text-xs);
   color: var(--color-ink-2);
   overflow-wrap: anywhere;
+}
+
+.picker__frequent {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 0.35rem var(--space-md);
+  background: var(--color-paper-2);
+  border-bottom: var(--rule) solid var(--color-rule);
+  overflow-x: auto;
+}
+
+.picker__frequent-label {
+  font-size: var(--text-xs);
+  color: var(--color-ink-3);
+  white-space: nowrap;
+}
+
+.picker__frequent-chips {
+  display: flex;
+  gap: var(--space-xs);
+  flex-wrap: nowrap;
+}
+
+.picker__chip {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-ink-2);
+  background: var(--color-paper);
+  border: var(--rule) solid var(--color-rule-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.picker__chip:hover {
+  background: var(--color-paper-3);
+  color: var(--color-ink);
+  border-color: var(--color-ink-3);
+}
+
+.enroll--dragover {
+  border-color: var(--color-accent) !important;
+  background: color-mix(in oklch, var(--color-accent) 4%, transparent);
 }
 
 .picker__list {
