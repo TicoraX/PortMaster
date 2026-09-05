@@ -953,8 +953,10 @@ function updateCard(entry, project) {
   root.querySelector('[data-act="down"]').disabled = !algoVivo || stopping;
 
   if (entry.logsOpen) {
-    if (!entry.eventSource) {
+    if (live && !entry.eventSource) {
       startLogsStream(project.id, entry);
+    } else if (!live && entry.eventSource) {
+      stopLogsStream(entry);
     }
   } else {
     stopLogsStream(entry);
@@ -1078,7 +1080,8 @@ function renderGraph(project, entry) {
 function startLogsStream(id, entry) {
   if (entry.eventSource) return;
   const liveBadge = entry.root.querySelector(".logs__live");
-  if (!window.EventSource) {
+  const isRunning = entry.lastState === "running" || entry.lastState === "starting";
+  if (!window.EventSource || !isRunning) {
     if (liveBadge) liveBadge.hidden = true;
     pullLogs(id, entry);
     return;
@@ -1666,19 +1669,26 @@ ui.notify.addEventListener("click", async () => {
 
 const ORPHAN_EVERY = 4; // cada N ciclos de POLL_MS
 let orphanTick = 0;
+let refreshAbortController = null;
 
 async function refresh() {
+  if (refreshAbortController) {
+    refreshAbortController.abort();
+  }
+  refreshAbortController = new AbortController();
+  const signal = refreshAbortController.signal;
   try {
     const params = new URLSearchParams({ page: String(page) });
     if (query) params.set("q", query);
     if (statusFilter) params.set("status", statusFilter);
-    const data = await api(`/api/state?${params}`);
+    const data = await api(`/api/state?${params}`, { signal });
     renderTunnels(data.tunnels || []);
     render(data.projects, data);
     const n = data.registered;
     ui.connection.textContent = `${n} ${n === 1 ? "proyecto" : "proyectos"}`;
     ui.connection.dataset.down = "false";
   } catch (error) {
+    if (error.name === "AbortError") return;
     ui.connection.textContent = `sin conexión · ${error.message}`;
     ui.connection.dataset.down = "true";
   }

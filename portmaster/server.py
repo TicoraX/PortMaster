@@ -647,8 +647,8 @@ def create_app(token: str | None = None) -> FastAPI:
 
         response = await call_next(request)
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; "
-            "frame-ancestors 'none'; object-src 'none'"
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+            "base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
         )
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
