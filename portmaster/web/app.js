@@ -411,7 +411,10 @@ function buildCard(project) {
   const logs = root.querySelector(".logs");
 
   const toggleBtn = root.querySelector(".project__toggle");
+  const detailsEl = root.querySelector(".project__details");
+  if (detailsEl) detailsEl.id = `details-${project.id}`;
   if (toggleBtn) {
+    if (detailsEl) toggleBtn.setAttribute("aria-controls", `details-${project.id}`);
     toggleBtn.addEventListener("click", () => {
       entry.userToggled = true;
       entry.expanded = !entry.expanded;
@@ -483,6 +486,7 @@ function buildCard(project) {
   });
 
   const logsBox = root.querySelector(".logs__box");
+  if (logsBox) logsBox.id = `logs-${project.id}`;
   const logsFilter = root.querySelector(".logs__filter");
   if (logsFilter) {
     logsFilter.addEventListener("input", () => {
@@ -517,6 +521,7 @@ function buildCard(project) {
   }
 
   const logsButton = root.querySelector('[data-act="logs"]');
+  if (logsButton && logsBox) logsButton.setAttribute("aria-controls", `logs-${project.id}`);
   logsButton.addEventListener("click", () => {
     entry.logsOpen = !entry.logsOpen;
     if (logsBox) logsBox.hidden = !entry.logsOpen;
@@ -544,7 +549,9 @@ function buildCard(project) {
   });
 
   const historyBox = root.querySelector(".history__box");
+  if (historyBox) historyBox.id = `history-${project.id}`;
   const historyButton = root.querySelector('[data-act="history"]');
+  if (historyButton && historyBox) historyButton.setAttribute("aria-controls", `history-${project.id}`);
   historyButton.addEventListener("click", () => {
     entry.historyOpen = !entry.historyOpen;
     if (historyBox) historyBox.hidden = !entry.historyOpen;
@@ -570,7 +577,9 @@ function buildCard(project) {
   });
 
   const graphBox = root.querySelector(".graph__box");
+  if (graphBox) graphBox.id = `graph-${project.id}`;
   const graphButton = root.querySelector('[data-act="graph"]');
+  if (graphButton && graphBox) graphButton.setAttribute("aria-controls", `graph-${project.id}`);
   if (graphButton) {
     graphButton.addEventListener("click", () => {
       entry.graphOpen = !entry.graphOpen;
@@ -595,7 +604,9 @@ function buildCard(project) {
   }
 
   const envBox = root.querySelector(".env__box");
+  if (envBox) envBox.id = `env-${project.id}`;
   const envButton = root.querySelector('[data-act="env-audit"]');
+  if (envButton && envBox) envButton.setAttribute("aria-controls", `env-${project.id}`);
   if (envButton) {
     envButton.addEventListener("click", () => {
       entry.envOpen = !entry.envOpen;

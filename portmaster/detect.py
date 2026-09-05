@@ -427,7 +427,8 @@ def _python(root: Path) -> list[Service]:
 
 
 def _python_at(path: Path, name: str) -> Service | None:
-    has_uv = (path / "uv.lock").is_file() or "tool.uv" in _read(path / "pyproject.toml")
+    pyproject_text = _read(path / "pyproject.toml")
+    has_uv = (path / "uv.lock").is_file() or bool(re.search(r"\[tool\.uv(\]|\.)", pyproject_text))
     prefix = "uv run " if has_uv else ""
 
     if (path / "manage.py").is_file():
@@ -586,7 +587,9 @@ def _deno_at(path: Path, name: str) -> Service | None:
         deno_file = path / f
         if deno_file.is_file():
             try:
-                data = json.loads(_read(deno_file) or "{}")
+                raw_text = _read(deno_file) or "{}"
+                clean_text = re.sub(r"(?m)^\s*//.*$|(?<=\s)//.*$", "", raw_text)
+                data = json.loads(clean_text)
                 if isinstance(data, dict):
                     tasks = data.get("tasks", {})
                     if isinstance(tasks, dict):

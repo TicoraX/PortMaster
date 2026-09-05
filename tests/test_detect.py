@@ -813,4 +813,42 @@ def test_deno_json_no_dict_no_revienta(tmp_path):
     assert stack.services["web"].command == "deno run --allow-net server.ts"
 
 
+def test_python_con_tool_uvicorn_no_se_detecta_como_uv(tmp_path):
+    write(
+        tmp_path,
+        "pyproject.toml",
+        """
+[project]
+name = "api"
+dependencies = ["fastapi", "uvicorn"]
+
+[tool.uvicorn]
+workers = 4
+""",
+    )
+    write(tmp_path, "main.py", "from fastapi import FastAPI\napp = FastAPI()\n")
+    stack = detect.detect(tmp_path)
+    assert stack is not None
+    assert "uv run" not in stack.services["api"].command
+    assert stack.services["api"].command.startswith("uvicorn main:app")
+
+
+def test_deno_jsonc_con_comentarios_en_tasks(tmp_path):
+    write(
+        tmp_path,
+        "deno.jsonc",
+        """{
+  // Comentario de configuración
+  "tasks": {
+    // Tarea de desarrollo
+    "dev": "deno run --allow-net main.ts"
+  }
+}""",
+    )
+    stack = detect.detect(tmp_path)
+    assert stack is not None
+    assert stack.services["web"].command == "deno task dev"
+
+
+
 

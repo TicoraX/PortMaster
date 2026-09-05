@@ -87,7 +87,11 @@ def roots() -> dict:
     """Punto de partida: la home del usuario y las unidades montadas."""
     seen = {str(Path.home())}
     entries = [{"name": "Inicio", "path": str(Path.home()), "markers": []}]
-    for partition in psutil.disk_partitions(all=False):
+    try:
+        partitions = psutil.disk_partitions(all=False)
+    except OSError:
+        partitions = []
+    for partition in partitions:
         mount = partition.mountpoint
         if mount not in seen and os.path.isdir(mount):
             seen.add(mount)

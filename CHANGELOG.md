@@ -4,6 +4,31 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
+## [1.4.2] - 2026-09-04
+
+### Corregido
+
+- **Concurrencia y locking seguro en `_Sink` (`server.py`).**
+  Protección de mutaciones de buffers de logs (`_partial`, `seq`, `lines`) bajo lock atómico para evitar carreras de hilos y pérdida de orden de líneas.
+- **Optimización de memoria y rendimiento O(1) en Action Budget (`mcp.py`).**
+  Uso de `collections.deque` con `popleft()` en lugar de filtrado $O(N)$ de listas para el límite de llamadas/minuto.
+- **Consistencia atómica en telemetría MCP (`mcp.py`).**
+  Adquisición concurrente y atómica de `_action_lock` y `_telemetry_lock` en `get_telemetry()`.
+- **Lectura eficiente y robusta de historial (`history.py`).**
+  Reemplazo de algoritmo manual de búsqueda de bytes por lectura en streaming con `collections.deque(maxlen=limit)`, eliminando problemas de fragmentación en líneas extensas.
+- **Tolerancia a particiones inaccesibles en explorador de archivos (`browse.py`).**
+  Manejo defensivo de excepciones `OSError` al enumerar unidades de disco con `psutil.disk_partitions`.
+- **Detección precisa de Deno con comentarios y uv en `pyproject.toml` (`detect.py`).**
+  Soporte para comentarios en archivos `deno.json` / `deno.jsonc` y corrección de expresión regular para `[tool.uv]` evitando colisiones con `[tool.uvicorn]`.
+- **Terminación eficiente de procesos (`runner.py`).**
+  Reducción del timeout de espera en reintento tras SIGKILL en `_terminate_tree`.
+- **Reintentos automáticos en CLI de logs (`cli.py`).**
+  Mecanismo de reconexión y tolerancia a fallos transitorios en `portmaster logs --follow`.
+- **Accesibilidad web WCAG (`web/app.js`).**
+  Asignación de atributos `aria-controls` e identificadores correspondientes en los botones colapsables del dashboard.
+- **Ampliación de matriz de CI (`.github/workflows/ci.yml`).**
+  Incorporación de Python 3.11 y 3.12 en la suite de pruebas automatizadas de Ubuntu.
+
 ## [1.4.1] - 2026-09-04
 
 ### Corregido

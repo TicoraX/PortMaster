@@ -224,7 +224,7 @@ def handle_request(req: dict[str, Any]) -> dict[str, Any] | None:
 
 _ACTION_BUDGET_WINDOW = 60.0
 _MAX_ACTIONS_PER_WINDOW = 30
-_action_timestamps: list[float] = []
+_action_timestamps: collections.deque[float] = collections.deque()
 _action_lock = threading.Lock()
 
 _MAX_TELEMETRY_EVENTS = 100
@@ -255,12 +255,11 @@ def record_tool_call(tool: str, duration_ms: float, status: str, summary: str = 
 def get_telemetry() -> dict[str, Any]:
     """Devuelve las estadísticas y llamadas recientes a herramientas MCP."""
     now = time.monotonic()
-    with _action_lock:
+    with _action_lock, _telemetry_lock:
         while _action_timestamps and _action_timestamps[0] < now - _ACTION_BUDGET_WINDOW:
-            _action_timestamps.pop(0)
+            _action_timestamps.popleft()
         active_rate = len(_action_timestamps)
 
-    with _telemetry_lock:
         return {
             "total_calls": _telemetry_counter,
             "active_rate_per_min": active_rate,
@@ -273,6 +272,8 @@ def get_telemetry() -> dict[str, Any]:
 def clear_telemetry() -> None:
     """Limpia el buffer y contadores de telemetría (usado para tests)."""
     global _telemetry_counter
+    with _action_lock:
+        _action_timestamps.clear()
     with _telemetry_lock:
         _telemetry_counter = 0
         _telemetry_by_tool.clear()
@@ -283,7 +284,7 @@ def _check_action_budget() -> None:
     now = time.monotonic()
     with _action_lock:
         while _action_timestamps and _action_timestamps[0] < now - _ACTION_BUDGET_WINDOW:
-            _action_timestamps.pop(0)
+            _action_timestamps.popleft()
         if len(_action_timestamps) >= _MAX_ACTIONS_PER_WINDOW:
             raise RuntimeError(
                 f"Límite de acciones MCP excedido ({_MAX_ACTIONS_PER_WINDOW} llamadas/min). Espera unos momentos."

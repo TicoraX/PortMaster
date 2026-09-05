@@ -664,6 +664,19 @@ def test_browse_sin_ruta_da_las_raices(client):
     assert cuerpo["entries"], "al menos la home del usuario"
 
 
+def test_browse_sin_ruta_con_oserror_en_particiones_no_falla(client, monkeypatch):
+    import psutil
+
+    def fake_disk_partitions(all=False):
+        raise OSError("Dispositivo no listo")
+
+    monkeypatch.setattr(psutil, "disk_partitions", fake_disk_partitions)
+    cuerpo = client.get("/api/browse").json()
+    assert cuerpo["path"] == ""
+    assert len(cuerpo["entries"]) >= 1
+    assert cuerpo["entries"][0]["name"] == "Inicio"
+
+
 def test_browse_lista_solo_carpetas(client, tmp_path):
     raiz = tmp_path / "arbol"
     (raiz / "proyecto").mkdir(parents=True)
@@ -1927,6 +1940,34 @@ def test_mcp_activity_endpoint(client):
     assert ev["tool"] == "portmaster_doctor"
     assert ev["duration_ms"] == 45.2
     assert ev["status"] == "ok"
+
+
+def test_sink_concurrencia_escribe_sin_perder_seq():
+    import threading
+
+    from portmaster.server import _Sink
+
+    sink = _Sink()
+    hilos = 5
+    lineas_por_hilo = 50
+
+    def escritor(hilo_id: int):
+        for i in range(lineas_por_hilo):
+            sink.write(f"hilo-{hilo_id} linea-{i}\n")
+        sink.flush()
+
+    threads = [threading.Thread(target=escritor, args=(h,)) for h in range(hilos)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    total_esperado = hilos * lineas_por_hilo
+    assert sink.seq == total_esperado
+    assert len(sink.lines) == total_esperado
+    seqs = [item[0] for item in sink.lines]
+    assert seqs == list(range(1, total_esperado + 1))
+
 
 
 

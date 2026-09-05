@@ -117,22 +117,29 @@ class _Sink:
             self._subscribers.discard(q)
 
     def write(self, text: str) -> int:
-        self._partial += text
-        *complete, self._partial = self._partial.split("\n")
-        for line in complete:
-            self.seq += 1
-            item = (self.seq, line.rstrip())
-            self.lines.append(item)
+        items = []
+        with self._lock:
+            self._partial += text
+            *complete, self._partial = self._partial.split("\n")
+            for line in complete:
+                self.seq += 1
+                item = (self.seq, line.rstrip())
+                self.lines.append(item)
+                items.append(item)
+        for item in items:
             self._dispatch(item)
         return len(text)
 
     def flush(self) -> None:
-        if self._partial:
-            self.seq += 1
-            item = (self.seq, self._partial.rstrip())
-            self.lines.append(item)
+        item = None
+        with self._lock:
+            if self._partial:
+                self.seq += 1
+                item = (self.seq, self._partial.rstrip())
+                self.lines.append(item)
+                self._partial = ""
+        if item is not None:
             self._dispatch(item)
-            self._partial = ""
 
     def _dispatch(self, item: tuple[int, str]) -> None:
         with self._lock:
@@ -454,7 +461,6 @@ def _save_sessions_state() -> None:
                         "state": session.state,
                     }
         registry.HOME.mkdir(parents=True, exist_ok=True)
-        import json
         _sessions_file().write_text(json.dumps(data, indent=2), encoding="utf-8")
     except Exception as exc:
         log.warning("no se pudo guardar estado de sesiones: %s", exc)

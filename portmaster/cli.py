@@ -1018,6 +1018,7 @@ def logs_cmd(
     base_url = f"http://127.0.0.1:{server_port}"
 
     seq = 0
+    retries = 0
     while True:
         req = urllib.request.Request(
             f"{base_url}/api/projects/{pid}/logs?since={seq}",
@@ -1026,7 +1027,12 @@ def logs_cmd(
         try:
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
+            retries = 0
         except Exception:
+            if follow and retries < 3:
+                retries += 1
+                time.sleep(1.0)
+                continue
             err.print(
                 f"[yellow]No se pudo conectar con PortMaster en {base_url}. Asegúrate de que `portmaster serve` está corriendo.[/]"
             )

@@ -65,3 +65,15 @@ def test_history_rotation(tmp_path, monkeypatch):
     assert len(entries) <= history.RETAIN_ENTRIES
     assert entries[-1]["index"] == 299
 
+
+def test_history_linea_larga_no_se_corta(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "HOME", tmp_path)
+    pid = "longlineproj"
+    # Línea de 10 KB (más grande que el antiguo buffer_size de 4096)
+    gran_texto = "A" * 10000
+    history.append(pid, {"index": 1, "data": gran_texto})
+    entries = history.read(pid, limit=10)
+    assert len(entries) == 1
+    assert entries[0]["data"] == gran_texto
+
+

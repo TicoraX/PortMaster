@@ -858,4 +858,4 @@ def _terminate_tree(pid: int, timeout: float = SHUTDOWN_TIMEOUT) -> None:
             victim.kill()
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
-    psutil.wait_procs(alive, timeout=timeout)
+    psutil.wait_procs(alive, timeout=min(2.0, timeout))

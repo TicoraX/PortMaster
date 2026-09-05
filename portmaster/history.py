@@ -1,5 +1,5 @@
+import collections
 import json
-import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,42 +19,14 @@ def _history_file(pid: str) -> Path:
 
 
 def _read_tail_lines(path: Path, limit: int) -> list[str]:
-    """Lee las últimas `limit` líneas de un archivo sin cargarlo entero en memoria."""
-    buffer_size = 4096
-    lines: list[bytes] = []
+    """Lee las últimas `limit` líneas de un archivo sin cortes en líneas largas."""
+    if limit <= 0:
+        return []
     try:
-        with path.open("rb") as f:
-            f.seek(0, os.SEEK_END)
-            file_size = f.tell()
-            remaining_bytes = file_size
-            remainder = b""
-
-            while remaining_bytes > 0 and len(lines) < limit:
-                read_size = min(buffer_size, remaining_bytes)
-                f.seek(remaining_bytes - read_size, os.SEEK_SET)
-                chunk = f.read(read_size) + remainder
-                chunk_lines = chunk.split(b"\n")
-                if remaining_bytes - read_size > 0:
-                    remainder = chunk_lines[0]
-                    complete_lines = chunk_lines[1:]
-                else:
-                    remainder = b""
-                    complete_lines = chunk_lines
-
-                for line_bytes in reversed(complete_lines):
-                    if line_bytes.strip():
-                        lines.append(line_bytes)
-                        if len(lines) >= limit:
-                            break
-                remaining_bytes -= read_size
-
-            if remainder.strip() and len(lines) < limit:
-                lines.append(remainder)
+        with path.open("r", encoding="utf-8", errors="replace") as f:
+            return [line.rstrip("\r\n") for line in collections.deque(f, maxlen=limit) if line.strip()]
     except OSError:
         return []
-
-    lines.reverse()
-    return [line_bytes.decode("utf-8", errors="replace") for line_bytes in lines]
 
 
 def _rotate_if_needed(path: Path) -> None:
