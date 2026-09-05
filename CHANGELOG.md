@@ -4,6 +4,17 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
+## [1.4.1] - 2026-09-04
+
+### Corregido
+
+- **Control de streaming SSE de logs en proyectos detenidos.**
+  Verificación de estado activo antes de abrir `EventSource` para evitar errores 404 innecesarios en la consola del navegador.
+- **Directivas explícitas de seguridad CSP.**
+  Incorporación de `script-src 'self'` y `style-src 'self'` en la cabecera `Content-Security-Policy`.
+- **Prevención de carreras en el sondeo web.**
+  Uso de `AbortController` en `refresh()` para cancelar peticiones en vuelo al navegar entre páginas o cambiar filtros.
+
 ## [1.4.0] - 2026-09-04
 
 ### Agregado
