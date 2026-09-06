@@ -25,6 +25,7 @@ import re
 from dataclasses import replace
 from pathlib import Path
 
+import tomllib
 import yaml
 
 from .config import CONFIG_NAMES, ConfigError, Service, Stack, find, load
@@ -83,7 +84,19 @@ DEV_SERVERS = (
 # y la mitad de las veces entra como cliente. Un CLI que descarga algo lo
 # declara igual que un servidor, y detectarlo dejaba al arranque esperando un
 # puerto que nunca abre. Los que quedan son frameworks de servidor y nada mas.
-RUST_SERVERS = ("axum", "actix-web", "rocket", "warp", "tide", "poem", "salvo")
+RUST_SERVERS = (
+    "axum",
+    "actix-web",
+    "rocket",
+    "warp",
+    "tide",
+    "poem",
+    "salvo",
+    "tonic",
+    "trillium",
+    "gotham",
+    "volo-http",
+)
 
 # Frameworks web de Go. A diferencia de Rust, esta lista no alcanza: net/http es
 # stdlib y un servidor escrito con ella no deja rastro en go.mod. Por eso ademas
@@ -488,17 +501,108 @@ def _go_at(path: Path, name: str) -> Service | None:
 
 
 def _rust(root: Path) -> list[Service]:
-    """Un servicio Rust en la raiz, o en una subcarpeta de backend."""
-    return _backend_at(root, _rust_at)
+    """Un servicio Rust en la raiz, en una subcarpeta de backend, o en un Cargo workspace."""
+    # 1. Si la raiz misma es un servicio Rust ejecutable
+    at_root = _rust_at(root, "api")
+    if at_root is not None:
+        return [at_root]
+
+    # 2. Revisar si es un Cargo workspace ([workspace] en Cargo.toml)
+    workspace_members = _cargo_workspace_members(root)
+    if workspace_members:
+        found = []
+        for member_path in workspace_members:
+            service = _rust_at(member_path, member_path.name)
+            if service is not None:
+                found.append(service)
+        if found:
+            return found
+
+    # 3. Subcarpetas habituales de backend
+    found = []
+    for path in _subprojects(root, BACKEND_DIRS):
+        service = _rust_at(path, path.name)
+        if service is not None:
+            found.append(service)
+    return found
+
+
+def _cargo_workspace_members(root: Path) -> list[Path]:
+    cargo_file = root / "Cargo.toml"
+    if not cargo_file.is_file():
+        return []
+    try:
+        data = tomllib.loads(_read(cargo_file))
+    except (OSError, tomllib.TOMLDecodeError):
+        return []
+    ws = data.get("workspace")
+    if not isinstance(ws, dict):
+        return []
+    members = ws.get("members", [])
+    if not isinstance(members, list):
+        return []
+
+    results = []
+    for pattern in members:
+        if not isinstance(pattern, str):
+            continue
+        # Soporta miembros directos ('crates/api') o globs simples ('crates/*')
+        if "*" in pattern:
+            results.extend(p for p in root.glob(pattern) if p.is_dir() and (p / "Cargo.toml").is_file())
+        else:
+            p = root / pattern
+            if p.is_dir() and (p / "Cargo.toml").is_file():
+                results.append(p)
+    return sorted(results, key=lambda p: p.name.lower())
 
 
 def _rust_at(path: Path, name: str) -> Service | None:
-    if not (path / "Cargo.toml").is_file() or not (path / "src" / "main.rs").is_file():
-        return None  # sin src/main.rs es una libreria, no hay nada que arrancar
-    declared = _read(path / "Cargo.toml").lower()
+    cargo_path = path / "Cargo.toml"
+    if not cargo_path.is_file():
+        return None
+
+    raw_cargo = _read(cargo_path)
+    try:
+        cargo_data = tomllib.loads(raw_cargo)
+    except (OSError, tomllib.TOMLDecodeError):
+        cargo_data = {}
+
+    # Si es explicitamente un workspace puro (tiene [workspace] pero no [package])
+    if "workspace" in cargo_data and "package" not in cargo_data and "bin" not in cargo_data:
+        return None
+
+    declared = raw_cargo.lower()
     if not any(server in declared for server in RUST_SERVERS):
         return None
-    return _served(name, "cargo run", path)
+
+    # Determinar si tiene un binario ejecutable y como arrancarlo:
+    # 1. src/main.rs -> cargo run
+    # 2. src/bin/<bin_name>.rs -> cargo run --bin <bin_name>
+    # 3. [[bin]] en Cargo.toml -> cargo run --bin <name>
+    bin_name = None
+    if (path / "src" / "main.rs").is_file():
+        return _served(name, "cargo run", path)
+
+    # Revisar [[bin]] en Cargo.toml
+    bins = cargo_data.get("bin")
+    if isinstance(bins, list) and bins:
+        for b in bins:
+            if isinstance(b, dict) and b.get("name"):
+                bin_name = b["name"]
+                break
+
+    # Revisar src/bin/ si no hubo [[bin]] explicito
+    if not bin_name:
+        bin_dir = path / "src" / "bin"
+        if bin_dir.is_dir():
+            for rs_file in sorted(bin_dir.glob("*.rs")):
+                bin_name = rs_file.stem
+                break
+
+    if bin_name:
+        return _served(name, f"cargo run --bin {bin_name}", path)
+
+    return None
 
 
 def _ruby(root: Path) -> list[Service]:

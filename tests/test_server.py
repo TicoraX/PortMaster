@@ -697,12 +697,15 @@ def test_browse_marca_los_proyectos(client, tmp_path):
     (raiz / "app").mkdir(parents=True)
     (raiz / "app" / "compose.yaml").write_text("services: {}", encoding="utf-8")
     (raiz / "app" / "manage.py").write_text("", encoding="utf-8")
+    (raiz / "rust_app").mkdir(parents=True)
+    (raiz / "rust_app" / "Cargo.toml").write_text("[package]\nname='test'\n", encoding="utf-8")
     (raiz / "vacia").mkdir()
 
     entries = {e["name"]: e["markers"] for e in
                client.get("/api/browse", params={"path": str(raiz)}).json()["entries"]}
 
     assert entries["app"] == ["compose.yaml", "manage.py"]
+    assert entries["rust_app"] == ["Cargo.toml"]
     assert entries["vacia"] == []
 
 
