@@ -608,6 +608,83 @@ def test_rust_con_hyper_no_se_detecta(tmp_path):
     assert detect.detect(tmp_path) is None
 
 
+def test_rust_con_bin_en_src_bin(tmp_path):
+    """Detecta binarios alternativos en src/bin/*.rs cuando no hay src/main.rs."""
+    write(tmp_path, "Cargo.toml", '[dependencies]\naxum = "0.7"\n')
+    write(tmp_path, "src/bin/server.rs", "fn main() {}\n")
+
+    stack = detect.detect(tmp_path)
+    assert stack is not None
+    assert stack.services["api"].command == "cargo run --bin server"
+    assert stack.services["api"].ready == "listen"
+
+
+def test_rust_con_bin_declarado_en_cargo_toml(tmp_path):
+    """Detecta binario declarado explicitamente con [[bin]] en Cargo.toml."""
+    write(
+        tmp_path,
+        "Cargo.toml",
+        '[package]\nname = "miapp"\n\n[[bin]]\nname = "mi-servidor"\npath = "src/app.rs"\n\n[dependencies]\nrocket = "0.5"\n',
+    )
+    write(tmp_path, "src/app.rs", "fn main() {}\n")
+
+    stack = detect.detect(tmp_path)
+    assert stack is not None
+    assert stack.services["api"].command == "cargo run --bin mi-servidor"
+
+
+def test_rust_cargo_workspace(tmp_path):
+    """Detecta miembros de un Cargo workspace en crates/* o services/*."""
+    write(
+        tmp_path,
+        "Cargo.toml",
+        '[workspace]\nmembers = [\n    "crates/api",\n    "crates/core",\n]\n',
+    )
+    # Miembro api con framework servidor
+    write(
+        tmp_path,
+        "crates/api/Cargo.toml",
+        '[package]\nname = "api"\n\n[dependencies]\ntonic = "0.12"\n',
+    )
+    write(tmp_path, "crates/api/src/main.rs", "fn main() {}\n")
+
+    # Miembro core es solo libreria
+    write(
+        tmp_path,
+        "crates/core/Cargo.toml",
+        '[package]\nname = "core"\n',
+    )
+    write(tmp_path, "crates/core/src/lib.rs", "pub fn helper() {}\n")
+
+    stack = detect.detect(tmp_path)
+    assert stack is not None
+    assert "api" in stack.services
+    assert stack.services["api"].command == "cargo run"
+    assert "core" not in stack.services
+
+
+def test_rust_nuevos_frameworks(tmp_path):
+    """Verifica deteccion con tonic, trillium, gotham y volo-http."""
+    for framework in ("tonic", "trillium", "gotham", "volo-http"):
+        carpeta = tmp_path / framework
+        write(carpeta, "Cargo.toml", f'[dependencies]\n{framework} = "1.0"\n')
+        write(carpeta, "src/main.rs", "fn main() {}\n")
+        stack = detect.detect(carpeta)
+        assert stack is not None, f"debio detectar {framework}"
+        assert stack.services["api"].command == "cargo run"
+
+
+def test_rust_cli_tipo_rtok_no_se_detecta(tmp_path):
+    """Un CLI o TUI de terminal (como rtok, con ratatui y ureq) no expone puertos y no debe detectarse."""
+    write(
+        tmp_path,
+        "Cargo.toml",
+        '[package]\nname = "rtok"\n\n[dependencies]\nratatui = "0.30"\nureq = "3.4"\narboard = "3.6"\n',
+    )
+    write(tmp_path, "src/main.rs", "fn main() {}\n")
+    assert detect.detect(tmp_path) is None
+
+
 def test_el_frontend_espera_al_backend_de_go(tmp_path):
     write(tmp_path, "go.mod", "module ejemplo\n\nrequire github.com/gin-gonic/gin v1.9.1\n")
     write(tmp_path, "main.go", "package main\n\nfunc main() {}\n")
