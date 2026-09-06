@@ -4,6 +4,17 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
+## [1.4.4] - 2026-09-06
+
+### Agregado
+
+- **Compatibilidad avanzada con proyectos Rust, Cargo Workspaces y binarios alternativos.**
+  - **Marcador en Explorador Web (`browse.py`)**: Se añade `Cargo.toml` a los marcadores reconocidos (`MARKERS`) permitiendo identificar proyectos Rust con badge en el modal de exploración y selector de carpetas.
+  - **Detección de servidores Web y RPC (`detect.py`)**: Se amplía `RUST_SERVERS` para dar soporte a `tonic` (gRPC), `trillium`, `gotham` y `volo-http` además de `axum`, `actix-web`, `rocket`, `warp`, `tide`, `poem` y `salvo`.
+  - **Soporte de binarios múltiples y alternativos**: Resolución automática de binarios en `src/bin/*.rs` o declarados mediante `[[bin]]` en `Cargo.toml` generando comandos `cargo run --bin <nombre>`.
+  - **Soporte de Cargo Workspaces**: Inspección de miembros definidos en `[workspace]` (`crates/*`, `services/*`, etc.) para detectar de forma aislada cada servicio ejecutable que use un framework de servidor, omitiendo librerías puras.
+  - **Aislamiento de CLIs/TUIs**: Proyectos de terminal pura sin servidor web (ej. con `ratatui`, `ureq`, `clap`) no son tratados como servicios de red, evitando bloqueos o esperas de puertos inexistentes.
+
 ## [1.4.3] - 2026-09-05
 
 ### Agregado
@@ -386,6 +397,8 @@ Primera versión publicada. Lo que sigue es el alcance completo, no un diff.
   la tarjeta, y no lo impide: `docker compose up -d` sobre un contenedor que ya
   está arriba es el mismo caso y ahí es correcto. Ver `docs/pendientes.md`.
 
+[1.4.4]: https://github.com/TicoraX/PortMaster/releases/tag/v1.4.4
+[1.4.3]: https://github.com/TicoraX/PortMaster/releases/tag/v1.4.3
 [1.4.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.4.0
 [1.3.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.3.0
 [1.2.0]: https://github.com/TicoraX/PortMaster/releases/tag/v1.2.0
