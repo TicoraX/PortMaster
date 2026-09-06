@@ -586,10 +586,15 @@ def test_rust_con_framework(tmp_path):
     assert stack.services["api"].ready == "listen"
 
 
-def test_rust_sin_framework_no_se_detecta(tmp_path):
+def test_rust_sin_framework_se_detecta_con_ready_none(tmp_path):
     write(tmp_path, "Cargo.toml", '[dependencies]\nclap = "4"\n')
     write(tmp_path, "src/main.rs", "fn main() {}\n")
-    assert detect.detect(tmp_path) is None
+    stack = detect.detect(tmp_path)
+    assert stack is not None
+    servicio = stack.services["api"]
+    assert servicio.command == "cargo run"
+    assert servicio.ready == "none"
+    assert servicio.port is None
 
 
 def test_rust_libreria_no_se_detecta(tmp_path):
@@ -599,13 +604,15 @@ def test_rust_libreria_no_se_detecta(tmp_path):
     assert detect.detect(tmp_path) is None
 
 
-def test_rust_con_hyper_no_se_detecta(tmp_path):
-    """hyper es la base del HTTP de Rust, y entra como cliente tan seguido como
-    de servidor. Un CLI que descarga algo declara la misma dependencia que un
-    servidor, y detectarlo deja al arranque esperando un puerto que nunca abre."""
+def test_rust_con_hyper_se_detecta_con_ready_none(tmp_path):
+    """hyper como cliente HTTP no activa ready: listen, pero el binario ejecutable
+    se detecta con ready: none sin esperar un puerto inexistente."""
     write(tmp_path, "Cargo.toml", '[dependencies]\nhyper = "1"\n')
     write(tmp_path, "src/main.rs", 'use hyper::Client;\nfn main() { descargar(); }\n')
-    assert detect.detect(tmp_path) is None
+    stack = detect.detect(tmp_path)
+    assert stack is not None
+    assert stack.services["api"].command == "cargo run"
+    assert stack.services["api"].ready == "none"
 
 
 def test_rust_con_bin_en_src_bin(tmp_path):
@@ -674,15 +681,20 @@ def test_rust_nuevos_frameworks(tmp_path):
         assert stack.services["api"].command == "cargo run"
 
 
-def test_rust_cli_tipo_rtok_no_se_detecta(tmp_path):
-    """Un CLI o TUI de terminal (como rtok, con ratatui y ureq) no expone puertos y no debe detectarse."""
+def test_rust_cli_tipo_rtok_se_detecta_con_ready_none(tmp_path):
+    """Un CLI o TUI de terminal (como rtok, con ratatui y ureq) se detecta con ready: none."""
     write(
         tmp_path,
         "Cargo.toml",
         '[package]\nname = "rtok"\n\n[dependencies]\nratatui = "0.30"\nureq = "3.4"\narboard = "3.6"\n',
     )
     write(tmp_path, "src/main.rs", "fn main() {}\n")
-    assert detect.detect(tmp_path) is None
+    stack = detect.detect(tmp_path)
+    assert stack is not None
+    servicio = stack.services["api"]
+    assert servicio.command == "cargo run"
+    assert servicio.ready == "none"
+    assert servicio.port is None
 
 
 def test_el_frontend_espera_al_backend_de_go(tmp_path):

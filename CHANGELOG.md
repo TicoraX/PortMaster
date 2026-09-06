@@ -4,6 +4,15 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
+## [1.4.5] - 2026-09-06
+
+### Agregado
+
+- **Soporte de proyectos Rust ejecutables sin servidor web (`ready: "none"`).**
+  - **Detección de CLIs y TUIs**: Los proyectos Rust con binario ejecutable (`src/main.rs`, `[[bin]]` o `src/bin/*.rs`) que no declaran frameworks web de servidor ahora se detectan y registran correctamente en lugar de ser descartados.
+  - **Estrategia `ready: "none"`**: Para binarios CLI/TUI (como herramientas basadas en `ratatui`, `clap`, `ureq`, etc.), PortMaster arranca el proceso sin esperar la apertura de un socket TCP/HTTP, evitando bloqueos por puertos inexistentes.
+  - **Exclusión precisa de librerías**: Proyectos o crates que únicamente definen `src/lib.rs` sin ningún binario ejecutable continúan siendo omitidos de forma segura.
+
 ## [1.4.4] - 2026-09-06
 
 ### Agregado

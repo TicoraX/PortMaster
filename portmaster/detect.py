@@ -571,38 +571,46 @@ def _rust_at(path: Path, name: str) -> Service | None:
     if "workspace" in cargo_data and "package" not in cargo_data and "bin" not in cargo_data:
         return None
 
-    declared = raw_cargo.lower()
-    if not any(server in declared for server in RUST_SERVERS):
-        return None
-
     # Determinar si tiene un binario ejecutable y como arrancarlo:
     # 1. src/main.rs -> cargo run
-    # 2. src/bin/<bin_name>.rs -> cargo run --bin <bin_name>
-    # 3. [[bin]] en Cargo.toml -> cargo run --bin <name>
-    bin_name = None
+    # 2. [[bin]] en Cargo.toml -> cargo run --bin <name>
+    # 3. src/bin/<bin_name>.rs -> cargo run --bin <bin_name>
+    cmd = None
     if (path / "src" / "main.rs").is_file():
-        return _served(name, "cargo run", path)
+        cmd = "cargo run"
+    else:
+        # Revisar [[bin]] en Cargo.toml
+        bins = cargo_data.get("bin")
+        if isinstance(bins, list) and bins:
+            for b in bins:
+                if isinstance(b, dict) and b.get("name"):
+                    cmd = f"cargo run --bin {b['name']}"
+                    break
 
-    # Revisar [[bin]] en Cargo.toml
-    bins = cargo_data.get("bin")
-    if isinstance(bins, list) and bins:
-        for b in bins:
-            if isinstance(b, dict) and b.get("name"):
-                bin_name = b["name"]
-                break
+        # Revisar src/bin/ si no hubo [[bin]] explicito
+        if not cmd:
+            bin_dir = path / "src" / "bin"
+            if bin_dir.is_dir():
+                for rs_file in sorted(bin_dir.glob("*.rs")):
+                    cmd = f"cargo run --bin {rs_file.stem}"
+                    break
 
-    # Revisar src/bin/ si no hubo [[bin]] explicito
-    if not bin_name:
-        bin_dir = path / "src" / "bin"
-        if bin_dir.is_dir():
-            for rs_file in sorted(bin_dir.glob("*.rs")):
-                bin_name = rs_file.stem
-                break
+    if not cmd:
+        return None
 
-    if bin_name:
-        return _served(name, f"cargo run --bin {bin_name}", path)
+    declared = raw_cargo.lower()
+    is_server = any(server in declared for server in RUST_SERVERS)
 
-    return None
+    return Service(
+        name=name,
+        command=cmd,
+        cwd=path,
+        port=None,
+        ready="listen" if is_server else "none",
+        needs=(),
+        env={},
+        detached=False,
+    )
 
 
 def _ruby(root: Path) -> list[Service]:
