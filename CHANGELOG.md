@@ -6,6 +6,17 @@ esquema de `stack.yaml` y las rutas de la API local.
 
 ## [No publicado]
 
+### Cambiado
+
+- **`browse.markers` hace un `scandir` por carpeta en vez de una consulta por
+  marcador.** El comentario `ponytail:` del módulo ya tenía anotado el techo
+  (~1800 consultas en un listado grande) y la ruta de salida; sumar lenguajes
+  es lo que lo cobra. El costo deja de crecer con `MARKERS`. La comparación
+  pasa a ser sin distinguir mayúsculas en las tres plataformas: NTFS y el APFS
+  por defecto de macOS ya resolvían `Cargo.toml` contra un `cargo.toml` en
+  disco, así que comparar nombres exactos habría borrado el badge en dos de
+  tres sin poner ningún test en rojo.
+
 ### Seguridad
 
 - **PortMaster ya no se puede publicar a sí mismo.** `portmaster share` y el botón
