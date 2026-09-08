@@ -1272,3 +1272,40 @@ def test_jvm_el_cache_del_path_no_se_pega_entre_proyectos(tmp_path, monkeypatch)
     detect._en_el_path.cache_clear()
     esperado = "mvnw.cmd" if os.name == "nt" else "./mvnw"
     assert detect.detect(tmp_path).services["api"].command == f"{esperado} spring-boot:run"
+
+
+def test_bun_servidor_con_export_default_fetch(tmp_path):
+    write(tmp_path, "bunfig.toml", "")
+    write(tmp_path, "index.ts", "export default { port: 3000, fetch(req) { return new Response('ok'); } };\n")
+    stack = detect.detect(tmp_path)
+    assert stack is not None
+    assert stack.services["web"].command == "bun run index.ts"
+
+
+def test_bun_con_main_ts(tmp_path):
+    write(tmp_path, "bunfig.toml", "")
+    write(tmp_path, "main.ts", "Bun.serve({ fetch() { return new Response('hola'); } });\n")
+    stack = detect.detect(tmp_path)
+    assert stack is not None
+    assert stack.services["web"].command == "bun run main.ts"
+
+
+def test_bun_subproyecto_en_monorepo(tmp_path):
+    write(tmp_path, "bun.lock", "")
+    write(tmp_path, "backend/index.ts", "Bun.serve({ fetch() { return new Response('api'); } });\n")
+    stack = detect.detect(tmp_path)
+    assert stack is not None
+    assert "backend" in stack.services
+    assert stack.services["backend"].command == "bun run index.ts"
+
+
+def test_jvm_monorepo_con_wrapper_en_raiz(tmp_path, monkeypatch):
+    sin_binarios(monkeypatch)
+    detect._en_el_path.cache_clear()
+    write(tmp_path, "mvnw", "#!/bin/sh")
+    write(tmp_path, "mvnw.cmd", "@echo off")
+    write(tmp_path, "backend/pom.xml", POM.format(deps=SPRING_WEB, plugins=""))
+    stack = detect.detect(tmp_path)
+    assert stack is not None
+    esperado = "..\\mvnw.cmd" if os.name == "nt" else "../mvnw"
+    assert stack.services["backend"].command == f"{esperado} spring-boot:run"

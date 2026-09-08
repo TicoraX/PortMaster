@@ -4,6 +4,25 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
+## [1.5.1] - 2026-09-07
+
+### Seguridad
+
+- **Blindaje en la creación del token de autenticación (`registry.py`).** Uso de `open(..., opener=...)` nativo con `os.fchmod(fd, 0o600)` atómico antes de escribir el secreto, eliminando toda ventana TOCTOU cuando el archivo de token ya existía previamente con permisos permisivos.
+- **Validación determinista del proceso propio en túneles (`tunnel.py`).** Detección directa mediante `estado.pid == os.getpid()` en `sirve_portmaster`, asegurando que ninguna instancia pueda publicar su propia API de administración a internet independientemente del nombre del ejecutable o wrapper.
+
+### Corregido
+
+- **Prevención de re-inyección de estado obsoleto en el caché de vista (`server.py`).** Se añade control de invalidación (`_stack_invalidations`) en `_stack_para_la_vista` para descartar detecciones en vuelo que terminen después de un `freeze()` o modificación.
+- **Purga de caché en desregistro de proyectos (`server.py`).** `drop_project` (`DELETE /api/projects/{pid}`) ahora invoca `_olvidar_stack(path)`, evitando retención innecesaria en memoria.
+- **Desacoplamiento y reseteo del sondeo web (`app.js`).** Al conmutar de pestaña oculta a visible, se reinicia el intervalo de sondeo eliminando ráfagas y dobles peticiones consecutivas en menos de 100ms.
+
+### Agregado
+
+- **Soporte para servidores nativos de Bun con `export default { fetch }` (`detect.py`).** Detección automática del patrón oficial idiomático de Bun además de `Bun.serve(`.
+- **Soporte para monorepos y subproyectos en Bun (`detect.py`).** Reconocimiento de subcarpetas en monorepos Bun con lockfiles en la raíz y ampliación de entradas de ejecución (`main.ts`, `app.ts`).
+- **Soporte para wrappers de build en monorepos JVM (`detect.py`).** `_lanzador` ahora detecta wrappers (`mvnw`, `gradlew`) presentes en la raíz del repositorio cuando el servicio reside en una subcarpeta de backend.
+
 ## [1.5.0] - 2026-09-07
 
 ### Agregado

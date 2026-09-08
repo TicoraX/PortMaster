@@ -312,3 +312,14 @@ def test_un_puerto_ajeno_no_se_confunde_con_portmaster(monkeypatch):
         ),
     )
     assert tunnel.sirve_portmaster(3000) is False
+
+
+def test_sirve_portmaster_detecta_propio_pid(monkeypatch):
+    monkeypatch.setattr(
+        tunnel.ports,
+        "scan",
+        lambda port: tunnel.ports.PortStatus(
+            port=port, free=False, pid=os.getpid(), cmdline="custom_executable --flag"
+        ),
+    )
+    assert tunnel.sirve_portmaster(7666) is True

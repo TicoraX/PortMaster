@@ -2408,10 +2408,16 @@ refresh();
 // Al volver se refresca en el acto, antes de esperar el intervalo: si no, la
 // pagina mostraba el estado de hace horas durante los primeros 2.5 segundos, y
 // eso en una herramienta que dice que esta corriendo ahora es peor que nada.
-setInterval(() => {
+let pollTimer = setInterval(() => {
   if (document.visibilityState === "visible") refresh();
 }, POLL_MS);
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") refresh();
+  if (document.visibilityState === "visible") {
+    clearInterval(pollTimer);
+    refresh();
+    pollTimer = setInterval(() => {
+      if (document.visibilityState === "visible") refresh();
+    }, POLL_MS);
+  }
 });

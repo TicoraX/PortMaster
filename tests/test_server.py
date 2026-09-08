@@ -2237,3 +2237,44 @@ def test_el_cache_de_la_vista_es_por_proyecto(client, tmp_path, monkeypatch):
     assert set(vistas) == {"uno", "dos"}
     assert de_nuevo["uno"]["path"] == str(raices[0])
     assert de_nuevo["dos"]["path"] == str(raices[1])
+
+
+def test_drop_project_invalida_el_cache_de_la_vista(client, tmp_path, monkeypatch):
+    raiz = tmp_path / "a_borrar"
+    raiz.mkdir()
+    (raiz / "package.json").write_text(
+        json.dumps({"scripts": {"dev": "vite"}, "dependencies": {"vite": "^5"}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(registry, "paths", lambda: [raiz])
+    pid = registry.project_id(raiz)
+
+    client.get("/api/state")
+    with server._stack_lock:
+        assert str(raiz) in server._stack_seen
+
+    assert client.delete(f"/api/projects/{pid}").status_code == 200
+    with server._stack_lock:
+        assert str(raiz) not in server._stack_seen
+
+
+def test_cache_invalidation_race_no_reinyecta_viejo(tmp_path):
+    raiz = tmp_path / "concurrente"
+    raiz.mkdir()
+    (raiz / "Cargo.toml").write_text('[package]\nname = "c"\n[dependencies]\naxum = "0.7"\n', encoding="utf-8")
+    (raiz / "src").mkdir()
+    (raiz / "src" / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
+
+    server._olvidar_stack(raiz)
+    with server._stack_lock:
+        server._stack_invalidations[str(raiz)] = 100.0
+
+    clave = str(raiz)
+    inicio = 50.0
+    stack = detect.stack_for(raiz)
+    with server._stack_lock:
+        if server._stack_invalidations.get(clave, 0.0) <= inicio:
+            server._stack_seen[clave] = (105.0, stack)
+
+    with server._stack_lock:
+        assert clave not in server._stack_seen

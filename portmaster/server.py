@@ -447,6 +447,7 @@ def _docker_is_down() -> bool:
 # (el estado y la lista de servicios), asi que se parece mas al `DOCKER_TTL`.
 STACK_TTL = 10.0
 _stack_seen: dict[str, tuple[float, config.Stack]] = {}
+_stack_invalidations: dict[str, float] = {}
 _stack_lock = threading.Lock()
 
 
@@ -483,21 +484,25 @@ def _stack_para_la_vista(path: Path) -> config.Stack:
             return visto[1]
     # Afuera del lock: la deteccion toca disco, y con doce proyectos adentro
     # del lock la vista se serializa entera contra el proyecto mas lento.
+    inicio = time.monotonic()
     stack = detect.stack_for(path)
     with _stack_lock:
-        _stack_seen[clave] = (time.monotonic(), stack)
+        # Si fue invalidado mientras leiamos el disco, no reinyectamos el resultado obsoleto.
+        if _stack_invalidations.get(clave, 0.0) <= inicio:
+            _stack_seen[clave] = (time.monotonic(), stack)
     return stack
 
 
 def _olvidar_stack(path: Path) -> None:
     """Saca el proyecto del cache de la vista.
 
-    Lo llama `freeze`, que es lo unico de la interfaz que cambia los archivos
-    del proyecto: sin esto el usuario apretaba "Congelar" y la fila no se
-    enteraba hasta diez segundos despues.
+    Lo llama `freeze` y `drop_project`: sin esto el usuario apretaba "Congelar"
+    o borraba el proyecto y la fila no se enteraba hasta diez segundos despues.
     """
+    clave = str(path)
     with _stack_lock:
-        _stack_seen.pop(str(path), None)
+        _stack_seen.pop(clave, None)
+        _stack_invalidations[clave] = time.monotonic()
 
 
 def _sessions_file() -> Path:
@@ -1029,12 +1034,14 @@ def create_app(token: str | None = None) -> FastAPI:
         dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)],
     )
     def drop_project(pid: str) -> dict:
+        path = _lookup(pid)
         with sessions_lock:
             session = sessions.pop(pid, None)
         if session is not None:
             session.stop()
         if not registry.remove(pid):
             raise HTTPException(404, "proyecto desconocido")
+        _olvidar_stack(path)
         return {"ok": True}
 
     @app.post(

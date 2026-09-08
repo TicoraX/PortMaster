@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import re
 import shutil
 import subprocess
@@ -71,6 +72,8 @@ def sirve_portmaster(port: int) -> bool:
         estado = ports.scan(port)
     except (ValueError, OSError):
         return False
+    if estado.pid == os.getpid():
+        return True
     linea = (estado.cmdline or "").lower()
     return "portmaster" in linea and "serve" in linea
 

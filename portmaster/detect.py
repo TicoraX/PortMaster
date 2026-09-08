@@ -137,7 +137,9 @@ BUN_MARKERS = ("bunfig.toml", "bun.lockb", "bun.lock")
 
 # Lo que Bun ejecuta directo, en orden de preferencia.
 BUN_ENTRIES = (
-    "index.ts", "server.ts", "src/index.ts", "src/server.ts", "index.js", "server.js",
+    "main.ts", "app.ts", "index.ts", "server.ts",
+    "src/main.ts", "src/app.ts", "src/index.ts", "src/server.ts",
+    "index.js", "server.js",
 )
 
 # Frameworks HTTP del ecosistema. Con cualquiera de estos el fuente no nombra a
@@ -751,7 +753,12 @@ def _lanzador(path: Path, herramienta: str, wrapper: tuple[str, str]) -> str:
     if _en_el_path(herramienta):
         return herramienta
     elegido = wrapper[1] if os.name == "nt" else wrapper[0]
-    return elegido if (path / Path(elegido).name).is_file() else herramienta
+    nombre = Path(elegido).name
+    if (path / nombre).is_file():
+        return elegido
+    if (path.parent / nombre).is_file():
+        return f"..\\{nombre}" if os.name == "nt" else f"../{nombre}"
+    return herramienta
 
 
 def _elixir(root: Path) -> list[Service]:
@@ -914,7 +921,7 @@ def _bun(root: Path) -> list[Service]:
 
 
 def _bun_at(path: Path, name: str) -> Service | None:
-    if not any((path / marca).is_file() for marca in BUN_MARKERS):
+    if not any((base / marca).is_file() for base in (path, path.parent) for marca in BUN_MARKERS):
         return None
 
     try:
@@ -931,12 +938,16 @@ def _bun_at(path: Path, name: str) -> Service | None:
         fuente = path / candidato
         if not fuente.is_file():
             continue
-        # `Bun.serve` es la API nativa y no figura en ninguna dependencia, asi
-        # que la llamada en el fuente es su unica senal. Es el mismo par que
-        # `_go_at` con `net/http`: el framework en el manifiesto, o la llamada
-        # en el codigo. Sin ninguna de las dos es una CLI, y arrancarla dejaria
-        # al runner esperando un puerto que nunca abre.
-        if not marco and BUN_SERVES not in _read(fuente):
+        # `Bun.serve` es la API nativa, o `export default { fetch }`, o framework HTTP.
+        # Sin ninguna de las tres es una CLI, y arrancarla dejaria al runner
+        # esperando un puerto que nunca abre.
+        contenido = _read(fuente)
+        es_servidor = (
+            marco
+            or (BUN_SERVES in contenido)
+            or ("export default" in contenido and "fetch" in contenido)
+        )
+        if not es_servidor:
             continue
         return _served(name, f"bun run {candidato}", path)
     return None

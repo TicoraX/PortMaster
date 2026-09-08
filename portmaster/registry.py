@@ -262,22 +262,25 @@ def token() -> str:
 
     HOME.mkdir(parents=True, exist_ok=True)
     fresh = token_urlsafe(32)
-    # Los permisos van en el open, no en un chmod despues. `write_text` crea el
-    # archivo con el umask (0644 tipico) y el chmod lo cierra un instante mas
-    # tarde: en esa ventana cualquier usuario local lee el token, y con el token
-    # corre comandos, porque stack.yaml es ejecutable por diseno.
-    modo = stat.S_IRUSR | stat.S_IWUSR
+    # Permisos restrictivos (0600) en el open, y fchmod previo si ya existia.
+    def _opener(p, flags):
+        fd = os.open(p, flags, 0o600)
+        if hasattr(os, "fchmod"):
+            try:
+                os.fchmod(fd, 0o600)
+            except OSError:
+                pass
+        return fd
+
     try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, modo)
+        with open(path, "w", encoding="utf-8", opener=_opener) as f:
+            f.write(fresh)
+        try:
+            path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass
     except OSError:
         path.write_text(fresh, encoding="utf-8")  # sistemas sin permisos POSIX
-        return fresh
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(fresh)
-    try:
-        path.chmod(modo)  # el archivo ya existia: O_CREAT no toca su modo
-    except OSError:
-        pass
     return fresh
 
 
