@@ -1,4 +1,5 @@
 import contextlib
+import json
 import os
 import shutil
 import socket
@@ -27,6 +28,11 @@ def aislado(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "HOME", tmp_path / "home")
     monkeypatch.setattr(registry, "PROJECTS", tmp_path / "home" / "projects.json")
     server.limiter._hits.clear()
+    # El cache de la vista no puede cruzar tests: un proyecto detectado en uno
+    # llegaria ya resuelto al siguiente, y el sintoma es el que `CLAUDE.md`
+    # marca como estado compartido, un test que pasa solo y falla acompanado.
+    with server._stack_lock:
+        server._stack_seen.clear()
     with server.sessions_lock:
         server.sessions.clear()
         server.selected_profiles.clear()
@@ -2079,3 +2085,155 @@ def test_browse_frecuentes(client, tmp_path, monkeypatch):
 
 
 
+
+
+def test_share_rechaza_el_puerto_propio(client, monkeypatch):
+    """PortMaster no se publica a si mismo.
+
+    Detras de ese puerto esta la API que corre los comandos de stack.yaml, o
+    sea ejecucion arbitraria: el token pasa a ser lo unico entre internet y tu
+    consola, y el usuario cree que compartio su proyecto.
+
+    El puerto sale del scope ASGI (el socket que se bindeo), no del header
+    Host, que lo escribe quien llama y serviria para esquivar la guarda. Con
+    TestClient el scope dice 80, asi que ese es el puerto propio aca.
+    """
+    llamadas = []
+    monkeypatch.setattr(
+        server.tunnel,
+        "start_tunnel",
+        lambda port, provider=None: llamadas.append(port),
+    )
+
+    res = client.post("/api/share?port=80")
+    assert res.status_code == 400
+    assert llamadas == [], "se abrio un tunel hacia el puerto de PortMaster"
+
+
+def test_share_no_confia_en_el_header_host(client, monkeypatch):
+    """Un Host mentido no mueve la guarda ni la abre ni la cierra.
+
+    `request.url.port` sale del header. Si la guarda leyera de ahi, un
+    `Host: 127.0.0.1:3000` haria pasar el 80 (el puerto real) y frenaria el
+    3000 (uno legitimo). Las dos mitades se afirman.
+    """
+    abiertos = []
+    monkeypatch.setattr(
+        server.tunnel,
+        "start_tunnel",
+        lambda port, provider=None: abiertos.append(port)
+        or server.tunnel.Tunnel(
+            provider="cloudflared",
+            port=port,
+            url="https://test-tunnel.trycloudflare.com",
+            proc=subprocess.Popen("echo ok", shell=True),
+        ),
+    )
+    cabecera = {"Host": "127.0.0.1:3000"}
+
+    assert client.post("/api/share?port=80", headers=cabecera).status_code == 400
+    assert client.post("/api/share?port=3000", headers=cabecera).status_code == 200
+    assert abiertos == [3000]
+    client.delete("/api/share/3000")
+
+
+# cache de la vista ---------------------------------------------------------
+
+
+def test_los_sondeos_siguientes_no_tocan_el_disco(client, proyecto, monkeypatch):
+    """La interfaz sondea cada 2.5s y `detect` relee todo el proyecto.
+
+    Medido sobre un proyecto poliglota: 6.7ms por llamada, o sea 242ms de disco
+    en cada `/api/state` con doce proyectos y tres pestanas, releyendo archivos
+    que casi nunca cambian.
+
+    Se afirma el efecto y no la forma: que la cuenta de lecturas **no crezca
+    con la cantidad de sondeos**. Cuantas hace el primero es asunto del
+    servidor (hoy son tres, porque ademas del stack de la fila se resuelven el
+    mapa de puertos compartidos y el de Docker, los dos ya cacheados en
+    `registry`); lo que este test protege es que los siguientes sean gratis.
+    """
+    lecturas = []
+    real = server.detect.stack_for
+    monkeypatch.setattr(
+        server.detect, "stack_for", lambda p: lecturas.append(str(p)) or real(p)
+    )
+
+    for _ in range(4):
+        assert client.get("/api/state").status_code == 200
+    tras_cuatro = len(lecturas)
+
+    for _ in range(8):
+        client.get("/api/state")
+
+    assert len(lecturas) == tras_cuatro, (
+        f"doce sondeos costaron {len(lecturas)} lecturas de disco y cuatro costaron "
+        f"{tras_cuatro}: el costo sigue atado a la cantidad de sondeos"
+    )
+
+
+def test_arrancar_no_usa_la_version_cacheada(client, proyecto, monkeypatch):
+    """`up` lee fresco siempre, y esto no es un detalle.
+
+    Arrancar con un stack cacheado correria los comandos viejos despues de que
+    el usuario edito su `stack.yaml`, que es exactamente lo que nadie espera.
+    La vista puede estar diez segundos vieja; el arranque no puede estarlo.
+    """
+    ruta, _puerto = proyecto
+    pid = registry.project_id(ruta)
+    client.get("/api/state")  # deja el proyecto en el cache de la vista
+
+    lecturas = []
+    real = server.detect.stack_for
+    monkeypatch.setattr(
+        server.detect, "stack_for", lambda p: lecturas.append(str(p)) or real(p)
+    )
+
+    assert client.post(f"/api/projects/{pid}/up", json={"profile": None}).status_code == 200
+    assert str(ruta) in lecturas, "up sirvio el stack del cache en vez de releer el stack.yaml"
+    client.post(f"/api/projects/{pid}/down")
+
+
+def test_congelar_refresca_la_vista_en_el_acto(client, tmp_path, monkeypatch):
+    """Sin invalidar, apretabas "Congelar" y la fila no se enteraba por 10s."""
+    raiz = tmp_path / "proyecto-node"
+    raiz.mkdir()
+    (raiz / "package.json").write_text(
+        json.dumps({"scripts": {"dev": "vite"}, "dependencies": {"vite": "^5"}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(registry, "paths", lambda: [raiz])
+    pid = registry.project_id(raiz)
+
+    def vista():
+        return client.get("/api/state").json()["projects"][0]
+
+    assert vista()["detected"] is True, "el proyecto tendria que salir detectado"
+    assert client.post(f"/api/projects/{pid}/freeze").status_code == 200
+    assert vista()["detected"] is False, "la fila siguio sirviendo la version cacheada"
+
+
+def test_el_cache_de_la_vista_es_por_proyecto(client, tmp_path, monkeypatch):
+    """Dos proyectos no comparten entrada: la clave es la ruta.
+
+    Sin esto, el primero en resolverse contestaria por los dos y la interfaz
+    mostraria los servicios de un proyecto en la fila del otro.
+    """
+    raices = []
+    for nombre in ("uno", "dos"):
+        raiz = tmp_path / nombre
+        raiz.mkdir()
+        (raiz / "package.json").write_text(
+            json.dumps({"scripts": {"dev": "vite"}, "dependencies": {"vite": "^5"}}),
+            encoding="utf-8",
+        )
+        raices.append(raiz)
+    monkeypatch.setattr(registry, "paths", lambda: raices)
+
+    vistas = {v["name"]: v for v in client.get("/api/state").json()["projects"]}
+    client.get("/api/state")
+    de_nuevo = {v["name"]: v for v in client.get("/api/state").json()["projects"]}
+
+    assert set(vistas) == {"uno", "dos"}
+    assert de_nuevo["uno"]["path"] == str(raices[0])
+    assert de_nuevo["dos"]["path"] == str(raices[1])

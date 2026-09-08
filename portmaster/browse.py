@@ -17,7 +17,12 @@ import psutil
 
 from . import detect
 
-MARKERS = ("stack.yaml", "stack.yml", *detect.COMPOSE_NAMES, "package.json", "manage.py", "Cargo.toml")
+MARKERS = (
+    "stack.yaml", "stack.yml", *detect.COMPOSE_NAMES,
+    "package.json", "manage.py", "Cargo.toml",
+    "bunfig.toml", "mix.exs",
+    "pom.xml", "build.gradle", "build.gradle.kts",
+)
 
 # Carpetas que nunca son un proyecto y solo hacen ruido al navegar.
 SKIP = {"node_modules", "__pycache__", "venv", "env", "dist", "build", "target"}
@@ -73,14 +78,48 @@ def _subdirs(path: Path) -> list[str]:
     return sorted(found, key=str.lower)
 
 
+def _es_archivo(entry: os.DirEntry) -> bool:
+    try:
+        return entry.is_file()
+    except OSError:
+        return False  # enlace roto o unidad desconectada
+
+
 def markers(path: Path) -> list[str]:
     """Archivos que delatan un proyecto.
 
-    ponytail: un stat por marcador y por carpeta, hasta ~1800 en un listado
-    grande. Es local y en SSD no se nota. Si alguna vez pesa, la salida es un
-    solo scandir por carpeta e intersecar los nombres.
+    Un `scandir` por carpeta y cruce de nombres, y no un `is_file()` por
+    marcador, que era el techo que este mismo comentario dejaba anotado: el
+    costo estaba atado al largo de `MARKERS`, y sumar lenguajes lo empuja.
+    Ahora no crece con la lista, solo con lo que la carpeta tiene de verdad.
+
+    Se pregunta por la entrada solo cuando el nombre ya coincide con un
+    marcador. Sin ese filtro, una carpeta con mil archivos pagaria mil
+    preguntas y el cambio seria una regresion en vez de una mejora.
+
+    **Sin distinguir mayusculas, y no es un detalle.** `(path / "Cargo.toml")
+    .is_file()` daba True con un `cargo.toml` en disco, porque el sistema de
+    archivos lo resolvia: NTFS y el APFS por defecto de macOS no distinguen.
+    Comparar nombres exactos habria borrado el badge en dos de las tres
+    plataformas de la CI, en silencio y sin ningun test en rojo. Se compara
+    igual en las tres, que ademas es una respuesta y no una casualidad del
+    sistema de archivos donde toco correr.
+
+    El conjunto se arma en cada llamada a proposito: `MARKERS` se puede
+    parchear (los tests lo hacen), y un conjunto de modulo quedaria viejo. Es
+    un punado de cadenas en memoria contra una llamada al sistema, no se nota.
     """
-    return [name for name in MARKERS if (path / name).is_file()]
+    objetivo = {name.lower(): name for name in MARKERS}
+    try:
+        with os.scandir(path) as items:
+            presentes = {
+                item.name.lower()
+                for item in items
+                if item.name.lower() in objetivo and _es_archivo(item)
+            }
+    except OSError:
+        return []  # sin permisos o no existe: se ve sin badges, no es un error
+    return [name for clave, name in objetivo.items() if clave in presentes]
 
 
 def roots() -> dict:

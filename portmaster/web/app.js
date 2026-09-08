@@ -2394,4 +2394,24 @@ showBuild();
 // todas las demas llamadas a `refresh` viven adentro de un handler. Se perdio en
 // a252013 al reescribir el final del archivo.
 refresh();
-setInterval(refresh, POLL_MS);
+
+// Sondear solo con la pestana a la vista. `setInterval(refresh, POLL_MS)` a
+// secas corria igual con la pestana oculta, minimizada o detras de otra
+// ventana, y ahi esta el grueso del trabajo al pedo: una pestana abierta ocho
+// horas hacia 11.520 sondeos, casi todos sin nadie mirando. Cada uno le pide al
+// servidor que resuelva cada proyecto registrado, o sea disco.
+//
+// `visibilityState` es API nativa del navegador y no hace falta nada mas: no
+// hay boton que apretar ni preferencia que guardar, y el que deja la pestana
+// abierta de fondo no tiene que acordarse de nada.
+//
+// Al volver se refresca en el acto, antes de esperar el intervalo: si no, la
+// pagina mostraba el estado de hace horas durante los primeros 2.5 segundos, y
+// eso en una herramienta que dice que esta corriendo ahora es peor que nada.
+setInterval(() => {
+  if (document.visibilityState === "visible") refresh();
+}, POLL_MS);
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") refresh();
+});

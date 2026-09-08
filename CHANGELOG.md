@@ -4,6 +4,103 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
+## [1.5.0] - 2026-09-07
+
+### Agregado
+
+- **Java y Kotlin sobre Maven o Gradle.** Spring Boot, Quarkus, Micronaut y
+  Ktor, con `build.gradle.kts` incluido: el build es el mismo y Kotlin no es un
+  detector aparte. Hace falta el framework, porque un `pom.xml` o un
+  `build.gradle` sueltos pueden ser una librería o una app de consola.
+  `spring-boot-starter` a secas no cuenta: es una app de Spring sin servlet
+  container y no abre ningún puerto.
+- **El comando JVM prefiere el binario del PATH antes que el wrapper del repo.**
+  `mvn spring-boot:run` es igual en las tres plataformas; el wrapper son dos
+  archivos distintos (`./mvnw` no corre en `cmd.exe`, `mvnw.cmd` no corre en
+  bash), así que congelar el wrapper rompía el `stack.yaml` compartido de un
+  equipo mixto. La consulta al PATH va cacheada: medido en Windows con 59
+  directorios, `shutil.which` cuesta 13.5ms por llamada, y `detect` corre en el
+  sondeo de la interfaz cada 2.5s por proyecto y por pestaña.
+- `pom.xml`, `build.gradle` y `build.gradle.kts` entran como marcadores del
+  explorador de carpetas.
+- **Elixir con Phoenix.** Un proyecto con `{:phoenix, ...}` en el `mix.exs`, o
+  con la carpeta `lib/<algo>_web/` que Phoenix genera siempre, arranca con
+  `mix phx.server`. La señal es la dependencia con su coma y no la palabra
+  suelta: una librería de componentes declara `phoenix_html` o
+  `phoenix_live_view` sin ser una aplicación, no tiene endpoint y `mix
+  phx.server` ahí falla. Un `mix.exs` solo es una librería o una app OTP sin
+  puerto y no se detecta.
+- `mix.exs` entra como marcador del explorador de carpetas.
+- **Bun como runtime, no sólo como gestor de paquetes.** Un proyecto sin
+  `package.json`, sin `scripts`, o con scripts que no sirven nada ahora se
+  detecta y arranca con `bun run <archivo>`. El proyecto Node con `bun.lock`
+  sigue saliendo por el camino de siempre (`bun run dev`), que es el único que
+  sabe leer los scripts: `_bun` va último en la tupla de detectores y sólo
+  atrapa lo que el resto deja pasar. Hace falta una marca de Bun
+  (`bunfig.toml`, `bun.lock`, `bun.lockb`) más la señal de que sirve por un
+  puerto: `Bun.serve(` en el fuente o un framework declarado (hono, elysia).
+  Sin eso es una CLI y no se detecta, la misma decisión que ya toman Go y Rust.
+- `bunfig.toml` entra como marcador del explorador de carpetas.
+
+### Cambiado
+
+- **La interfaz deja de sondear con la pestaña oculta.** `setInterval(refresh,
+  POLL_MS)` corría igual minimizada o detrás de otra ventana: una pestaña
+  abierta ocho horas hacía 11.520 sondeos, casi todos sin nadie mirando, y cada
+  uno le pide al servidor que resuelva todos los proyectos registrados. Ahora
+  sondea sólo con la pestaña a la vista, y al volver refresca en el acto en vez
+  de esperar el intervalo. Es `document.visibilityState`, API nativa: no hay
+  botón que apretar ni preferencia que guardar.
+- **La vista de estado cachea la detección diez segundos.** `detect.stack_for`
+  relee y reparsea `pom.xml`, `package.json` y `compose.yaml` en cada llamada,
+  y `_project_view` corre una vez por proyecto y por request. Medido sobre un
+  proyecto políglota: 6.7ms por llamada, o sea 242ms de disco en cada
+  `/api/state` con doce proyectos y tres pestañas. `up`, `switch_profile` y
+  `down` siguen leyendo fresco: arrancar con una versión cacheada correría los
+  comandos viejos después de que editaste tu `stack.yaml`. `freeze` invalida la
+  entrada, así que "Congelar" refresca la fila en el acto.
+- **`browse.markers` hace un `scandir` por carpeta en vez de una consulta por
+  marcador.** El comentario `ponytail:` del módulo ya tenía anotado el techo
+  (~1800 consultas en un listado grande) y la ruta de salida; sumar lenguajes
+  es lo que lo cobra. El costo deja de crecer con `MARKERS`. La comparación
+  pasa a ser sin distinguir mayúsculas en las tres plataformas: NTFS y el APFS
+  por defecto de macOS ya resolvían `Cargo.toml` contra un `cargo.toml` en
+  disco, así que comparar nombres exactos habría borrado el badge en dos de
+  tres sin poner ningún test en rojo.
+
+### Seguridad
+
+- **PortMaster ya no se puede publicar a sí mismo.** `portmaster share` y el botón
+  de la interfaz rechazan el puerto de un `portmaster serve`. Detrás de ese puerto
+  está la API que arranca los servicios de `stack.yaml`, o sea ejecución de
+  comandos: publicarla dejaba al token como única puerta contra internet. El
+  servidor decide con el socket que bindeó (el scope ASGI, no el header `Host`,
+  que lo escribe quien llama); `tunnel.start_tunnel` cubre además el CLI y
+  cualquier instancia ajena.
+- **El token se crea con sus permisos, no se los pone después.** `write_text` lo
+  dejaba en disco con el umask (0644 típico) y el `chmod(0600)` llegaba un
+  instante tarde: en esa ventana cualquier usuario local lo leía, y con el token
+  se ejecutan comandos. Ahora el modo va en el `os.open`.
+- **`_terminate_tree` recibe el `Popen`, no un pid suelto.** `psutil` verifica el
+  reciclado de PID contra la identidad que capturó al construir el `Process`: si
+  el pid ya se había reciclado antes de esa línea, adoptaba al intruso y lo
+  terminaba. Los hooks (`pre_start`, `post_start`) llamaban con un pid pelado y
+  sin ningún `poll()` previo. Con el `Popen` a mano, un `poll()` que da `None`
+  prueba que el hijo sigue vivo y sin cosechar.
+- **`/api/open-editor` dejó de usar `shell=True`.** En Windows metía la ruta por
+  `cmd.exe /c` con `list2cmdline` sola, la media medida que `scripts._entrecomillar`
+  ya documenta como insuficiente. `shutil.which` devuelve el `.cmd` completo y
+  `CreateProcess` lo corre igual, así que la capa de shell no aportaba nada.
+
+### Corregido
+
+- **`test_serve_port_occupied_suggests_alternative` fallaba con `FORCE_COLOR` en el
+  entorno.** Rich pinta los números y el test afirmaba substrings planos, así que
+  daba verde en CI (sin `FORCE_COLOR`) y rojo en la terminal del desarrollador, o
+  dentro de un `portmaster up`, que se lo pone a sus hijos. El helper `sin_color`
+  de `tests/test_cli.py` centraliza el arreglo que ya estaba inline en el test de
+  `--version`.
+
 ## [1.4.5] - 2026-09-06
 
 ### Agregado

@@ -100,6 +100,18 @@ Genera un túnel HTTPS seguro y efímero hacia el puerto local, ideal para proba
 compartir vistas previas con clientes o probar en dispositivos móviles. Presioná `Ctrl-C` para
 cerrar el túnel de inmediato.
 
+**No se puede compartir el puerto de `portmaster serve`.** Detrás de ese puerto está la API
+que arranca los servicios de tu `stack.yaml`, o sea ejecución de comandos: publicarla dejaría
+al token como única puerta entre internet y tu consola. Vale para el CLI y para el botón de la
+interfaz por igual:
+
+```console
+$ portmaster share 7667
+Iniciando tunel hacia 127.0.0.1:7667...
+Error: el puerto 7667 es de un `portmaster serve`. Publicarlo expone la API que
+ejecuta los comandos de tu stack.yaml, no tu proyecto.
+```
+
 ## Limpieza de recursos Docker (Higiene)
 
 ```bash

@@ -3,7 +3,9 @@
 import dataclasses
 import io
 import os
+import shutil
 import socket
+import subprocess
 import sys
 import textwrap
 import threading
@@ -14,7 +16,7 @@ import psutil
 import pytest
 from rich.console import Console
 
-from portmaster import config, ports, runner
+from portmaster import config, detect, ports, runner
 
 # Servidor minimo que anuncia su arranque y se queda escuchando.
 SERVER = (
@@ -493,9 +495,46 @@ def test_env_llega_al_proceso(tmp_path):
     assert "VALOR=hola" in salida.getvalue()
 
 
+class _Cosechado:
+    """Un `Popen` que ya murio y fue cosechado, con el pid de otro proceso vivo.
+
+    Es exactamente la forma del reciclado de PID: el sistema le dio ese numero
+    a alguien nuevo despues de que el nuestro terminara. Un objeto de verdad no
+    sirve porque los pids no se pueden reasignar a mano.
+    """
+
+    def __init__(self, pid: int, codigo: int = 0):
+        self.pid = pid
+        self._codigo = codigo
+
+    def poll(self):
+        return self._codigo
+
+
+def test_terminate_tree_no_mata_un_pid_reciclado():
+    """El pid de un proceso ya muerto no es nuestro, y no se toca.
+
+    `psutil` verifica el reciclado contra la identidad que capturo al construir
+    el `Process`; si el pid ya se habia reciclado antes de esa linea, adopta al
+    intruso y lo mata. La guarda es el `poll()` del `Popen`: mientras da None,
+    el hijo esta vivo y sin cosechar y el sistema no puede reasignar su pid.
+
+    Se afirma el efecto, no la forma: que el proceso ajeno siga vivo.
+    """
+    inocente = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    try:
+        runner._terminate_tree(_Cosechado(inocente.pid))
+        time.sleep(0.3)
+        assert inocente.poll() is None, "se mato un proceso ajeno con un pid reciclado"
+    finally:
+        inocente.kill()
+        inocente.wait(timeout=5)
+
+
 def test_terminate_tree_pid_inexistente():
-    # PID 999999 no deberia lanzar psutil.NoSuchProcess
-    runner._terminate_tree(999999)
+    # Un pid que no existe no deberia lanzar psutil.NoSuchProcess. Va vivo
+    # (poll None) para pasar la guarda y llegar al psutil.Process de adentro.
+    runner._terminate_tree(_Cosechado(999999, codigo=None))
 
 
 LENTO = (
@@ -1179,3 +1218,56 @@ def test_dependency_graph(tmp_path):
     assert len(profile_graph["nodes"]) == 2
     assert profile_graph["edges"] == [{"from": "db", "to": "api"}]
 
+
+
+# bun ----------------------------------------------------------------------
+
+BUN_SERVER = """
+Bun.serve({{
+  port: {port},
+  fetch: () => new Response("ok"),
+}});
+console.log("SERVIDOR ARRIBA");
+"""
+
+
+@pytest.mark.skipif(shutil.which("bun") is None, reason="bun no esta instalado")
+def test_bun_detectado_arranca_y_abre_el_puerto(tmp_path, free_ports):
+    """Deteccion y arranque de un proyecto Bun de punta a punta, con Bun de verdad.
+
+    Los tests de `detect` afirman el string del comando y nada mas, que alcanza
+    porque la deteccion es inspeccion de archivos. Lo que no prueban es el
+    eslabon siguiente: que ese string efectivamente arranque algo y que el
+    puerto aparezca. Un comando bien armado contra una API que no existe se ve
+    igual de verde en `test_detect`.
+
+    De los tres lenguajes del plan, Bun es el unico con toolchain instalado en
+    la maquina de desarrollo, asi que es el unico que puede cerrar el circulo.
+    Se saltea solo si `bun` no esta, para no romperle la CI a nadie.
+
+    El puerto va en el fuente y `ready` queda en `listen`, que es lo que `_served`
+    produce: se afirma que el runner lo descubre solo, sin que el stack.yaml se
+    lo diga.
+    """
+    (port,) = free_ports(1)
+    (tmp_path / "bunfig.toml").write_text("[install]\n", encoding="utf-8")
+    (tmp_path / "index.ts").write_text(BUN_SERVER.format(port=port), encoding="utf-8")
+
+    stack = detect.detect(tmp_path)
+    assert stack is not None, "no se detecto el proyecto Bun"
+    assert stack.services["web"].command == "bun run index.ts"
+
+    engine = make_runner(stack, timeout=60.0)
+    try:
+        engine.up()
+        assert engine.procs[0].ready
+        # El puerto no estaba en el stack: lo descubrio el runner del socket.
+        assert engine.procs[0].port == port
+        assert not ports.is_free(port)
+    finally:
+        engine.down()
+
+    deadline = time.time() + 10
+    while time.time() < deadline and not ports.is_free(port):
+        time.sleep(0.1)
+    assert ports.is_free(port), "el puerto quedo tomado despues de down()"

@@ -19,9 +19,11 @@ el puerto real del proceso ya arrancado. Ver el spec en docs/.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
+import shutil
 from dataclasses import replace
 from pathlib import Path
 
@@ -107,6 +109,42 @@ GO_SERVES = ("ListenAndServe", "http.Serve(")
 # Donde buscar el paquete main de un proyecto Go.
 GO_MAINS = ("main.go", "cmd/server/main.go", "cmd/api/main.go", "cmd/app/main.go")
 
+# Frameworks JVM que sirven por un puerto, con su tarea en cada build system:
+# (marcas en el archivo del build, goal de Maven, tarea de Gradle). `None` donde
+# el framework no tiene un camino usable con esa herramienta.
+#
+# `spring-boot-starter-web` cubre tambien `-webflux`, que lo contiene como
+# prefijo. Y no cubre `spring-boot-starter` a secas, que es lo que importa: esa
+# es una app de Spring sin servlet container (una tarea batch, un consumidor de
+# colas) y no abre ningun puerto.
+JVM_SERVERS = (
+    (("spring-boot-starter-web",), "spring-boot:run", "bootRun"),
+    (("quarkus-maven-plugin", "io.quarkus", "quarkus-gradle-plugin"), "quarkus:dev", "quarkusDev"),
+    (("micronaut-http-server",), "mn:run", "run"),
+    (("ktor-server",), None, "run"),
+)
+
+# `{:phoenix, "~> 1.7"}` y no un `"phoenix" in texto`. Una libreria de
+# componentes declara `phoenix_html` o `phoenix_live_view` sin ser una
+# aplicacion: no tiene endpoint, y `mix phx.server` ahi falla. La coma es lo
+# unico que separa un caso del otro.
+PHOENIX_DEP = re.compile(r"\{\s*:phoenix\s*,")
+
+# Que delata un proyecto de Bun. El lockfile ya estaba en LOCKFILES, pero ahi
+# sirve para elegir el gestor de paquetes de un proyecto Node; aca dice que el
+# runtime es Bun, que es otra pregunta.
+BUN_MARKERS = ("bunfig.toml", "bun.lockb", "bun.lock")
+
+# Lo que Bun ejecuta directo, en orden de preferencia.
+BUN_ENTRIES = (
+    "index.ts", "server.ts", "src/index.ts", "src/server.ts", "index.js", "server.js",
+)
+
+# Frameworks HTTP del ecosistema. Con cualquiera de estos el fuente no nombra a
+# `Bun.serve`, asi que la dependencia es la unica senal.
+BUN_SERVERS = ("hono", "elysia", "@elysiajs/", "@hono/", "bun-router")
+BUN_SERVES = "Bun.serve("
+
 
 def stack_for(root: Path) -> Stack:
     """Stack del proyecto: el archivo si existe, la deteccion si no.
@@ -139,7 +177,12 @@ def detect(root: Path) -> Stack | None:
 
     opcionales = _compose_profiles(root)
 
-    for detector in (_compose, _python, _go, _rust, _ruby, _php, _dotnet, _deno, _node):
+    # `_bun` va ultimo, y no es un detalle de estilo: el primero gana (ver abajo),
+    # y un proyecto con `package.json` mas `bun.lock` tiene que salir por `_node`,
+    # que es el unico que sabe leer los scripts. `_bun` atrapa lo que sobra.
+    for detector in (
+        _compose, _python, _go, _rust, _ruby, _elixir, _php, _dotnet, _jvm, _deno, _node, _bun
+    ):
         group = []
         for service in detector(root):
             if service.name in services:
@@ -631,6 +674,117 @@ def _ruby_at(path: Path, name: str) -> Service | None:
     return _served(name, "bundle exec rails server", path)
 
 
+@functools.lru_cache(maxsize=None)
+def _en_el_path(binario: str) -> bool:
+    """Si el binario existe, cacheado.
+
+    `detect` corre en el camino de sondeo de la interfaz: `_project_view` lo
+    llama una vez por proyecto y por request, y la interfaz sondea cada 2.5s
+    por pestana abierta. `shutil.which` barre el PATH entero, y en Windows lo
+    permuta ademas contra cada extension de PATHEXT.
+
+    Medido en Windows con 59 directorios en el PATH: 13.5ms por llamada, contra
+    0.06ms cacheada. Con seis proyectos JVM y dos pestanas abiertas eso son
+    162ms de barrido de disco en cada `/api/state`, cada 2.5 segundos, sobre el
+    mismo threadpool que atiende apagar y matar procesos. Es el problema que
+    `server._docker_is_down` ya documenta del otro lado: sin su cache,
+    `/api/health` pasaba de 2ms a 9s.
+
+    ponytail: sin vencimiento, a diferencia del cache de Docker. Ahi el valor
+    cambia solo, porque el daemon se cae y se levanta; un binario del PATH no.
+    Instalar gradle con `serve` abierto pide reiniciar para que lo vea, y ese
+    caso no vale un cache con TTL y candado. Los tests lo limpian con
+    `cache_clear`, que si no el resultado cruza de un test al siguiente.
+    """
+    return shutil.which(binario) is not None
+
+
+def _jvm(root: Path) -> list[Service]:
+    """Un servicio JVM en la raiz, o en una subcarpeta de backend.
+
+    Java y Kotlin no son dos detectores: el build es el mismo y `.kts` solo
+    cambia la extension del archivo de Gradle.
+    """
+    return _backend_at(root, _jvm_at)
+
+
+def _jvm_at(path: Path, name: str) -> Service | None:
+    if (path / "pom.xml").is_file():
+        build = _read(path / "pom.xml")
+        herramienta, wrapper = "mvn", ("./mvnw", "mvnw.cmd")
+        maven = True
+    else:
+        gradle = [path / f for f in ("build.gradle", "build.gradle.kts") if (path / f).is_file()]
+        if not gradle:
+            return None
+        # Los dos si estan los dos: un proyecto puede declarar los plugins en
+        # el Groovy y las dependencias en el Kotlin DSL.
+        build = "\n".join(_read(f) for f in gradle)
+        herramienta, wrapper = "gradle", ("./gradlew", "gradlew.bat")
+        maven = False
+
+    # Un `pom.xml` o un `build.gradle` a secas puede ser una libreria o una app
+    # de consola, y arrancarla dejaria al runner esperando un puerto que nunca
+    # abre. Hace falta el framework, igual que en Rust.
+    for marcas, goal, task in JVM_SERVERS:
+        tarea = goal if maven else task
+        if tarea is not None and any(marca in build for marca in marcas):
+            return _served(name, f"{_lanzador(path, herramienta, wrapper)} {tarea}", path)
+    return None
+
+
+def _lanzador(path: Path, herramienta: str, wrapper: tuple[str, str]) -> str:
+    """Con que se invoca el build: el binario del PATH, o el wrapper del repo.
+
+    El binario gana cuando esta, y no es una preferencia de estilo. El comando
+    detectado termina en el `stack.yaml` que `freeze` escribe, y ese archivo se
+    commitea y lo abre alguien en otro sistema operativo. `mvn spring-boot:run`
+    es igual en los tres; el wrapper son dos archivos distintos (`./mvnw` no
+    corre en cmd.exe, `mvnw.cmd` no corre en bash), asi que congelar el wrapper
+    rompe el stack compartido de un equipo mixto.
+
+    Sin binario y sin wrapper se devuelve igual el nombre pelado: es un
+    proyecto que existe, y fallar con "command not found" dice mas que no
+    detectarlo. Es distinto del caso de la libreria, que no falla sino que se
+    cuelga esperando un puerto.
+    """
+    if _en_el_path(herramienta):
+        return herramienta
+    elegido = wrapper[1] if os.name == "nt" else wrapper[0]
+    return elegido if (path / Path(elegido).name).is_file() else herramienta
+
+
+def _elixir(root: Path) -> list[Service]:
+    """Un Phoenix en la raiz, o en una subcarpeta de backend."""
+    return _backend_at(root, _elixir_at)
+
+
+def _elixir_at(path: Path, name: str) -> Service | None:
+    # `mix.exs` dice que hay un proyecto Elixir y nada mas: puede ser una
+    # libreria o una app OTP sin puerto, y arrancarla dejaria al runner
+    # esperando un socket que nunca abre. Hace falta la segunda senal.
+    if not (path / "mix.exs").is_file():
+        return None
+
+    # La dependencia, o la carpeta que Phoenix genera siempre. Dos senales
+    # porque una sola no alcanza: en un umbrella las dependencias viven en el
+    # mix.exs de la raiz y el hijo se queda sin la primera.
+    if PHOENIX_DEP.search(_read(path / "mix.exs")):
+        return _served(name, "mix phx.server", path)
+
+    # `iterdir` no se traga los errores como `glob`: sin `lib`, sin permisos o
+    # con la unidad desconectada, levanta. Y esto corre en el camino de sondeo
+    # de la interfaz, asi que una excepcion aca es un 500 cada 2.5 segundos.
+    # Es el mismo `try` que ya usa `_subprojects`.
+    try:
+        hijos = list((path / "lib").iterdir())
+    except OSError:
+        return None
+    if any(hijo.is_dir() and hijo.name.endswith("_web") for hijo in hijos):
+        return _served(name, "mix phx.server", path)
+    return None
+
+
 def _php(root: Path) -> list[Service]:
     """Un Laravel en la raiz, o en una subcarpeta de backend."""
     return _backend_at(root, _php_at)
@@ -682,16 +836,27 @@ def _backend_at(root: Path, detector) -> list[Service]:
     return found
 
 
-def _deno(root: Path) -> list[Service]:
-    at_root = _deno_at(root, "web")
+def _web_or_backend_at(root: Path, detector) -> list[Service]:
+    """La raiz si es el proyecto, y si no las subcarpetas de front o de back.
+
+    El analogo de `_backend_at` para los runtimes que sirven las dos cosas.
+    Deno y Bun corren igual un frontend que una API, asi que mirar solo
+    BACKEND_DIRS dejaria afuera un `frontend/` servido con cualquiera de los
+    dos. Se extrajo cuando aparecio el segundo uso, no antes.
+    """
+    at_root = detector(root, "web")
     if at_root is not None:
         return [at_root]
     found = []
     for path in _subprojects(root, (*NODE_DIRS, *BACKEND_DIRS)):
-        service = _deno_at(path, path.name)
+        service = detector(path, path.name)
         if service is not None:
             found.append(service)
     return found
+
+
+def _deno(root: Path) -> list[Service]:
+    return _web_or_backend_at(root, _deno_at)
 
 
 def _deno_at(path: Path, name: str) -> Service | None:
@@ -731,6 +896,50 @@ def _node(root: Path) -> list[Service]:
         if service is not None:
             found.append(service)
     return found
+
+
+def _bun(root: Path) -> list[Service]:
+    """Bun como runtime, lo que `_node` deja pasar.
+
+    Va **despues** de `_node` en la tupla de `detect`, y esa posicion es la
+    mitad de la logica. Un proyecto con `package.json` y `bun.lock` ya salia
+    bien de antes: `_package` lee el script y `_manager` devuelve `bun` por el
+    lockfile. Adelantar `_bun` le robaria el nombre del servicio y lo arrancaria
+    con el archivo en vez del script.
+
+    Lo que queda para aca es el proyecto sin `package.json`, sin `scripts`, o
+    con scripts que no sirven nada: ahi Bun corre el archivo directo.
+    """
+    return _web_or_backend_at(root, _bun_at)
+
+
+def _bun_at(path: Path, name: str) -> Service | None:
+    if not any((path / marca).is_file() for marca in BUN_MARKERS):
+        return None
+
+    try:
+        raw = json.loads(_read(path / "package.json") or "{}")
+    except json.JSONDecodeError:
+        raw = {}
+    declaradas = {
+        *(raw.get("dependencies") or {}),
+        *(raw.get("devDependencies") or {}),
+    } if isinstance(raw, dict) else set()
+    marco = any(dep.startswith(server) for dep in declaradas for server in BUN_SERVERS)
+
+    for candidato in BUN_ENTRIES:
+        fuente = path / candidato
+        if not fuente.is_file():
+            continue
+        # `Bun.serve` es la API nativa y no figura en ninguna dependencia, asi
+        # que la llamada en el fuente es su unica senal. Es el mismo par que
+        # `_go_at` con `net/http`: el framework en el manifiesto, o la llamada
+        # en el codigo. Sin ninguna de las dos es una CLI, y arrancarla dejaria
+        # al runner esperando un puerto que nunca abre.
+        if not marco and BUN_SERVES not in _read(fuente):
+            continue
+        return _served(name, f"bun run {candidato}", path)
+    return None
 
 
 def _subprojects(root: Path, names: tuple[str, ...]):

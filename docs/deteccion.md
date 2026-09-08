@@ -48,6 +48,31 @@ existen en aplicaciones que sirven, y un `Gemfile` o un `composer.json` sueltos
 no alcanzan. Rails arranca con `bundle exec rails server` y no con el binstub
 `bin/rails`, que es un script con shebang y en Windows no lo ejecuta nadie.
 
+En la JVM da lo mismo Java que Kotlin: el build es el mismo y `build.gradle.kts`
+sólo cambia la extensión. Hace falta un framework declarado, porque un `pom.xml`
+o un `build.gradle` sueltos pueden ser una librería o una app de consola: Spring
+Boot (`spring-boot-starter-web`, que también cubre `-webflux`), Quarkus,
+Micronaut o Ktor. `spring-boot-starter` a secas no cuenta, y esa es la
+diferencia que importa: es una app de Spring sin servlet container, una tarea
+batch o un consumidor de colas, y no abre ningún puerto.
+
+El comando prefiere `mvn` o `gradle` del PATH, y sólo cae al wrapper del repo
+cuando no están. No es una preferencia de estilo. El comando detectado termina
+en el `stack.yaml` que escribe `portmaster freeze`, ese archivo se commitea, y
+lo abre alguien en otro sistema operativo: `mvn spring-boot:run` es igual en los
+tres, mientras que `./mvnw` no corre en `cmd.exe` y `mvnw.cmd` no corre en bash.
+Un repo que commiteó sólo el wrapper de POSIX, visto desde Windows, cae al
+binario pelado por la misma razón. Sin binario y sin wrapper se emite igual el
+nombre a secas: fallar con "command not found" dice más que no detectar nada.
+
+En Elixir hace falta Phoenix, y la señal es `{:phoenix, ...}` en el `mix.exs`,
+con la coma. No alcanza con que diga "phoenix" en algún lado: una librería de
+componentes declara `phoenix_html` o `phoenix_live_view` sin ser una aplicación,
+no tiene endpoint y `mix phx.server` ahí falla. La otra señal aceptada es
+`lib/<algo>_web/`, que Phoenix genera siempre y que sirve para el proyecto de un
+umbrella, donde las dependencias viven en el `mix.exs` de la raíz. Un `mix.exs`
+solo es una librería o una app OTP sin puerto, y no se detecta.
+
 En .NET la señal está en el atributo `Sdk` del `.csproj` y en ningún otro lado:
 una librería y una app de consola usan `Microsoft.NET.Sdk` a secas, y ni el
 nombre del proyecto ni sus paquetes distinguen una cosa de la otra.
@@ -56,6 +81,19 @@ En las subcarpetas hace falta además una dependencia que declare un servidor de
 desarrollo (vite, next, nest, astro, nodemon y compañía). Un workspace tiene
 tantas librerías como apps, y una librería con `dev: tsc --watch` entraría como
 servicio y se quedaría esperando un puerto que nunca abre.
+
+Con Bun hay dos caminos distintos y conviene no confundirlos. Un proyecto con
+`package.json` y un script (`dev`, `serve`, `start`) sale por el camino de Node,
+y el `bun.lock` sólo decide el gestor: el comando queda `bun run dev`. El
+detector propio de Bun es para lo otro, el proyecto sin `package.json`, sin
+`scripts`, o con scripts que no sirven nada, donde Bun ejecuta el archivo
+directo: `bun run index.ts`.
+
+Hace falta una marca de Bun (`bunfig.toml`, `bun.lock` o `bun.lockb`) y además
+la señal de que eso sirve por un puerto, que es la llamada a `Bun.serve(` en el
+fuente o un framework declarado (hono, elysia). Es el mismo par que Go: `Bun.serve`
+es API nativa y no figura en ninguna dependencia, igual que `net/http`. Sin
+ninguna de las dos señales es una CLI y no se detecta.
 
 Nada de esto es recursivo: un scan profundo termina dentro de `node_modules`.
 

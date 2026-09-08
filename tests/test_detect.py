@@ -3,6 +3,7 @@ proceso real que escucha. Lo mismo que el resto de la suite: nada de mocks."""
 
 import io
 import json
+import os
 import sys
 import textwrap
 
@@ -941,3 +942,333 @@ def test_deno_jsonc_con_comentarios_en_tasks(tmp_path):
 
 
 
+
+
+# bun ----------------------------------------------------------------------
+
+
+def test_bun_no_se_come_un_proyecto_node(tmp_path):
+    """El orden de la tupla de detectores, que es lo mas fragil de este cambio.
+
+    Un proyecto con `package.json` y `bun.lock` ya funcionaba antes de que
+    existiera `_bun`: sale por `_node`, que es el unico que sabe leer los
+    scripts, y `_manager` devuelve `bun` por el lockfile. `_bun_at` solo tiene
+    que atrapar lo que `_node` deja pasar.
+
+    En `detect()` el primero gana, asi que esto depende de una linea: `_bun`
+    va despues de `_node` en la tupla. Es una dependencia entre dos posiciones
+    de una lista, invisible para cualquier otro test, y si alguien las
+    reordena este proyecto pasa a arrancar con el comando equivocado sin que
+    nada se ponga rojo.
+    """
+    write(tmp_path, "package.json", json.dumps({
+        "scripts": {"dev": "vite"},
+        "dependencies": {"vite": "^5.0.0"},
+    }))
+    write(tmp_path, "bun.lock", "{}")
+    write(tmp_path, "index.ts", "Bun.serve({ fetch() {} })")
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["web"].command == "bun run dev"
+
+
+def test_bun_como_runtime_sin_scripts(tmp_path):
+    """Lo que `_node` deja pasar: no hay script que correr.
+
+    `_package` pide un `scripts` con `dev`, `start:dev`, `serve` o `start`, y
+    sin eso devuelve None. Un proyecto Bun tipico no tiene ninguno: se corre el
+    archivo directo.
+    """
+    write(tmp_path, "bunfig.toml", "[install]\n")
+    write(tmp_path, "index.ts", 'Bun.serve({ port: 3000, fetch: () => new Response("ok") })')
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["web"].command == "bun run index.ts"
+    assert stack.services["web"].ready == "listen"
+
+
+def test_bun_con_framework_en_las_dependencias(tmp_path):
+    """`Bun.serve` es la API nativa y no aparece en ninguna dependencia.
+
+    Con Hono o Elysia el fuente no la nombra, asi que la dependencia es la
+    unica senal. Es el mismo par que usa `_go_at`: el framework en el manifiesto
+    o la llamada en el codigo.
+    """
+    write(tmp_path, "bun.lockb", "")
+    write(tmp_path, "package.json", json.dumps({"dependencies": {"hono": "^4.0.0"}}))
+    write(tmp_path, "src/index.ts", "import { Hono } from 'hono'\nexport default new Hono()")
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["web"].command == "bun run src/index.ts"
+
+
+def test_bun_no_detecta_una_cli(tmp_path):
+    """Sin framework y sin `Bun.serve`, es una herramienta de linea de comandos.
+
+    Es la misma decision que `_go_at` con las CLIs y `_rust_at` con las
+    librerias: arrancarla dejaria al runner esperando un puerto que nunca abre
+    hasta que se acabe el timeout. No detectar es mejor.
+
+    Este es el test que atrapa el bug caro. Un detector que devuelve algo
+    siempre pasa los otros tres.
+    """
+    write(tmp_path, "bunfig.toml", "[install]\n")
+    write(tmp_path, "index.ts", 'console.log("hola desde una cli")')
+
+    assert detect.detect(tmp_path) is None
+
+
+def test_bun_sin_marca_de_bun_no_es_de_bun(tmp_path):
+    """Un `index.ts` suelto no alcanza: podria ser de Deno, de Node o de nadie."""
+    write(tmp_path, "index.ts", 'console.log("hola")')
+
+    assert detect.detect(tmp_path) is None
+
+
+def test_bun_en_una_subcarpeta_de_backend(tmp_path):
+    """Bun sirve un frontend o una API, asi que se busca en los dos lados.
+
+    Por eso no puede usar `_backend_at` como Go o PHP: mirar solo BACKEND_DIRS
+    dejaria afuera un `frontend/` servido con Bun.
+    """
+    write(tmp_path, "api/bunfig.toml", "[install]\n")
+    write(tmp_path, "api/server.ts", "Bun.serve({ fetch() {} })")
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["api"].command == "bun run server.ts"
+
+
+# elixir -------------------------------------------------------------------
+
+
+def test_elixir_phoenix_por_la_dependencia(tmp_path):
+    write(tmp_path, "mix.exs", """
+        defmodule MiApp.MixProject do
+          use Mix.Project
+          defp deps do
+            [
+              {:phoenix, "~> 1.7.10"},
+              {:ecto_sql, "~> 3.10"}
+            ]
+          end
+        end
+    """)
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["api"].command == "mix phx.server"
+    assert stack.services["api"].ready == "listen"
+
+
+def test_elixir_phoenix_por_la_carpeta_web(tmp_path):
+    """`lib/<algo>_web/` la genera Phoenix siempre.
+
+    Es la senal estructural, el analogo de `config/application.rb` en Rails: si
+    esta, hay una aplicacion que sirve. Sirve para el proyecto que trae las
+    dependencias de otro archivo o de un umbrella.
+    """
+    write(tmp_path, "mix.exs", "defmodule MiApp.MixProject do\nend\n")
+    write(tmp_path, "lib/mi_app_web/router.ex", "defmodule MiAppWeb.Router do\nend\n")
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["api"].command == "mix phx.server"
+
+
+def test_elixir_una_libreria_no_se_detecta(tmp_path):
+    """Un `mix.exs` a secas es una libreria o una app OTP sin puerto.
+
+    Arrancarla dejaria al runner esperando un socket que nunca abre hasta que
+    se acabe el timeout. Es la misma decision que `_go_at` con las CLIs.
+
+    Este es el test que atrapa el bug caro: un detector que devuelve algo
+    siempre pasa los otros.
+    """
+    write(tmp_path, "mix.exs", """
+        defmodule MiLibreria.MixProject do
+          use Mix.Project
+          defp deps do
+            [{:jason, "~> 1.4"}, {:telemetry, "~> 1.2"}]
+          end
+        end
+    """)
+
+    assert detect.detect(tmp_path) is None
+
+
+def test_elixir_una_libreria_de_componentes_phoenix_no_se_detecta(tmp_path):
+    """`{:phoenix_html, ...}` no es `{:phoenix, ...}`, y la diferencia importa.
+
+    Una libreria de componentes declara `phoenix_html` o `phoenix_live_view`
+    sin ser una aplicacion: no tiene endpoint, y `mix phx.server` ahi falla.
+    Un `"phoenix" in texto` las tomaria a todas, que es la forma facil y
+    equivocada de escribir este detector.
+    """
+    write(tmp_path, "mix.exs", """
+        defmodule MisComponentes.MixProject do
+          use Mix.Project
+          defp deps do
+            [{:phoenix_html, "~> 4.0"}, {:phoenix_live_view, "~> 0.20"}]
+          end
+        end
+    """)
+
+    assert detect.detect(tmp_path) is None
+
+
+def test_elixir_en_una_subcarpeta_de_backend(tmp_path):
+    write(tmp_path, "backend/mix.exs", '[{:phoenix, "~> 1.7"}]')
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["backend"].command == "mix phx.server"
+
+
+def test_elixir_sin_mix_no_es_elixir(tmp_path):
+    write(tmp_path, "lib/mi_app_web/router.ex", "defmodule MiAppWeb.Router do\nend\n")
+
+    assert detect.detect(tmp_path) is None
+
+
+# jvm ----------------------------------------------------------------------
+
+POM = """
+<project>
+  <dependencies>{deps}</dependencies>
+  <build><plugins>{plugins}</plugins></build>
+</project>
+"""
+
+SPRING_WEB = "<dependency><artifactId>spring-boot-starter-web</artifactId></dependency>"
+
+
+@pytest.fixture(autouse=True)
+def _sin_cache_de_path():
+    """`_en_el_path` esta cacheado, y el cache no puede cruzar tests.
+
+    Un test que parchea `shutil.which` deja la respuesta guardada para el
+    siguiente, y el sintoma es el peor de todos: pasa solo y falla acompanado,
+    o al reves. `CLAUDE.md` lo nombra como estado compartido entre tests y dice
+    que nunca es ruido del runner.
+    """
+    detect._en_el_path.cache_clear()
+    yield
+    detect._en_el_path.cache_clear()
+
+
+def sin_binarios(monkeypatch, *disponibles):
+    """El PATH visto por el detector: solo lo que se nombre existe."""
+    monkeypatch.setattr(
+        detect.shutil, "which", lambda b: f"/usr/bin/{b}" if b in disponibles else None
+    )
+
+
+def test_jvm_spring_maven_con_mvn_en_el_path(tmp_path, monkeypatch):
+    """El caso que hace portable el stack.yaml congelado.
+
+    `mvn spring-boot:run` es igual en Linux, macOS y Windows. El wrapper no:
+    `./mvnw` no corre en cmd.exe y `mvnw.cmd` no corre en bash, asi que un
+    stack.yaml congelado con el wrapper se rompe al compartirlo con un equipo
+    mixto. Por eso el binario del PATH gana cuando esta.
+    """
+    write(tmp_path, "pom.xml", POM.format(deps=SPRING_WEB, plugins=""))
+    write(tmp_path, "mvnw", "#!/bin/sh")
+    sin_binarios(monkeypatch, "mvn")
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["api"].command == "mvn spring-boot:run"
+    assert stack.services["api"].ready == "listen"
+
+
+def test_jvm_spring_maven_cae_al_wrapper_de_la_plataforma(tmp_path, monkeypatch):
+    """Sin `mvn` en el PATH queda el wrapper, y el wrapper es por plataforma."""
+    write(tmp_path, "pom.xml", POM.format(deps=SPRING_WEB, plugins=""))
+    write(tmp_path, "mvnw", "#!/bin/sh")
+    write(tmp_path, "mvnw.cmd", "@echo off")
+    sin_binarios(monkeypatch)
+
+    esperado = "mvnw.cmd" if os.name == "nt" else "./mvnw"
+    assert detect.detect(tmp_path).services["api"].command == f"{esperado} spring-boot:run"
+
+
+def test_jvm_spring_gradle_usa_bootrun(tmp_path, monkeypatch):
+    write(tmp_path, "build.gradle", "dependencies { implementation 'spring-boot-starter-web' }")
+    sin_binarios(monkeypatch, "gradle")
+
+    assert detect.detect(tmp_path).services["api"].command == "gradle bootRun"
+
+
+def test_jvm_ktor_en_kotlin_dsl(tmp_path, monkeypatch):
+    """`build.gradle.kts` es Gradle igual: Kotlin no es un detector aparte."""
+    write(tmp_path, "build.gradle.kts", 'implementation("io.ktor:ktor-server-netty:2.3.0")')
+    sin_binarios(monkeypatch, "gradle")
+
+    assert detect.detect(tmp_path).services["api"].command == "gradle run"
+
+
+def test_jvm_quarkus_maven(tmp_path, monkeypatch):
+    write(tmp_path, "pom.xml", POM.format(
+        deps="", plugins="<plugin><artifactId>quarkus-maven-plugin</artifactId></plugin>"
+    ))
+    sin_binarios(monkeypatch, "mvn")
+
+    assert detect.detect(tmp_path).services["api"].command == "mvn quarkus:dev"
+
+
+def test_jvm_una_libreria_no_se_detecta(tmp_path, monkeypatch):
+    """Un `pom.xml` sin framework web es una libreria o una app de consola.
+
+    Este es el test que atrapa el bug caro: un detector que devuelve algo
+    siempre pasa todos los demas.
+    """
+    write(tmp_path, "pom.xml", POM.format(
+        deps="<dependency><artifactId>guava</artifactId></dependency>", plugins=""
+    ))
+    sin_binarios(monkeypatch, "mvn")
+
+    assert detect.detect(tmp_path) is None
+
+
+def test_jvm_spring_sin_web_no_sirve_por_un_puerto(tmp_path, monkeypatch):
+    """`spring-boot-starter` a secas no levanta un servidor.
+
+    Es una app de Spring sin servlet container: una tarea batch, un consumidor
+    de colas, un CLI. `bootRun` corre y termina, o se queda sin abrir ningun
+    puerto. Es el mismo filo que `phoenix_html` contra `phoenix` en Elixir, y
+    la unica forma de tomar las dos es buscar la palabra suelta.
+    """
+    write(tmp_path, "pom.xml", POM.format(
+        deps="<dependency><artifactId>spring-boot-starter</artifactId></dependency>", plugins=""
+    ))
+    sin_binarios(monkeypatch, "mvn")
+
+    assert detect.detect(tmp_path) is None
+
+
+def test_jvm_en_una_subcarpeta_de_backend(tmp_path, monkeypatch):
+    write(tmp_path, "backend/pom.xml", POM.format(deps=SPRING_WEB, plugins=""))
+    sin_binarios(monkeypatch, "mvn")
+
+    assert detect.detect(tmp_path).services["backend"].command == "mvn spring-boot:run"
+
+
+def test_jvm_el_cache_del_path_no_se_pega_entre_proyectos(tmp_path, monkeypatch):
+    """El cache es por binario, no por proyecto ni por PATH.
+
+    Es la contracara del lru_cache: acelera el sondeo, y a cambio no puede
+    distinguir dos PATH distintos dentro del mismo proceso. Se afirma para que
+    quede escrito que es la decision y no un descuido, y para que el dia que
+    alguien necesite lo contrario encuentre el test en vez del sintoma.
+    """
+    write(tmp_path, "pom.xml", POM.format(deps=SPRING_WEB, plugins=""))
+    # Los dos wrappers: con solo el de POSIX, en Windows no hay wrapper usable
+    # y el detector cae al binario pelado, que es correcto pero tapa lo que
+    # este test quiere mirar.
+    write(tmp_path, "mvnw", "#!/bin/sh")
+    write(tmp_path, "mvnw.cmd", "@echo off")
+    sin_binarios(monkeypatch, "mvn")
+    assert detect.detect(tmp_path).services["api"].command == "mvn spring-boot:run"
+
+    sin_binarios(monkeypatch)  # ahora mvn "no esta", pero ya se pregunto
+    assert detect.detect(tmp_path).services["api"].command == "mvn spring-boot:run"
+
+    detect._en_el_path.cache_clear()
+    esperado = "mvnw.cmd" if os.name == "nt" else "./mvnw"
+    assert detect.detect(tmp_path).services["api"].command == f"{esperado} spring-boot:run"

@@ -441,6 +441,65 @@ def _docker_is_down() -> bool:
         caido = doctor._docker().level == "fail"
         _docker_seen = (time.monotonic(), caido)
         return caido
+# Cuanto vale una deteccion antes de repetirla. Entre los dos TTL que ya hay, y
+# a proposito: `registry.PORTS_TTL` son 30s porque alimenta un aviso de puertos
+# compartidos, donde llegar tarde no molesta. Esto alimenta la fila principal
+# (el estado y la lista de servicios), asi que se parece mas al `DOCKER_TTL`.
+STACK_TTL = 10.0
+_stack_seen: dict[str, tuple[float, config.Stack]] = {}
+_stack_lock = threading.Lock()
+
+
+def _stack_para_la_vista(path: Path) -> config.Stack:
+    """El stack del proyecto para la vista de estado, con cache.
+
+    `detect.stack_for` relee y reparsea `pom.xml`, `package.json`,
+    `compose.yaml` y todo lo demas en cada llamada, y `_project_view` corre una
+    vez por proyecto y por request con la interfaz sondeando cada 2.5s por
+    pestana. Medido sobre un proyecto poliglota: 6.7ms por llamada, o sea 242ms
+    de lectura de disco en cada `/api/state` con doce proyectos y tres
+    pestanas, releyendo archivos que casi nunca cambian.
+
+    Cierra un hueco en vez de inventar un patron: los otros dos caminos que
+    resuelven stacks en el mismo request ya estaban cacheados hace rato
+    (`registry.declared_ports` y `registry.any_uses_docker`, las dos con
+    `max_age=PORTS_TTL`). El de `_project_view` era el unico que quedaba
+    releyendo en cada sondeo.
+
+    **Solo para la vista.** `up`, `switch_profile` y `down` siguen llamando a
+    `detect.stack_for` directo, y eso no es una omision: arrancar un stack con
+    una version cacheada correria los comandos viejos despues de que el usuario
+    edito su `stack.yaml`, que es exactamente lo que nadie espera. La vista
+    puede estar diez segundos vieja; el arranque no puede estarlo nunca.
+
+    `Stack` y `Service` son `frozen=True`, asi que compartir la instancia entre
+    requests es seguro.
+    """
+    ahora = time.monotonic()
+    clave = str(path)
+    with _stack_lock:
+        visto = _stack_seen.get(clave)
+        if visto is not None and ahora - visto[0] < STACK_TTL:
+            return visto[1]
+    # Afuera del lock: la deteccion toca disco, y con doce proyectos adentro
+    # del lock la vista se serializa entera contra el proyecto mas lento.
+    stack = detect.stack_for(path)
+    with _stack_lock:
+        _stack_seen[clave] = (time.monotonic(), stack)
+    return stack
+
+
+def _olvidar_stack(path: Path) -> None:
+    """Saca el proyecto del cache de la vista.
+
+    Lo llama `freeze`, que es lo unico de la interfaz que cambia los archivos
+    del proyecto: sin esto el usuario apretaba "Congelar" y la fila no se
+    enteraba hasta diez segundos despues.
+    """
+    with _stack_lock:
+        _stack_seen.pop(str(path), None)
+
+
 def _sessions_file() -> Path:
     """Resuelto al usarlo y no al importar.
 
@@ -835,7 +894,12 @@ def create_app(token: str | None = None) -> FastAPI:
 
         p_str = str(resolved)
         try:
-            subprocess.Popen([found_editor, p_str], shell=(sys.platform == "win32"))
+            # Sin shell=True: en Windows metia la ruta por `cmd.exe /c`, y ahi
+            # `list2cmdline` sola no alcanza (ver `scripts._entrecomillar`).
+            # `shutil.which` devuelve el .cmd completo y CreateProcess lo corre
+            # igual, asi que la capa de shell no aportaba nada y solo abria
+            # superficie a los metacaracteres de cmd en el nombre de la carpeta.
+            subprocess.Popen([found_editor, p_str])
             return {"ok": True, "editor": editor_display, "path": p_str}
         except Exception as exc:
             log.warning("fallo al abrir editor %s en %s: %s", found_editor, p_str, exc)
@@ -995,6 +1059,10 @@ def create_app(token: str | None = None) -> FastAPI:
             # del disco es el que manda, no el pedido.
             raise HTTPException(409, str(exc))
 
+        # El stack.yaml recien escrito es lo que la vista tiene que leer ahora,
+        # no dentro de diez segundos: sin esto se apretaba "Congelar" y la fila
+        # seguia diciendo "detectado" hasta que venciera el cache.
+        _olvidar_stack(path)
         log.info("stack congelado en %s", target)
         return {"ok": True, "path": str(target)}
 
@@ -1432,7 +1500,7 @@ def create_app(token: str | None = None) -> FastAPI:
         "/api/share",
         dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)],
     )
-    def share_port(port: int, provider: str | None = None) -> dict:
+    def share_port(request: Request, port: int, provider: str | None = None) -> dict:
         """Inicia un tunel efimero para compartir un puerto."""
         # Antes del candado y de la reserva: un puerto que no existe no puede
         # dejar una entrada a medias en `_active_tunnels`. `kill` valida gratis
@@ -1443,6 +1511,24 @@ def create_app(token: str | None = None) -> FastAPI:
         except ValueError as exc:
             log.info("puerto rechazado: %s", exc)
             raise HTTPException(400, str(exc))
+
+        # PortMaster no se publica a si mismo. Detras de este puerto esta la API
+        # que arranca stack.yaml, o sea ejecucion de comandos: exponerla deja al
+        # token como unica puerta contra internet entero. La validacion de Host
+        # del middleware ya rechaza al cliente de tuneles, asi que hoy el efecto
+        # es una URL publica que solo sabe contestar 400; el usuario cree que
+        # compartio algo y comparte la consola. Se corta aca y se dice por que.
+        #
+        # El puerto sale del scope ASGI, que uvicorn llena con el socket que
+        # bindeo de verdad. `request.url.port` sale del header Host, y un header
+        # lo escribe quien llama: serviria para esquivar justo esta guarda.
+        propio = (request.scope.get("server") or (None, None))[1]
+        if propio is not None and port == propio:
+            raise HTTPException(
+                400,
+                f"el puerto {port} es el de PortMaster. Publicarlo expone la API "
+                "que ejecuta los comandos de tu stack.yaml, no tu proyecto.",
+            )
 
         with _tunnels_lock:
             # Un tunel que se murio solo no puede bloquear el puerto hasta que
@@ -1533,7 +1619,7 @@ def _project_view(path: Path) -> dict:
     base = {"id": pid, "path": str(path), "name": path.name}
 
     try:
-        stack = detect.stack_for(path)
+        stack = _stack_para_la_vista(path)
     except config.ConfigError as exc:
         # Con el contrato completo: este `return` se salteaba `detected`,
         # `needs_docker` y `docker_down`, y un proyecto con la config rota
