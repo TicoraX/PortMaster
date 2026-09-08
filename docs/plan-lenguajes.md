@@ -1,5 +1,18 @@
 # Plan: JVM, Elixir y Bun en la detección
 
+> **Ejecutado y cerrado el 7 de septiembre de 2026.** Entraron los cuatro PRs en
+> el orden previsto: `browse.markers`, Bun, Elixir y JVM. 461 tests en verde.
+> Este documento queda como registro de cómo se decidió, no como plan pendiente.
+> Lo que quedó afuera está al final, en "Lo que queda anotado y no entra".
+>
+> Dos cosas salieron distinto de lo escrito acá y valen para la próxima tanda.
+> El refactor de `browse.markers` no era neutro: comparar nombres exactos habría
+> borrado el badge en Windows y macOS, donde el sistema de archivos ya resolvía
+> `Cargo.toml` contra un `cargo.toml` en disco. Y el hallazgo del `shutil.which`
+> estaba **subestimado**: medido en Windows con 59 directorios en el PATH son
+> 13.5ms por llamada, o sea ~162ms de barrido de disco por sondeo con seis
+> proyectos y dos pestañas, no el costo menor que el plan sugería.
+
 Fecha: 7 de septiembre de 2026. Rama `main`, 432 tests en verde.
 
 PortMaster detecta hoy compose, Python, Node, Deno, Go, Rust, Ruby, PHP y .NET.

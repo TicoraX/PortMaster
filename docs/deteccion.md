@@ -48,6 +48,23 @@ existen en aplicaciones que sirven, y un `Gemfile` o un `composer.json` sueltos
 no alcanzan. Rails arranca con `bundle exec rails server` y no con el binstub
 `bin/rails`, que es un script con shebang y en Windows no lo ejecuta nadie.
 
+En la JVM da lo mismo Java que Kotlin: el build es el mismo y `build.gradle.kts`
+sólo cambia la extensión. Hace falta un framework declarado, porque un `pom.xml`
+o un `build.gradle` sueltos pueden ser una librería o una app de consola: Spring
+Boot (`spring-boot-starter-web`, que también cubre `-webflux`), Quarkus,
+Micronaut o Ktor. `spring-boot-starter` a secas no cuenta, y esa es la
+diferencia que importa: es una app de Spring sin servlet container, una tarea
+batch o un consumidor de colas, y no abre ningún puerto.
+
+El comando prefiere `mvn` o `gradle` del PATH, y sólo cae al wrapper del repo
+cuando no están. No es una preferencia de estilo. El comando detectado termina
+en el `stack.yaml` que escribe `portmaster freeze`, ese archivo se commitea, y
+lo abre alguien en otro sistema operativo: `mvn spring-boot:run` es igual en los
+tres, mientras que `./mvnw` no corre en `cmd.exe` y `mvnw.cmd` no corre en bash.
+Un repo que commiteó sólo el wrapper de POSIX, visto desde Windows, cae al
+binario pelado por la misma razón. Sin binario y sin wrapper se emite igual el
+nombre a secas: fallar con "command not found" dice más que no detectar nada.
+
 En Elixir hace falta Phoenix, y la señal es `{:phoenix, ...}` en el `mix.exs`,
 con la coma. No alcanza con que diga "phoenix" en algún lado: una librería de
 componentes declara `phoenix_html` o `phoenix_live_view` sin ser una aplicación,

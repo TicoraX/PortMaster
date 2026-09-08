@@ -8,6 +8,21 @@ esquema de `stack.yaml` y las rutas de la API local.
 
 ### Agregado
 
+- **Java y Kotlin sobre Maven o Gradle.** Spring Boot, Quarkus, Micronaut y
+  Ktor, con `build.gradle.kts` incluido: el build es el mismo y Kotlin no es un
+  detector aparte. Hace falta el framework, porque un `pom.xml` o un
+  `build.gradle` sueltos pueden ser una librería o una app de consola.
+  `spring-boot-starter` a secas no cuenta: es una app de Spring sin servlet
+  container y no abre ningún puerto.
+- **El comando JVM prefiere el binario del PATH antes que el wrapper del repo.**
+  `mvn spring-boot:run` es igual en las tres plataformas; el wrapper son dos
+  archivos distintos (`./mvnw` no corre en `cmd.exe`, `mvnw.cmd` no corre en
+  bash), así que congelar el wrapper rompía el `stack.yaml` compartido de un
+  equipo mixto. La consulta al PATH va cacheada: medido en Windows con 59
+  directorios, `shutil.which` cuesta 13.5ms por llamada, y `detect` corre en el
+  sondeo de la interfaz cada 2.5s por proyecto y por pestaña.
+- `pom.xml`, `build.gradle` y `build.gradle.kts` entran como marcadores del
+  explorador de carpetas.
 - **Elixir con Phoenix.** Un proyecto con `{:phoenix, ...}` en el `mix.exs`, o
   con la carpeta `lib/<algo>_web/` que Phoenix genera siempre, arranca con
   `mix phx.server`. La señal es la dependencia con su coma y no la palabra

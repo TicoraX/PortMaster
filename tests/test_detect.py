@@ -3,6 +3,7 @@ proceso real que escucha. Lo mismo que el resto de la suite: nada de mocks."""
 
 import io
 import json
+import os
 import sys
 import textwrap
 
@@ -1124,3 +1125,150 @@ def test_elixir_sin_mix_no_es_elixir(tmp_path):
     write(tmp_path, "lib/mi_app_web/router.ex", "defmodule MiAppWeb.Router do\nend\n")
 
     assert detect.detect(tmp_path) is None
+
+
+# jvm ----------------------------------------------------------------------
+
+POM = """
+<project>
+  <dependencies>{deps}</dependencies>
+  <build><plugins>{plugins}</plugins></build>
+</project>
+"""
+
+SPRING_WEB = "<dependency><artifactId>spring-boot-starter-web</artifactId></dependency>"
+
+
+@pytest.fixture(autouse=True)
+def _sin_cache_de_path():
+    """`_en_el_path` esta cacheado, y el cache no puede cruzar tests.
+
+    Un test que parchea `shutil.which` deja la respuesta guardada para el
+    siguiente, y el sintoma es el peor de todos: pasa solo y falla acompanado,
+    o al reves. `CLAUDE.md` lo nombra como estado compartido entre tests y dice
+    que nunca es ruido del runner.
+    """
+    detect._en_el_path.cache_clear()
+    yield
+    detect._en_el_path.cache_clear()
+
+
+def sin_binarios(monkeypatch, *disponibles):
+    """El PATH visto por el detector: solo lo que se nombre existe."""
+    monkeypatch.setattr(
+        detect.shutil, "which", lambda b: f"/usr/bin/{b}" if b in disponibles else None
+    )
+
+
+def test_jvm_spring_maven_con_mvn_en_el_path(tmp_path, monkeypatch):
+    """El caso que hace portable el stack.yaml congelado.
+
+    `mvn spring-boot:run` es igual en Linux, macOS y Windows. El wrapper no:
+    `./mvnw` no corre en cmd.exe y `mvnw.cmd` no corre en bash, asi que un
+    stack.yaml congelado con el wrapper se rompe al compartirlo con un equipo
+    mixto. Por eso el binario del PATH gana cuando esta.
+    """
+    write(tmp_path, "pom.xml", POM.format(deps=SPRING_WEB, plugins=""))
+    write(tmp_path, "mvnw", "#!/bin/sh")
+    sin_binarios(monkeypatch, "mvn")
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["api"].command == "mvn spring-boot:run"
+    assert stack.services["api"].ready == "listen"
+
+
+def test_jvm_spring_maven_cae_al_wrapper_de_la_plataforma(tmp_path, monkeypatch):
+    """Sin `mvn` en el PATH queda el wrapper, y el wrapper es por plataforma."""
+    write(tmp_path, "pom.xml", POM.format(deps=SPRING_WEB, plugins=""))
+    write(tmp_path, "mvnw", "#!/bin/sh")
+    write(tmp_path, "mvnw.cmd", "@echo off")
+    sin_binarios(monkeypatch)
+
+    esperado = "mvnw.cmd" if os.name == "nt" else "./mvnw"
+    assert detect.detect(tmp_path).services["api"].command == f"{esperado} spring-boot:run"
+
+
+def test_jvm_spring_gradle_usa_bootrun(tmp_path, monkeypatch):
+    write(tmp_path, "build.gradle", "dependencies { implementation 'spring-boot-starter-web' }")
+    sin_binarios(monkeypatch, "gradle")
+
+    assert detect.detect(tmp_path).services["api"].command == "gradle bootRun"
+
+
+def test_jvm_ktor_en_kotlin_dsl(tmp_path, monkeypatch):
+    """`build.gradle.kts` es Gradle igual: Kotlin no es un detector aparte."""
+    write(tmp_path, "build.gradle.kts", 'implementation("io.ktor:ktor-server-netty:2.3.0")')
+    sin_binarios(monkeypatch, "gradle")
+
+    assert detect.detect(tmp_path).services["api"].command == "gradle run"
+
+
+def test_jvm_quarkus_maven(tmp_path, monkeypatch):
+    write(tmp_path, "pom.xml", POM.format(
+        deps="", plugins="<plugin><artifactId>quarkus-maven-plugin</artifactId></plugin>"
+    ))
+    sin_binarios(monkeypatch, "mvn")
+
+    assert detect.detect(tmp_path).services["api"].command == "mvn quarkus:dev"
+
+
+def test_jvm_una_libreria_no_se_detecta(tmp_path, monkeypatch):
+    """Un `pom.xml` sin framework web es una libreria o una app de consola.
+
+    Este es el test que atrapa el bug caro: un detector que devuelve algo
+    siempre pasa todos los demas.
+    """
+    write(tmp_path, "pom.xml", POM.format(
+        deps="<dependency><artifactId>guava</artifactId></dependency>", plugins=""
+    ))
+    sin_binarios(monkeypatch, "mvn")
+
+    assert detect.detect(tmp_path) is None
+
+
+def test_jvm_spring_sin_web_no_sirve_por_un_puerto(tmp_path, monkeypatch):
+    """`spring-boot-starter` a secas no levanta un servidor.
+
+    Es una app de Spring sin servlet container: una tarea batch, un consumidor
+    de colas, un CLI. `bootRun` corre y termina, o se queda sin abrir ningun
+    puerto. Es el mismo filo que `phoenix_html` contra `phoenix` en Elixir, y
+    la unica forma de tomar las dos es buscar la palabra suelta.
+    """
+    write(tmp_path, "pom.xml", POM.format(
+        deps="<dependency><artifactId>spring-boot-starter</artifactId></dependency>", plugins=""
+    ))
+    sin_binarios(monkeypatch, "mvn")
+
+    assert detect.detect(tmp_path) is None
+
+
+def test_jvm_en_una_subcarpeta_de_backend(tmp_path, monkeypatch):
+    write(tmp_path, "backend/pom.xml", POM.format(deps=SPRING_WEB, plugins=""))
+    sin_binarios(monkeypatch, "mvn")
+
+    assert detect.detect(tmp_path).services["backend"].command == "mvn spring-boot:run"
+
+
+def test_jvm_el_cache_del_path_no_se_pega_entre_proyectos(tmp_path, monkeypatch):
+    """El cache es por binario, no por proyecto ni por PATH.
+
+    Es la contracara del lru_cache: acelera el sondeo, y a cambio no puede
+    distinguir dos PATH distintos dentro del mismo proceso. Se afirma para que
+    quede escrito que es la decision y no un descuido, y para que el dia que
+    alguien necesite lo contrario encuentre el test en vez del sintoma.
+    """
+    write(tmp_path, "pom.xml", POM.format(deps=SPRING_WEB, plugins=""))
+    # Los dos wrappers: con solo el de POSIX, en Windows no hay wrapper usable
+    # y el detector cae al binario pelado, que es correcto pero tapa lo que
+    # este test quiere mirar.
+    write(tmp_path, "mvnw", "#!/bin/sh")
+    write(tmp_path, "mvnw.cmd", "@echo off")
+    sin_binarios(monkeypatch, "mvn")
+    assert detect.detect(tmp_path).services["api"].command == "mvn spring-boot:run"
+
+    sin_binarios(monkeypatch)  # ahora mvn "no esta", pero ya se pregunto
+    assert detect.detect(tmp_path).services["api"].command == "mvn spring-boot:run"
+
+    detect._en_el_path.cache_clear()
+    esperado = "mvnw.cmd" if os.name == "nt" else "./mvnw"
+    assert detect.detect(tmp_path).services["api"].command == f"{esperado} spring-boot:run"

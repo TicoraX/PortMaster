@@ -19,7 +19,9 @@ from . import detect
 
 MARKERS = (
     "stack.yaml", "stack.yml", *detect.COMPOSE_NAMES,
-    "package.json", "manage.py", "Cargo.toml", "bunfig.toml", "mix.exs",
+    "package.json", "manage.py", "Cargo.toml",
+    "bunfig.toml", "mix.exs",
+    "pom.xml", "build.gradle", "build.gradle.kts",
 )
 
 # Carpetas que nunca son un proyecto y solo hacen ruido al navegar.
@@ -104,8 +106,8 @@ def markers(path: Path) -> list[str]:
     sistema de archivos donde toco correr.
 
     El conjunto se arma en cada llamada a proposito: `MARKERS` se puede
-    parchear (los tests lo hacen), y un conjunto de modulo quedaria viejo. Son
-    quince cadenas en memoria contra una llamada al sistema, no se nota.
+    parchear (los tests lo hacen), y un conjunto de modulo quedaria viejo. Es
+    un punado de cadenas en memoria contra una llamada al sistema, no se nota.
     """
     objetivo = {name.lower(): name for name in MARKERS}
     try:

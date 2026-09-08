@@ -19,9 +19,11 @@ el puerto real del proceso ya arrancado. Ver el spec en docs/.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
+import shutil
 from dataclasses import replace
 from pathlib import Path
 
@@ -107,6 +109,21 @@ GO_SERVES = ("ListenAndServe", "http.Serve(")
 # Donde buscar el paquete main de un proyecto Go.
 GO_MAINS = ("main.go", "cmd/server/main.go", "cmd/api/main.go", "cmd/app/main.go")
 
+# Frameworks JVM que sirven por un puerto, con su tarea en cada build system:
+# (marcas en el archivo del build, goal de Maven, tarea de Gradle). `None` donde
+# el framework no tiene un camino usable con esa herramienta.
+#
+# `spring-boot-starter-web` cubre tambien `-webflux`, que lo contiene como
+# prefijo. Y no cubre `spring-boot-starter` a secas, que es lo que importa: esa
+# es una app de Spring sin servlet container (una tarea batch, un consumidor de
+# colas) y no abre ningun puerto.
+JVM_SERVERS = (
+    (("spring-boot-starter-web",), "spring-boot:run", "bootRun"),
+    (("quarkus-maven-plugin", "io.quarkus", "quarkus-gradle-plugin"), "quarkus:dev", "quarkusDev"),
+    (("micronaut-http-server",), "mn:run", "run"),
+    (("ktor-server",), None, "run"),
+)
+
 # `{:phoenix, "~> 1.7"}` y no un `"phoenix" in texto`. Una libreria de
 # componentes declara `phoenix_html` o `phoenix_live_view` sin ser una
 # aplicacion: no tiene endpoint, y `mix phx.server` ahi falla. La coma es lo
@@ -164,7 +181,7 @@ def detect(root: Path) -> Stack | None:
     # y un proyecto con `package.json` mas `bun.lock` tiene que salir por `_node`,
     # que es el unico que sabe leer los scripts. `_bun` atrapa lo que sobra.
     for detector in (
-        _compose, _python, _go, _rust, _ruby, _elixir, _php, _dotnet, _deno, _node, _bun
+        _compose, _python, _go, _rust, _ruby, _elixir, _php, _dotnet, _jvm, _deno, _node, _bun
     ):
         group = []
         for service in detector(root):
@@ -655,6 +672,86 @@ def _ruby_at(path: Path, name: str) -> Service | None:
     # `bundle exec` y no el binstub `bin/rails`: es un script con shebang y en
     # Windows no lo ejecuta nadie. Bundler ya es obligatorio si hay Gemfile.
     return _served(name, "bundle exec rails server", path)
+
+
+@functools.lru_cache(maxsize=None)
+def _en_el_path(binario: str) -> bool:
+    """Si el binario existe, cacheado.
+
+    `detect` corre en el camino de sondeo de la interfaz: `_project_view` lo
+    llama una vez por proyecto y por request, y la interfaz sondea cada 2.5s
+    por pestana abierta. `shutil.which` barre el PATH entero, y en Windows lo
+    permuta ademas contra cada extension de PATHEXT.
+
+    Medido en Windows con 59 directorios en el PATH: 13.5ms por llamada, contra
+    0.06ms cacheada. Con seis proyectos JVM y dos pestanas abiertas eso son
+    162ms de barrido de disco en cada `/api/state`, cada 2.5 segundos, sobre el
+    mismo threadpool que atiende apagar y matar procesos. Es el problema que
+    `server._docker_is_down` ya documenta del otro lado: sin su cache,
+    `/api/health` pasaba de 2ms a 9s.
+
+    ponytail: sin vencimiento, a diferencia del cache de Docker. Ahi el valor
+    cambia solo, porque el daemon se cae y se levanta; un binario del PATH no.
+    Instalar gradle con `serve` abierto pide reiniciar para que lo vea, y ese
+    caso no vale un cache con TTL y candado. Los tests lo limpian con
+    `cache_clear`, que si no el resultado cruza de un test al siguiente.
+    """
+    return shutil.which(binario) is not None
+
+
+def _jvm(root: Path) -> list[Service]:
+    """Un servicio JVM en la raiz, o en una subcarpeta de backend.
+
+    Java y Kotlin no son dos detectores: el build es el mismo y `.kts` solo
+    cambia la extension del archivo de Gradle.
+    """
+    return _backend_at(root, _jvm_at)
+
+
+def _jvm_at(path: Path, name: str) -> Service | None:
+    if (path / "pom.xml").is_file():
+        build = _read(path / "pom.xml")
+        herramienta, wrapper = "mvn", ("./mvnw", "mvnw.cmd")
+        maven = True
+    else:
+        gradle = [path / f for f in ("build.gradle", "build.gradle.kts") if (path / f).is_file()]
+        if not gradle:
+            return None
+        # Los dos si estan los dos: un proyecto puede declarar los plugins en
+        # el Groovy y las dependencias en el Kotlin DSL.
+        build = "\n".join(_read(f) for f in gradle)
+        herramienta, wrapper = "gradle", ("./gradlew", "gradlew.bat")
+        maven = False
+
+    # Un `pom.xml` o un `build.gradle` a secas puede ser una libreria o una app
+    # de consola, y arrancarla dejaria al runner esperando un puerto que nunca
+    # abre. Hace falta el framework, igual que en Rust.
+    for marcas, goal, task in JVM_SERVERS:
+        tarea = goal if maven else task
+        if tarea is not None and any(marca in build for marca in marcas):
+            return _served(name, f"{_lanzador(path, herramienta, wrapper)} {tarea}", path)
+    return None
+
+
+def _lanzador(path: Path, herramienta: str, wrapper: tuple[str, str]) -> str:
+    """Con que se invoca el build: el binario del PATH, o el wrapper del repo.
+
+    El binario gana cuando esta, y no es una preferencia de estilo. El comando
+    detectado termina en el `stack.yaml` que `freeze` escribe, y ese archivo se
+    commitea y lo abre alguien en otro sistema operativo. `mvn spring-boot:run`
+    es igual en los tres; el wrapper son dos archivos distintos (`./mvnw` no
+    corre en cmd.exe, `mvnw.cmd` no corre en bash), asi que congelar el wrapper
+    rompe el stack compartido de un equipo mixto.
+
+    Sin binario y sin wrapper se devuelve igual el nombre pelado: es un
+    proyecto que existe, y fallar con "command not found" dice mas que no
+    detectarlo. Es distinto del caso de la libreria, que no falla sino que se
+    cuelga esperando un puerto.
+    """
+    if _en_el_path(herramienta):
+        return herramienta
+    elegido = wrapper[1] if os.name == "nt" else wrapper[0]
+    return elegido if (path / Path(elegido).name).is_file() else herramienta
 
 
 def _elixir(root: Path) -> list[Service]:
