@@ -48,6 +48,14 @@ existen en aplicaciones que sirven, y un `Gemfile` o un `composer.json` sueltos
 no alcanzan. Rails arranca con `bundle exec rails server` y no con el binstub
 `bin/rails`, que es un script con shebang y en Windows no lo ejecuta nadie.
 
+En Elixir hace falta Phoenix, y la señal es `{:phoenix, ...}` en el `mix.exs`,
+con la coma. No alcanza con que diga "phoenix" en algún lado: una librería de
+componentes declara `phoenix_html` o `phoenix_live_view` sin ser una aplicación,
+no tiene endpoint y `mix phx.server` ahí falla. La otra señal aceptada es
+`lib/<algo>_web/`, que Phoenix genera siempre y que sirve para el proyecto de un
+umbrella, donde las dependencias viven en el `mix.exs` de la raíz. Un `mix.exs`
+solo es una librería o una app OTP sin puerto, y no se detecta.
+
 En .NET la señal está en el atributo `Sdk` del `.csproj` y en ningún otro lado:
 una librería y una app de consola usan `Microsoft.NET.Sdk` a secas, y ni el
 nombre del proyecto ni sus paquetes distinguen una cosa de la otra.

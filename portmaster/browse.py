@@ -19,7 +19,7 @@ from . import detect
 
 MARKERS = (
     "stack.yaml", "stack.yml", *detect.COMPOSE_NAMES,
-    "package.json", "manage.py", "Cargo.toml", "bunfig.toml",
+    "package.json", "manage.py", "Cargo.toml", "bunfig.toml", "mix.exs",
 )
 
 # Carpetas que nunca son un proyecto y solo hacen ruido al navegar.

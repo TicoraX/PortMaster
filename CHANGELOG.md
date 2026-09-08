@@ -8,6 +8,14 @@ esquema de `stack.yaml` y las rutas de la API local.
 
 ### Agregado
 
+- **Elixir con Phoenix.** Un proyecto con `{:phoenix, ...}` en el `mix.exs`, o
+  con la carpeta `lib/<algo>_web/` que Phoenix genera siempre, arranca con
+  `mix phx.server`. La señal es la dependencia con su coma y no la palabra
+  suelta: una librería de componentes declara `phoenix_html` o
+  `phoenix_live_view` sin ser una aplicación, no tiene endpoint y `mix
+  phx.server` ahí falla. Un `mix.exs` solo es una librería o una app OTP sin
+  puerto y no se detecta.
+- `mix.exs` entra como marcador del explorador de carpetas.
 - **Bun como runtime, no sólo como gestor de paquetes.** Un proyecto sin
   `package.json`, sin `scripts`, o con scripts que no sirven nada ahora se
   detecta y arranca con `bun run <archivo>`. El proyecto Node con `bun.lock`

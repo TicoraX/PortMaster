@@ -107,6 +107,12 @@ GO_SERVES = ("ListenAndServe", "http.Serve(")
 # Donde buscar el paquete main de un proyecto Go.
 GO_MAINS = ("main.go", "cmd/server/main.go", "cmd/api/main.go", "cmd/app/main.go")
 
+# `{:phoenix, "~> 1.7"}` y no un `"phoenix" in texto`. Una libreria de
+# componentes declara `phoenix_html` o `phoenix_live_view` sin ser una
+# aplicacion: no tiene endpoint, y `mix phx.server` ahi falla. La coma es lo
+# unico que separa un caso del otro.
+PHOENIX_DEP = re.compile(r"\{\s*:phoenix\s*,")
+
 # Que delata un proyecto de Bun. El lockfile ya estaba en LOCKFILES, pero ahi
 # sirve para elegir el gestor de paquetes de un proyecto Node; aca dice que el
 # runtime es Bun, que es otra pregunta.
@@ -157,7 +163,9 @@ def detect(root: Path) -> Stack | None:
     # `_bun` va ultimo, y no es un detalle de estilo: el primero gana (ver abajo),
     # y un proyecto con `package.json` mas `bun.lock` tiene que salir por `_node`,
     # que es el unico que sabe leer los scripts. `_bun` atrapa lo que sobra.
-    for detector in (_compose, _python, _go, _rust, _ruby, _php, _dotnet, _deno, _node, _bun):
+    for detector in (
+        _compose, _python, _go, _rust, _ruby, _elixir, _php, _dotnet, _deno, _node, _bun
+    ):
         group = []
         for service in detector(root):
             if service.name in services:
@@ -647,6 +655,37 @@ def _ruby_at(path: Path, name: str) -> Service | None:
     # `bundle exec` y no el binstub `bin/rails`: es un script con shebang y en
     # Windows no lo ejecuta nadie. Bundler ya es obligatorio si hay Gemfile.
     return _served(name, "bundle exec rails server", path)
+
+
+def _elixir(root: Path) -> list[Service]:
+    """Un Phoenix en la raiz, o en una subcarpeta de backend."""
+    return _backend_at(root, _elixir_at)
+
+
+def _elixir_at(path: Path, name: str) -> Service | None:
+    # `mix.exs` dice que hay un proyecto Elixir y nada mas: puede ser una
+    # libreria o una app OTP sin puerto, y arrancarla dejaria al runner
+    # esperando un socket que nunca abre. Hace falta la segunda senal.
+    if not (path / "mix.exs").is_file():
+        return None
+
+    # La dependencia, o la carpeta que Phoenix genera siempre. Dos senales
+    # porque una sola no alcanza: en un umbrella las dependencias viven en el
+    # mix.exs de la raiz y el hijo se queda sin la primera.
+    if PHOENIX_DEP.search(_read(path / "mix.exs")):
+        return _served(name, "mix phx.server", path)
+
+    # `iterdir` no se traga los errores como `glob`: sin `lib`, sin permisos o
+    # con la unidad desconectada, levanta. Y esto corre en el camino de sondeo
+    # de la interfaz, asi que una excepcion aca es un 500 cada 2.5 segundos.
+    # Es el mismo `try` que ya usa `_subprojects`.
+    try:
+        hijos = list((path / "lib").iterdir())
+    except OSError:
+        return None
+    if any(hijo.is_dir() and hijo.name.endswith("_web") for hijo in hijos):
+        return _served(name, "mix phx.server", path)
+    return None
 
 
 def _php(root: Path) -> list[Service]:

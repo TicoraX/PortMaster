@@ -1035,3 +1035,92 @@ def test_bun_en_una_subcarpeta_de_backend(tmp_path):
 
     stack = detect.detect(tmp_path)
     assert stack.services["api"].command == "bun run server.ts"
+
+
+# elixir -------------------------------------------------------------------
+
+
+def test_elixir_phoenix_por_la_dependencia(tmp_path):
+    write(tmp_path, "mix.exs", """
+        defmodule MiApp.MixProject do
+          use Mix.Project
+          defp deps do
+            [
+              {:phoenix, "~> 1.7.10"},
+              {:ecto_sql, "~> 3.10"}
+            ]
+          end
+        end
+    """)
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["api"].command == "mix phx.server"
+    assert stack.services["api"].ready == "listen"
+
+
+def test_elixir_phoenix_por_la_carpeta_web(tmp_path):
+    """`lib/<algo>_web/` la genera Phoenix siempre.
+
+    Es la senal estructural, el analogo de `config/application.rb` en Rails: si
+    esta, hay una aplicacion que sirve. Sirve para el proyecto que trae las
+    dependencias de otro archivo o de un umbrella.
+    """
+    write(tmp_path, "mix.exs", "defmodule MiApp.MixProject do\nend\n")
+    write(tmp_path, "lib/mi_app_web/router.ex", "defmodule MiAppWeb.Router do\nend\n")
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["api"].command == "mix phx.server"
+
+
+def test_elixir_una_libreria_no_se_detecta(tmp_path):
+    """Un `mix.exs` a secas es una libreria o una app OTP sin puerto.
+
+    Arrancarla dejaria al runner esperando un socket que nunca abre hasta que
+    se acabe el timeout. Es la misma decision que `_go_at` con las CLIs.
+
+    Este es el test que atrapa el bug caro: un detector que devuelve algo
+    siempre pasa los otros.
+    """
+    write(tmp_path, "mix.exs", """
+        defmodule MiLibreria.MixProject do
+          use Mix.Project
+          defp deps do
+            [{:jason, "~> 1.4"}, {:telemetry, "~> 1.2"}]
+          end
+        end
+    """)
+
+    assert detect.detect(tmp_path) is None
+
+
+def test_elixir_una_libreria_de_componentes_phoenix_no_se_detecta(tmp_path):
+    """`{:phoenix_html, ...}` no es `{:phoenix, ...}`, y la diferencia importa.
+
+    Una libreria de componentes declara `phoenix_html` o `phoenix_live_view`
+    sin ser una aplicacion: no tiene endpoint, y `mix phx.server` ahi falla.
+    Un `"phoenix" in texto` las tomaria a todas, que es la forma facil y
+    equivocada de escribir este detector.
+    """
+    write(tmp_path, "mix.exs", """
+        defmodule MisComponentes.MixProject do
+          use Mix.Project
+          defp deps do
+            [{:phoenix_html, "~> 4.0"}, {:phoenix_live_view, "~> 0.20"}]
+          end
+        end
+    """)
+
+    assert detect.detect(tmp_path) is None
+
+
+def test_elixir_en_una_subcarpeta_de_backend(tmp_path):
+    write(tmp_path, "backend/mix.exs", '[{:phoenix, "~> 1.7"}]')
+
+    stack = detect.detect(tmp_path)
+    assert stack.services["backend"].command == "mix phx.server"
+
+
+def test_elixir_sin_mix_no_es_elixir(tmp_path):
+    write(tmp_path, "lib/mi_app_web/router.ex", "defmodule MiAppWeb.Router do\nend\n")
+
+    assert detect.detect(tmp_path) is None
