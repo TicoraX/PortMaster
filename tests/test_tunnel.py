@@ -273,3 +273,42 @@ def test_el_mcp_rechaza_un_puerto_fuera_de_rango():
 
     with pytest.raises(ValueError, match="rango"):
         mcp._execute_tool("portmaster_share", {"port": 0})
+
+
+def test_no_se_publica_un_portmaster_serve(monkeypatch):
+    """El unico choke point de los tuneles se niega a exponer la propia API.
+
+    Detras de ese puerto esta lo que corre los comandos de stack.yaml. Va aca y
+    no en el comando porque por `start_tunnel` pasan los tres caminos: el boton
+    de la interfaz, `portmaster share` y el CLI.
+
+    Se afirma el efecto: que no se lance ningun cliente de tuneles.
+    """
+    lanzados = []
+    monkeypatch.setattr(tunnel.subprocess, "Popen", lambda *a, **k: lanzados.append(a))
+    monkeypatch.setattr(
+        tunnel.ports,
+        "scan",
+        lambda port: tunnel.ports.PortStatus(
+            port=port, free=False, pid=123, cmdline="python -m portmaster serve --port 7666"
+        ),
+    )
+
+    with pytest.raises(tunnel.TunnelError, match="portmaster serve"):
+        tunnel.start_tunnel(7666)
+    assert lanzados == [], "se levanto un cliente de tuneles contra la propia API"
+
+
+def test_un_puerto_ajeno_no_se_confunde_con_portmaster(monkeypatch):
+    """La otra mitad: la guarda no puede frenar un tunel legitimo.
+
+    Sin esto, un `return True` constante pasaria el test de arriba.
+    """
+    monkeypatch.setattr(
+        tunnel.ports,
+        "scan",
+        lambda port: tunnel.ports.PortStatus(
+            port=port, free=False, pid=456, cmdline="node /app/node_modules/.bin/vite serve"
+        ),
+    )
+    assert tunnel.sirve_portmaster(3000) is False

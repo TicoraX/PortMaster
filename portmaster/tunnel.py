@@ -12,7 +12,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Callable
 
-from . import runner
+from . import ports, runner
 
 PROVIDERS = ("cloudflared", "ngrok", "lt", "tailscale")
 TAILSCALE_URL = re.compile(r"https://[a-zA-Z0-9.-]+\.ts\.net(?:/\S*)?")
@@ -47,7 +47,7 @@ class Tunnel:
         la señal colgaba el apagado del servidor para siempre.
         """
         if self.proc.poll() is None:
-            runner._terminate_tree(self.proc.pid)
+            runner._terminate_tree(self.proc)
         with contextlib.suppress(subprocess.TimeoutExpired):
             self.proc.wait(timeout=3)
 
@@ -57,12 +57,41 @@ def detect_providers() -> list[str]:
     return [p for p in PROVIDERS if shutil.which(p) is not None]
 
 
+def sirve_portmaster(port: int) -> bool:
+    """Si detras del puerto hay un `portmaster serve`.
+
+    ponytail: es la linea de comando del dueno del puerto, o sea una heuristica.
+    Lo exacto seria que `serve` dejara su puerto en un archivo, y eso es estado
+    nuevo que sobrevive a un cierre feo. El costo de equivocarse es chico en las
+    dos direcciones: un falso positivo pide otro puerto, un falso negativo deja
+    el comportamiento que ya habia. El servidor ademas tiene su propia guarda,
+    que sale del socket que bindeo y no de una cadena de texto.
+    """
+    try:
+        estado = ports.scan(port)
+    except (ValueError, OSError):
+        return False
+    linea = (estado.cmdline or "").lower()
+    return "portmaster" in linea and "serve" in linea
+
+
 def start_tunnel(
     port: int,
     provider: str | None = None,
     timeout: float = 15.0,
 ) -> Tunnel:
     """Inicia un tunel efimero hacia el puerto especificado y extrae la URL publica."""
+    # PortMaster no se publica a si mismo. Detras de ese puerto esta la API que
+    # arranca stack.yaml, o sea ejecucion de comandos, y el token pasaria a ser
+    # lo unico entre internet y la consola del usuario. Va aca y no en cada
+    # comando porque este es el unico lugar por donde pasan todos los tuneles:
+    # el boton de la interfaz, `portmaster share` y lo que venga despues.
+    if sirve_portmaster(port):
+        raise TunnelError(
+            f"el puerto {port} es de un `portmaster serve`. Publicarlo expone la "
+            "API que ejecuta los comandos de tu stack.yaml, no tu proyecto."
+        )
+
     available = detect_providers()
     if provider:
         if provider not in PROVIDERS:

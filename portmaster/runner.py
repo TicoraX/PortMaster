@@ -419,7 +419,7 @@ class Runner:
             self._stop_command(proc)
         if proc.popen.poll() is None:
             self._say(proc, "apagando")
-            _terminate_tree(proc.popen.pid)
+            _terminate_tree(proc.popen)
 
     def _stop_command(self, proc: Proc) -> None:
         """Apagado propio del servicio.
@@ -491,14 +491,14 @@ class Runner:
         if tarde:
             # El apagado ya paso por la lista de hooks: a este lo baja quien lo
             # arranco, igual que en `_launch` y en `restart`.
-            _terminate_tree(proc.pid)
+            _terminate_tree(proc)
             proc.communicate()
             raise StartupError("apagado pedido durante el arranque")
 
         try:
             salida, _ = proc.communicate(timeout=DETACHED_TIMEOUT)
         except subprocess.TimeoutExpired:
-            _terminate_tree(proc.pid)
+            _terminate_tree(proc)
             salida, _ = proc.communicate()
             # Sin esto el timeout salia crudo. Un `npm run build` colgado rompia
             # el arranque con un traceback en vez de decir que servicio y que
@@ -517,7 +517,7 @@ class Runner:
             pendientes = list(self._hooks)
             self._hooks.clear()
         for hook in pendientes:
-            _terminate_tree(hook.pid)
+            _terminate_tree(hook)
 
     def _spawn(self, service: Service) -> subprocess.Popen:
         # shell=True es deliberado: `npm run dev` y `docker compose up -d` no son
@@ -835,14 +835,30 @@ def _http_ok(url: str) -> bool:
         return False
 
 
-def _terminate_tree(pid: int, timeout: float = SHUTDOWN_TIMEOUT) -> None:
+def _terminate_tree(popen: subprocess.Popen, timeout: float = SHUTDOWN_TIMEOUT) -> None:
     """Cierra el proceso y sus descendientes.
 
     Con shell=True el hijo directo es el shell, y matarlo solo a el deja
     huerfano al servidor de verdad. Por eso se apaga el arbol entero.
+
+    Recibe el `Popen` y no el pid, y esa es la guarda. `psutil` verifica el
+    reciclado de PID en cada llamada, pero contra la identidad que capturo al
+    construir el `Process`: si el pid ya se habia reciclado *antes* de esa
+    linea, psutil adopta la identidad del intruso y lo termina sin quejarse.
+    Recibiendo un entero suelto no habia forma de saberlo. Con el `Popen` si:
+    mientras `poll()` da None el hijo esta vivo y sin cosechar, o sea que el
+    sistema todavia no puede darle ese pid a nadie mas. Los hooks eran el
+    agujero concreto, que llamaban con un pid pelado y sin ningun poll previo.
+
+    ponytail: queda la ventana entre el `poll()` y el `psutil.Process`, de
+    microsegundos. Cerrarla del todo es guardar el `psutil.Process` en el
+    momento del spawn y arrastrarlo por `Proc` y por `_hooks`; se hace si
+    alguna vez aparece un sintoma, no antes.
     """
+    if popen.poll() is not None:
+        return  # ya murio: su pid puede ser de otro, y ese otro no es nuestro
     try:
-        parent = psutil.Process(pid)
+        parent = psutil.Process(popen.pid)
         victims = parent.children(recursive=True) + [parent]
     except psutil.NoSuchProcess:
         return

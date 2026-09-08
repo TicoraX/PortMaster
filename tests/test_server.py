@@ -2079,3 +2079,53 @@ def test_browse_frecuentes(client, tmp_path, monkeypatch):
 
 
 
+
+
+def test_share_rechaza_el_puerto_propio(client, monkeypatch):
+    """PortMaster no se publica a si mismo.
+
+    Detras de ese puerto esta la API que corre los comandos de stack.yaml, o
+    sea ejecucion arbitraria: el token pasa a ser lo unico entre internet y tu
+    consola, y el usuario cree que compartio su proyecto.
+
+    El puerto sale del scope ASGI (el socket que se bindeo), no del header
+    Host, que lo escribe quien llama y serviria para esquivar la guarda. Con
+    TestClient el scope dice 80, asi que ese es el puerto propio aca.
+    """
+    llamadas = []
+    monkeypatch.setattr(
+        server.tunnel,
+        "start_tunnel",
+        lambda port, provider=None: llamadas.append(port),
+    )
+
+    res = client.post("/api/share?port=80")
+    assert res.status_code == 400
+    assert llamadas == [], "se abrio un tunel hacia el puerto de PortMaster"
+
+
+def test_share_no_confia_en_el_header_host(client, monkeypatch):
+    """Un Host mentido no mueve la guarda ni la abre ni la cierra.
+
+    `request.url.port` sale del header. Si la guarda leyera de ahi, un
+    `Host: 127.0.0.1:3000` haria pasar el 80 (el puerto real) y frenaria el
+    3000 (uno legitimo). Las dos mitades se afirman.
+    """
+    abiertos = []
+    monkeypatch.setattr(
+        server.tunnel,
+        "start_tunnel",
+        lambda port, provider=None: abiertos.append(port)
+        or server.tunnel.Tunnel(
+            provider="cloudflared",
+            port=port,
+            url="https://test-tunnel.trycloudflare.com",
+            proc=subprocess.Popen("echo ok", shell=True),
+        ),
+    )
+    cabecera = {"Host": "127.0.0.1:3000"}
+
+    assert client.post("/api/share?port=80", headers=cabecera).status_code == 400
+    assert client.post("/api/share?port=3000", headers=cabecera).status_code == 200
+    assert abiertos == [3000]
+    client.delete("/api/share/3000")

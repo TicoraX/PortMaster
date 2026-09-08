@@ -20,6 +20,24 @@ from portmaster import cli, registry
 
 runner = CliRunner()
 
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def sin_color(texto: str) -> str:
+    """La salida sin los codigos de color de Rich.
+
+    Rich pinta los numeros, asi que `f"El puerto {port} ya esta ocupado"` llega
+    partido por un `\x1b[1;36m` en el medio y un `in` plano no lo encuentra. Solo
+    aparece cuando el entorno trae `FORCE_COLOR` (la terminal del desarrollador,
+    o un `portmaster up` que se lo pone a sus hijos): sin eso Rich ve que no hay
+    tty y no pinta nada, que es por lo que en CI el test daba verde.
+
+    Afirmar sobre el texto pelado, y no sobre como se ve, es lo correcto igual:
+    lo que el test quiere probar es que el mensaje nombra el puerto y el comando
+    que lo arregla, no de que color salen.
+    """
+    return _ANSI.sub("", texto)
+
 
 @pytest.fixture(autouse=True)
 def aislado_cli(tmp_path, monkeypatch):
@@ -953,10 +971,11 @@ def test_serve_port_occupied_suggests_alternative(free_ports):
     sock.listen()
     try:
         resultado = runner.invoke(cli.app, ["serve", "--port", str(port), "--no-open"])
+        salida = sin_color(resultado.output)
         assert resultado.exit_code == 1
-        assert f"El puerto {port} ya esta ocupado" in resultado.output
-        assert f"portmaster free {port}" in resultado.output
-        assert "arranca con: --port" in resultado.output
+        assert f"El puerto {port} ya esta ocupado" in salida
+        assert f"portmaster free {port}" in salida
+        assert "arranca con: --port" in salida
     finally:
         sock.close()
 

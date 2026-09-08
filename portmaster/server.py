@@ -835,7 +835,12 @@ def create_app(token: str | None = None) -> FastAPI:
 
         p_str = str(resolved)
         try:
-            subprocess.Popen([found_editor, p_str], shell=(sys.platform == "win32"))
+            # Sin shell=True: en Windows metia la ruta por `cmd.exe /c`, y ahi
+            # `list2cmdline` sola no alcanza (ver `scripts._entrecomillar`).
+            # `shutil.which` devuelve el .cmd completo y CreateProcess lo corre
+            # igual, asi que la capa de shell no aportaba nada y solo abria
+            # superficie a los metacaracteres de cmd en el nombre de la carpeta.
+            subprocess.Popen([found_editor, p_str])
             return {"ok": True, "editor": editor_display, "path": p_str}
         except Exception as exc:
             log.warning("fallo al abrir editor %s en %s: %s", found_editor, p_str, exc)
@@ -1432,7 +1437,7 @@ def create_app(token: str | None = None) -> FastAPI:
         "/api/share",
         dependencies=[quota("write", QUOTA_WRITE), Depends(require_token)],
     )
-    def share_port(port: int, provider: str | None = None) -> dict:
+    def share_port(request: Request, port: int, provider: str | None = None) -> dict:
         """Inicia un tunel efimero para compartir un puerto."""
         # Antes del candado y de la reserva: un puerto que no existe no puede
         # dejar una entrada a medias en `_active_tunnels`. `kill` valida gratis
@@ -1443,6 +1448,24 @@ def create_app(token: str | None = None) -> FastAPI:
         except ValueError as exc:
             log.info("puerto rechazado: %s", exc)
             raise HTTPException(400, str(exc))
+
+        # PortMaster no se publica a si mismo. Detras de este puerto esta la API
+        # que arranca stack.yaml, o sea ejecucion de comandos: exponerla deja al
+        # token como unica puerta contra internet entero. La validacion de Host
+        # del middleware ya rechaza al cliente de tuneles, asi que hoy el efecto
+        # es una URL publica que solo sabe contestar 400; el usuario cree que
+        # compartio algo y comparte la consola. Se corta aca y se dice por que.
+        #
+        # El puerto sale del scope ASGI, que uvicorn llena con el socket que
+        # bindeo de verdad. `request.url.port` sale del header Host, y un header
+        # lo escribe quien llama: serviria para esquivar justo esta guarda.
+        propio = (request.scope.get("server") or (None, None))[1]
+        if propio is not None and port == propio:
+            raise HTTPException(
+                400,
+                f"el puerto {port} es el de PortMaster. Publicarlo expone la API "
+                "que ejecuta los comandos de tu stack.yaml, no tu proyecto.",
+            )
 
         with _tunnels_lock:
             # Un tunel que se murio solo no puede bloquear el puerto hasta que

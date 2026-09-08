@@ -4,6 +4,41 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
+## [No publicado]
+
+### Seguridad
+
+- **PortMaster ya no se puede publicar a sí mismo.** `portmaster share` y el botón
+  de la interfaz rechazan el puerto de un `portmaster serve`. Detrás de ese puerto
+  está la API que arranca los servicios de `stack.yaml`, o sea ejecución de
+  comandos: publicarla dejaba al token como única puerta contra internet. El
+  servidor decide con el socket que bindeó (el scope ASGI, no el header `Host`,
+  que lo escribe quien llama); `tunnel.start_tunnel` cubre además el CLI y
+  cualquier instancia ajena.
+- **El token se crea con sus permisos, no se los pone después.** `write_text` lo
+  dejaba en disco con el umask (0644 típico) y el `chmod(0600)` llegaba un
+  instante tarde: en esa ventana cualquier usuario local lo leía, y con el token
+  se ejecutan comandos. Ahora el modo va en el `os.open`.
+- **`_terminate_tree` recibe el `Popen`, no un pid suelto.** `psutil` verifica el
+  reciclado de PID contra la identidad que capturó al construir el `Process`: si
+  el pid ya se había reciclado antes de esa línea, adoptaba al intruso y lo
+  terminaba. Los hooks (`pre_start`, `post_start`) llamaban con un pid pelado y
+  sin ningún `poll()` previo. Con el `Popen` a mano, un `poll()` que da `None`
+  prueba que el hijo sigue vivo y sin cosechar.
+- **`/api/open-editor` dejó de usar `shell=True`.** En Windows metía la ruta por
+  `cmd.exe /c` con `list2cmdline` sola, la media medida que `scripts._entrecomillar`
+  ya documenta como insuficiente. `shutil.which` devuelve el `.cmd` completo y
+  `CreateProcess` lo corre igual, así que la capa de shell no aportaba nada.
+
+### Corregido
+
+- **`test_serve_port_occupied_suggests_alternative` fallaba con `FORCE_COLOR` en el
+  entorno.** Rich pinta los números y el test afirmaba substrings planos, así que
+  daba verde en CI (sin `FORCE_COLOR`) y rojo en la terminal del desarrollador, o
+  dentro de un `portmaster up`, que se lo pone a sus hijos. El helper `sin_color`
+  de `tests/test_cli.py` centraliza el arreglo que ya estaba inline en el test de
+  `--version`.
+
 ## [1.4.5] - 2026-09-06
 
 ### Agregado
