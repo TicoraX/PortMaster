@@ -107,6 +107,21 @@ GO_SERVES = ("ListenAndServe", "http.Serve(")
 # Donde buscar el paquete main de un proyecto Go.
 GO_MAINS = ("main.go", "cmd/server/main.go", "cmd/api/main.go", "cmd/app/main.go")
 
+# Que delata un proyecto de Bun. El lockfile ya estaba en LOCKFILES, pero ahi
+# sirve para elegir el gestor de paquetes de un proyecto Node; aca dice que el
+# runtime es Bun, que es otra pregunta.
+BUN_MARKERS = ("bunfig.toml", "bun.lockb", "bun.lock")
+
+# Lo que Bun ejecuta directo, en orden de preferencia.
+BUN_ENTRIES = (
+    "index.ts", "server.ts", "src/index.ts", "src/server.ts", "index.js", "server.js",
+)
+
+# Frameworks HTTP del ecosistema. Con cualquiera de estos el fuente no nombra a
+# `Bun.serve`, asi que la dependencia es la unica senal.
+BUN_SERVERS = ("hono", "elysia", "@elysiajs/", "@hono/", "bun-router")
+BUN_SERVES = "Bun.serve("
+
 
 def stack_for(root: Path) -> Stack:
     """Stack del proyecto: el archivo si existe, la deteccion si no.
@@ -139,7 +154,10 @@ def detect(root: Path) -> Stack | None:
 
     opcionales = _compose_profiles(root)
 
-    for detector in (_compose, _python, _go, _rust, _ruby, _php, _dotnet, _deno, _node):
+    # `_bun` va ultimo, y no es un detalle de estilo: el primero gana (ver abajo),
+    # y un proyecto con `package.json` mas `bun.lock` tiene que salir por `_node`,
+    # que es el unico que sabe leer los scripts. `_bun` atrapa lo que sobra.
+    for detector in (_compose, _python, _go, _rust, _ruby, _php, _dotnet, _deno, _node, _bun):
         group = []
         for service in detector(root):
             if service.name in services:
@@ -682,16 +700,27 @@ def _backend_at(root: Path, detector) -> list[Service]:
     return found
 
 
-def _deno(root: Path) -> list[Service]:
-    at_root = _deno_at(root, "web")
+def _web_or_backend_at(root: Path, detector) -> list[Service]:
+    """La raiz si es el proyecto, y si no las subcarpetas de front o de back.
+
+    El analogo de `_backend_at` para los runtimes que sirven las dos cosas.
+    Deno y Bun corren igual un frontend que una API, asi que mirar solo
+    BACKEND_DIRS dejaria afuera un `frontend/` servido con cualquiera de los
+    dos. Se extrajo cuando aparecio el segundo uso, no antes.
+    """
+    at_root = detector(root, "web")
     if at_root is not None:
         return [at_root]
     found = []
     for path in _subprojects(root, (*NODE_DIRS, *BACKEND_DIRS)):
-        service = _deno_at(path, path.name)
+        service = detector(path, path.name)
         if service is not None:
             found.append(service)
     return found
+
+
+def _deno(root: Path) -> list[Service]:
+    return _web_or_backend_at(root, _deno_at)
 
 
 def _deno_at(path: Path, name: str) -> Service | None:
@@ -731,6 +760,50 @@ def _node(root: Path) -> list[Service]:
         if service is not None:
             found.append(service)
     return found
+
+
+def _bun(root: Path) -> list[Service]:
+    """Bun como runtime, lo que `_node` deja pasar.
+
+    Va **despues** de `_node` en la tupla de `detect`, y esa posicion es la
+    mitad de la logica. Un proyecto con `package.json` y `bun.lock` ya salia
+    bien de antes: `_package` lee el script y `_manager` devuelve `bun` por el
+    lockfile. Adelantar `_bun` le robaria el nombre del servicio y lo arrancaria
+    con el archivo en vez del script.
+
+    Lo que queda para aca es el proyecto sin `package.json`, sin `scripts`, o
+    con scripts que no sirven nada: ahi Bun corre el archivo directo.
+    """
+    return _web_or_backend_at(root, _bun_at)
+
+
+def _bun_at(path: Path, name: str) -> Service | None:
+    if not any((path / marca).is_file() for marca in BUN_MARKERS):
+        return None
+
+    try:
+        raw = json.loads(_read(path / "package.json") or "{}")
+    except json.JSONDecodeError:
+        raw = {}
+    declaradas = {
+        *(raw.get("dependencies") or {}),
+        *(raw.get("devDependencies") or {}),
+    } if isinstance(raw, dict) else set()
+    marco = any(dep.startswith(server) for dep in declaradas for server in BUN_SERVERS)
+
+    for candidato in BUN_ENTRIES:
+        fuente = path / candidato
+        if not fuente.is_file():
+            continue
+        # `Bun.serve` es la API nativa y no figura en ninguna dependencia, asi
+        # que la llamada en el fuente es su unica senal. Es el mismo par que
+        # `_go_at` con `net/http`: el framework en el manifiesto, o la llamada
+        # en el codigo. Sin ninguna de las dos es una CLI, y arrancarla dejaria
+        # al runner esperando un puerto que nunca abre.
+        if not marco and BUN_SERVES not in _read(fuente):
+            continue
+        return _served(name, f"bun run {candidato}", path)
+    return None
 
 
 def _subprojects(root: Path, names: tuple[str, ...]):

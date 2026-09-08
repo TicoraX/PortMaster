@@ -57,6 +57,19 @@ desarrollo (vite, next, nest, astro, nodemon y compañía). Un workspace tiene
 tantas librerías como apps, y una librería con `dev: tsc --watch` entraría como
 servicio y se quedaría esperando un puerto que nunca abre.
 
+Con Bun hay dos caminos distintos y conviene no confundirlos. Un proyecto con
+`package.json` y un script (`dev`, `serve`, `start`) sale por el camino de Node,
+y el `bun.lock` sólo decide el gestor: el comando queda `bun run dev`. El
+detector propio de Bun es para lo otro, el proyecto sin `package.json`, sin
+`scripts`, o con scripts que no sirven nada, donde Bun ejecuta el archivo
+directo: `bun run index.ts`.
+
+Hace falta una marca de Bun (`bunfig.toml`, `bun.lock` o `bun.lockb`) y además
+la señal de que eso sirve por un puerto, que es la llamada a `Bun.serve(` en el
+fuente o un framework declarado (hono, elysia). Es el mismo par que Go: `Bun.serve`
+es API nativa y no figura en ninguna dependencia, igual que `net/http`. Sin
+ninguna de las dos señales es una CLI y no se detecta.
+
 Nada de esto es recursivo: un scan profundo termina dentro de `node_modules`.
 
 ## Compose

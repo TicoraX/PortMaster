@@ -6,6 +6,19 @@ esquema de `stack.yaml` y las rutas de la API local.
 
 ## [No publicado]
 
+### Agregado
+
+- **Bun como runtime, no sólo como gestor de paquetes.** Un proyecto sin
+  `package.json`, sin `scripts`, o con scripts que no sirven nada ahora se
+  detecta y arranca con `bun run <archivo>`. El proyecto Node con `bun.lock`
+  sigue saliendo por el camino de siempre (`bun run dev`), que es el único que
+  sabe leer los scripts: `_bun` va último en la tupla de detectores y sólo
+  atrapa lo que el resto deja pasar. Hace falta una marca de Bun
+  (`bunfig.toml`, `bun.lock`, `bun.lockb`) más la señal de que sirve por un
+  puerto: `Bun.serve(` en el fuente o un framework declarado (hono, elysia).
+  Sin eso es una CLI y no se detecta, la misma decisión que ya toman Go y Rust.
+- `bunfig.toml` entra como marcador del explorador de carpetas.
+
 ### Cambiado
 
 - **`browse.markers` hace un `scandir` por carpeta en vez de una consulta por

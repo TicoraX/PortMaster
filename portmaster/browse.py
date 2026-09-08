@@ -17,7 +17,10 @@ import psutil
 
 from . import detect
 
-MARKERS = ("stack.yaml", "stack.yml", *detect.COMPOSE_NAMES, "package.json", "manage.py", "Cargo.toml")
+MARKERS = (
+    "stack.yaml", "stack.yml", *detect.COMPOSE_NAMES,
+    "package.json", "manage.py", "Cargo.toml", "bunfig.toml",
+)
 
 # Carpetas que nunca son un proyecto y solo hacen ruido al navegar.
 SKIP = {"node_modules", "__pycache__", "venv", "env", "dist", "build", "target"}
