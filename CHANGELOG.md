@@ -44,6 +44,21 @@ esquema de `stack.yaml` y las rutas de la API local.
 
 ### Cambiado
 
+- **La interfaz deja de sondear con la pestaña oculta.** `setInterval(refresh,
+  POLL_MS)` corría igual minimizada o detrás de otra ventana: una pestaña
+  abierta ocho horas hacía 11.520 sondeos, casi todos sin nadie mirando, y cada
+  uno le pide al servidor que resuelva todos los proyectos registrados. Ahora
+  sondea sólo con la pestaña a la vista, y al volver refresca en el acto en vez
+  de esperar el intervalo. Es `document.visibilityState`, API nativa: no hay
+  botón que apretar ni preferencia que guardar.
+- **La vista de estado cachea la detección diez segundos.** `detect.stack_for`
+  relee y reparsea `pom.xml`, `package.json` y `compose.yaml` en cada llamada,
+  y `_project_view` corre una vez por proyecto y por request. Medido sobre un
+  proyecto políglota: 6.7ms por llamada, o sea 242ms de disco en cada
+  `/api/state` con doce proyectos y tres pestañas. `up`, `switch_profile` y
+  `down` siguen leyendo fresco: arrancar con una versión cacheada correría los
+  comandos viejos después de que editaste tu `stack.yaml`. `freeze` invalida la
+  entrada, así que "Congelar" refresca la fila en el acto.
 - **`browse.markers` hace un `scandir` por carpeta en vez de una consulta por
   marcador.** El comentario `ponytail:` del módulo ya tenía anotado el techo
   (~1800 consultas en un listado grande) y la ruta de salida; sumar lenguajes
