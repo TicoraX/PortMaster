@@ -1,6 +1,6 @@
 # PortMaster
 
-[![pypi](https://img.shields.io/pypi/v/portmaster.svg)](https://pypi.org/project/portmaster/)
+[![pypi](https://img.shields.io/pypi/v/portmaster)](https://pypi.org/project/portmaster/)
 [![tests](https://github.com/TicoraX/PortMaster/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TicoraX/PortMaster/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
