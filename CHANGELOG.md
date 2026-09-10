@@ -4,6 +4,13 @@ Formato de [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Versionado semántico: la superficie pública son los comandos del CLI, el
 esquema de `stack.yaml` y las rutas de la API local.
 
+## [1.5.2] - 2026-09-09
+
+### Corregido
+
+- **Restaurada la compatibilidad con Python 3.10 (`detect.py` y `pyproject.toml`).** En Python 3.10 `tomllib` no forma parte de la biblioteca estándar (incorporado a partir de Python 3.11). Se añade la dependencia condicional `tomli>=2.0; python_version < '3.11'` y fallback transparente de importación en la inspección de proyectos, resolviendo el error de importación al correr sobre entornos con Python 3.10.
+- **Insignia de CI fijada a rama `main` (`README.md`).** El badge de estado de tests en el README ahora referencia explícitamente `?branch=main` para reportar con precisión la salud de la rama principal.
+
 ## [1.5.1] - 2026-09-07
 
 ### Seguridad
