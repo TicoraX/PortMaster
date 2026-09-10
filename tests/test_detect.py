@@ -1,6 +1,7 @@
 """Deteccion sobre directorios reales, y descubrimiento del puerto sobre un
 proceso real que escucha. Lo mismo que el resto de la suite: nada de mocks."""
 
+import builtins
 import io
 import json
 import os
@@ -18,6 +19,33 @@ def write(root, name, body=""):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(textwrap.dedent(body), encoding="utf-8")
     return path
+
+
+def test_importa_tomli_si_falta_tomllib(monkeypatch):
+    class FakeTomli:
+        class TOMLDecodeError(ValueError):
+            pass
+
+        @staticmethod
+        def loads(_text):
+            return {}
+
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "tomllib":
+            raise ModuleNotFoundError("No module named 'tomllib'")
+        if name == "tomli":
+            return FakeTomli
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    source = open(detect.__file__, encoding="utf-8").read()
+    namespace = {"__name__": "portmaster._detect_import_probe", "__package__": "portmaster", "__file__": detect.__file__}
+    exec(compile(source, detect.__file__, "exec"), namespace)
+
+    assert namespace["tomllib"] is FakeTomli
 
 
 def test_sin_nada_conocido_no_detecta(tmp_path):

@@ -27,8 +27,12 @@ import shutil
 from dataclasses import replace
 from pathlib import Path
 
-import tomllib
 import yaml
+
+try:  # Python 3.11+
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - solo en Python 3.10
+    import tomli as tomllib
 
 from .config import CONFIG_NAMES, ConfigError, Service, Stack, find, load
 
